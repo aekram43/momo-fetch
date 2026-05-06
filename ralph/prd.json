@@ -9,14 +9,14 @@
       "description": "As a developer, I want to scaffold the project using cargo adk new and customize it for our harness with the correct source structure.",
       "acceptanceCriteria": [
         "cargo adk new agent-harness creates correct project",
-        "Cargo.toml uses adk-rust = '0.6.0' with features: ['openai', 'anthropic', 'deepseek', 'ollama', 'groq']",
+        "Cargo.toml uses adk-rust = '0.7.0' with features: ['openai', 'anthropic', 'deepseek', 'ollama', 'groq']",
         "cargo build passes with no errors",
         "Custom source structure created: src/{main.rs, harness.rs, cli/, tools/{file.rs, shell.rs, search.rs, web.rs, memory.rs}, memory/{vault.rs, parser.rs, retrieval.rs, lifecycle.rs, types.rs}, context/, sandbox/, config/, providers.rs}",
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1.1 — foundation for all other stories"
+      "passes": true,
+      "notes": "Phase 1.1 — foundation for all other stories. Version updated to 0.7.0 (latest available)."
     },
     {
       "id": "US-002",

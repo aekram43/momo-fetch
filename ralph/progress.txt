@@ -1,3 +1,28 @@
 # Ralph Progress Log
 Started: Wed May  6 23:34:32 +07 2026
+
+## Codebase Patterns
+- adk-rust 0.7.0 is the current version (PRD said 0.6.0 but that doesn't exist — use 0.7.0)
+- adk-rust features for providers: only `anthropic` and `gemini` are direct features. For openai/deepseek/ollama/groq/openrouter, use `adk-model` crate directly with its features
+- reqwest 0.13 TLS feature is `rustls` (not `rustls-tls` as in older versions)
+- path-clean 0.1 takes `&self` reference, not owned PathBuf
+- Borrow checker: clone provider/model strings before mutable borrow when switching providers
+- All "never used" warnings are expected for placeholder code in scaffold phase
+
+---
+
+## Wed May 7 01:15 +07 2026 - US-001
+- Scaffolded Rust project with adk-rust 0.7.0 + adk-model 0.7.0
+- Created complete source structure: main.rs, harness.rs, cli/{mod,commands,oneshot,repl}, tools/{file,shell,search,web,memory}, memory/{vault,parser,retrieval,lifecycle,types}, context/mod, sandbox/mod, config/mod, providers.rs
+- Cargo.toml with all dependencies from SDS spec (adk-rust, tokio, clap, rustyline, colored, serde, pulldown-cmark, regex, chrono, uuid, ignore, walkdir, path-clean, reqwest, dotenvy, tracing, etc.)
+- Initialized git repo, created branch `ralph/agent-harness`
+- cargo build: passes (only "never used" warnings for placeholder code)
+- cargo test: 5 tests pass (parser unit tests, file range parsing tests)
+- Files changed: Cargo.toml, .gitignore, src/main.rs, src/harness.rs, src/providers.rs, src/cli/mod.rs, src/cli/commands.rs, src/cli/repl.rs, src/cli/oneshot.rs, src/config/mod.rs, src/sandbox/mod.rs, src/context/mod.rs, src/tools/mod.rs, src/tools/file.rs, src/tools/shell.rs, src/tools/search.rs, src/tools/web.rs, src/tools/memory.rs, src/memory/mod.rs, src/memory/types.rs, src/memory/parser.rs, src/memory/vault.rs, src/memory/retrieval.rs, src/memory/lifecycle.rs
+- **Learnings for future iterations:**
+  - adk-rust 0.7.0 provider features: only anthropic/gemini are direct features. Use adk-model crate for openai/deepseek/ollama/groq/openrouter
+  - reqwest 0.13 uses `rustls` feature name (not `rustls-tls`)
+  - path-clean 0.1 API: `PathClean::clean(&pathbuf)` takes a reference
+  - Borrow checker pattern: clone strings from immutable borrow before calling mutable methods
+  - The SDS code examples use types that may not match exact adk-rust 0.7.0 API — need to verify against actual crate API when implementing each story
 ---

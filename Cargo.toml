@@ -1,0 +1,71 @@
+[package]
+name = "agent-harness"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+description = "Rust-native AI agent workspace with EverMemOS memory vault"
+license = "MIT"
+
+[dependencies]
+# Agent framework
+adk-rust = { version = "0.7.0", features = [
+    "anthropic", "gemini", "models", "tools", "sessions",
+    "runner", "agents", "skills"
+] }
+adk-model = { version = "0.7.0", features = [
+    "openai", "anthropic", "deepseek", "ollama", "groq", "openrouter"
+] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+rustyline = "18"
+colored = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Memory vault
+pulldown-cmark = "0.13"
+regex = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Filesystem
+ignore = "0.4"
+walkdir = "2"
+path-clean = "0.1"
+tempfile = "3"
+
+# Networking
+reqwest = { version = "0.13", features = ["json", "rustls"] }
+
+# Configuration & secrets
+dotenvy = "0.15"
+dirs = "6"
+
+# System
+libc = "0.2"
+anyhow = "1"
+glob = "0.3"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+assert_cmd = "2"
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1
