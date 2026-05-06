@@ -1,0 +1,371 @@
+{
+  "project": "Agent Harness",
+  "branchName": "ralph/agent-harness",
+  "description": "Rust-native AI agent workspace built on adk-rust v0.6.0 with EverMemOS-compatible memory vault (Obsidian wiki 6-level hierarchy). Personal tool for daily software engineering with multi-provider LLM support, tool system, MCP, filesystem sandbox, and memory lifecycle.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Scaffold project with adk-rust",
+      "description": "As a developer, I want to scaffold the project using cargo adk new and customize it for our harness with the correct source structure.",
+      "acceptanceCriteria": [
+        "cargo adk new agent-harness creates correct project",
+        "Cargo.toml uses adk-rust = '0.6.0' with features: ['openai', 'anthropic', 'deepseek', 'ollama', 'groq']",
+        "cargo build passes with no errors",
+        "Custom source structure created: src/{main.rs, harness.rs, cli/, tools/{file.rs, shell.rs, search.rs, web.rs, memory.rs}, memory/{vault.rs, parser.rs, retrieval.rs, lifecycle.rs, types.rs}, context/, sandbox/, config/, providers.rs}",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.1 — foundation for all other stories"
+    },
+    {
+      "id": "US-002",
+      "title": "Multi-provider LLM — configure and switch mid-session",
+      "description": "As a user, I want to use adk-rust's built-in multi-provider support and switch between models mid-session via slash commands.",
+      "acceptanceCriteria": [
+        "Use adk-model built-in providers: Gemini, OpenAI, Anthropic, DeepSeek, Groq, Ollama + OpenAI-compatible presets",
+        "provider_from_env() auto-detect from env vars",
+        "/model <name> slash command switches model mid-session (re-creates model instance)",
+        "/provider <name> slash command switches provider",
+        "/models command lists available models",
+        "API keys loaded from .env file",
+        "Wrapper struct ProviderManager holds current model and allows hot-swap",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.2 — depends on US-001. Uses adk-model providers + provider_from_env()"
+    },
+    {
+      "id": "US-003",
+      "title": "Built-in file tools using #[tool] macro",
+      "description": "As an agent, I need file read/write/edit tools implemented using adk-rust's #[tool] macro.",
+      "acceptanceCriteria": [
+        "FileRead tool using #[tool] macro with path and optional range parameters",
+        "FileWrite tool writes content to file",
+        "FileEdit tool performs string replacement in existing file (old_string to new_string)",
+        "All file operations scoped to working directory via sandbox (US-006)",
+        "Tools registered with LlmAgentBuilder::tool(Arc::new(FileRead))",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.3 — depends on US-001. Uses #[tool] macro"
+    },
+    {
+      "id": "US-004",
+      "title": "Shell + Grep/Glob tools using #[tool] macro",
+      "description": "As an agent, I need shell execution and file search tools with destructive command protection.",
+      "acceptanceCriteria": [
+        "ShellExec tool using #[tool] macro: run shell command with timeout (default 120s)",
+        "Grep tool: search file content using grep-regex crate internally",
+        "Glob tool: find files by pattern using glob crate",
+        "Destructive command detection in ShellExec (rm -rf, git push --force, DROP TABLE, DELETE FROM, git reset --hard)",
+        "Return needs_approval: true flag for destructive commands, CLI prompts user before executing",
+        "! command shell escape in REPL: run directly without agent",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.4 — depends on US-001. Uses #[tool] macro"
+    },
+    {
+      "id": "US-005",
+      "title": "Web search/fetch tools",
+      "description": "As an agent, I need web search and URL fetching capabilities.",
+      "acceptanceCriteria": [
+        "WebSearch tool: search via Serper.dev API or DuckDuckGo",
+        "WebFetch tool: fetch URL content, convert to markdown/text",
+        "Results returned as structured JSON (title, URL, snippet)",
+        "Rate limiting configurable (default 10 req/min)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.9 — depends on US-001. Uses #[tool] macro"
+    },
+    {
+      "id": "US-006",
+      "title": "Filesystem sandbox & safety",
+      "description": "As a user, I want all agent operations scoped to my project directory with approval prompts for dangerous actions.",
+      "acceptanceCriteria": [
+        "Leverage adk-sandbox crate as base, extend with custom rules",
+        "Path scoping: all file ops restricted to working directory",
+        "Path traversal protection: ../../etc/passwd blocked",
+        ".agentignore file support (use ignore crate, same format as .gitignore)",
+        "ToolConfirmationPolicy integrated with adk-rust's built-in HITL system",
+        "3 permission modes via .harness/settings.json or --permission flag: strict (default), auto, yolo",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.5 — depends on US-003, US-004. Uses adk-sandbox + ToolConfirmationPolicy"
+    },
+    {
+      "id": "US-007",
+      "title": "Session persistence using adk-session",
+      "description": "As a user, I want conversation history saved using adk-rust's built-in SQLite session backend.",
+      "acceptanceCriteria": [
+        "Use adk-session SQLite backend: SqliteSessionService",
+        "Configure path: ~/.config/agent-harness/sessions.db",
+        "/sessions command lists past sessions",
+        "/resume <id> command resumes previous session",
+        "Auto-save every turn via adk-runner",
+        "Session metadata: project path, model, provider, timestamps",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.6 — depends on US-001. Uses adk-session SQLite"
+    },
+    {
+      "id": "US-008",
+      "title": "Custom CLI REPL with slash commands",
+      "description": "As a user, I want an enhanced REPL built on top of adk-cli with domain-specific slash commands.",
+      "acceptanceCriteria": [
+        "Extend adk-cli or build custom REPL using rustyline",
+        "Streaming token output via adk-runner event streaming",
+        "Ctrl+C cancels current generation",
+        "Slash commands: /help, /model, /provider, /models, /sessions, /resume, /cost, /mem, /kms, /skill list, /mcp list, /quit",
+        "! command shell escape: run shell directly",
+        "Multi-line input support (paste code blocks)",
+        "Colored output: tool calls (yellow), errors (red), success (green)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.7 — depends on US-002, US-005, US-006. Uses adk-cli base + adk-runner streaming"
+    },
+    {
+      "id": "US-009",
+      "title": "One-shot mode",
+      "description": "As a user, I want to run a single prompt and exit for scripts/CI.",
+      "acceptanceCriteria": [
+        "agent-harness -p 'prompt' runs 1 turn then exits",
+        "--model <name> flag overrides model",
+        "--provider <name> flag overrides provider",
+        "--project <path> flag sets working directory",
+        "--permission <mode> flag sets permission mode",
+        "Exit code: 0 = success, 1 = error",
+        "stdout: agent response, stderr: debug/logging",
+        "cat file.md | agent-harness -p 'summarize' stdin support",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.8 — depends on US-008. Uses adk-runner"
+    },
+    {
+      "id": "US-010",
+      "title": "AGENTS.md / CLAUDE.md context injection",
+      "description": "As a user, I want the agent to auto-discover project instruction files and inject them into the system prompt.",
+      "acceptanceCriteria": [
+        "Walk up from cwd finding: AGENTS.md, CLAUDE.md, .harness/AGENTS.md",
+        "Read all discovered files, inject into system prompt via LlmAgentBuilder::instruction()",
+        "Files closer to cwd have higher priority (closer overrides further)",
+        "Log: 'Loaded context from: ./AGENTS.md, ../CLAUDE.md'",
+        "No files found → continue without error",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Phase 1.10 — depends on US-008. Uses LlmAgentBuilder::instruction()"
+    },
+    {
+      "id": "US-011",
+      "title": "MCP integration using adk-tool built-in MCP support",
+      "description": "As a user, I want to connect to MCP servers using adk-rust's built-in MCP client.",
+      "acceptanceCriteria": [
+        "Use adk-tool MCP integration (stdio + HTTP Streamable)",
+        "/mcp add <name> <command-or-url> adds MCP server",
+        "/mcp list shows connected servers",
+        "MCP tools auto-registered with mcp_ namespace prefix",
+        "Server config stored in .harness/mcp.json",
+        "Support MCP Elicitation (servers can request user input)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Phase 2.1 — depends on Phase 1 complete. Uses adk-tool MCP client"
+    },
+    {
+      "id": "US-012",
+      "title": "Memory vault — Write & Extract lifecycle",
+      "description": "As an agent, I want to automatically create MemCells and extract Events/Foresights/Episodes after each conversation turn into the Obsidian wiki vault.",
+      "acceptanceCriteria": [
+        "mem_write tool (#[tool] macro): append MemCell to daily log",
+        "mem_extract tool: extract events + foresights + episode from MemCells",
+        "ObsidianVault struct manages all vault I/O with vault_path, config, counters",
+        "Auto-trigger extraction via adk-runner's AfterToolCallback",
+        "Notes created following schemas in memory-vault/",
+        "Wikilinks [[ref]] connect parent-child correctly",
+        ".vault-config.json counters updated after every write",
+        "index.md regenerated after every write",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Phase 2.2 — depends on Phase 1. Main differentiator. Uses #[tool] macro + AfterToolCallback"
+    },
+    {
+      "id": "US-013",
+      "title": "Memory vault — Retrieval (4 modes)",
+      "description": "As an agent, I want to search my memory vault using multiple retrieval strategies.",
+      "acceptanceCriteria": [
+        "mem_search tool with 4 modes: grep_llm (default), graph_walk, tag_filter, agentic",
+        "grep_llm: grep candidates → LLM rank → top N",
+        "graph_walk: follow [[wikilinks]] from seed note",
+        "tag_filter: filter by YAML frontmatter tags",
+        "agentic: multi-round grep → LLM sufficiency check → refined queries → merge",
+        "mem_read tool: read specific note by ID or wikilink",
+        "mem_graph tool: get connected notes (outgoing + backlinks)",
+        "mem_profile tool: read agent/user profile",
+        "Results include relevance_score (0-1) from LLM",
+        "Relevant results auto-injected into context",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Phase 2.3 — depends on US-012. Uses #[tool] macro"
+    },
+    {
+      "id": "US-014",
+      "title": "Memory vault — Consolidation & Reflection",
+      "description": "As an agent, I want to consolidate memories into clusters and update my profile over time.",
+      "acceptanceCriteria": [
+        "mem_consolidate tool: cluster MemCells + update agent profile",
+        "Cluster detection: same project + overlapping keywords (threshold: 0.65)",
+        "Profile operations: ADD / UPDATE / DELETE (LLM-driven)",
+        "Profile compaction: when items > 37 → LLM consolidates to ~17",
+        "mem_validate_foresights tool: validate pending predictions",
+        "mem_reflect tool: generate weekly/monthly reflection",
+        "mem_stats tool: vault statistics",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Phase 2.4 — depends on US-013. Uses #[tool] macro"
+    },
+    {
+      "id": "US-015",
+      "title": "Skill system using adk-skill",
+      "description": "As a user, I want to use adk-rust's built-in skill system (SKILL.md parsing + discovery) with custom skill installation.",
+      "acceptanceCriteria": [
+        "Use adk-skill crate for SKILL.md parsing + whenToUse matching",
+        "Skill discovery: scan .harness/skills/ and .claude/skills/",
+        "Auto-match: adk-skill matches user request via lexical matching",
+        "Explicit invoke: /<skill-name> slash command",
+        "/skill install <git-url> custom command: clone + install skill",
+        "/skill list shows installed skills",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Phase 2.5 — depends on Phase 1. Uses adk-skill"
+    },
+    {
+      "id": "US-016",
+      "title": "Sub-agent orchestration using adk-agent",
+      "description": "As an agent, I want to delegate subtasks to isolated sub-agents using adk-rust's built-in agent types.",
+      "acceptanceCriteria": [
+        "Use SequentialAgent and ParallelAgent from adk-agent",
+        "Task tool: delegate subtask → spawn sub-agent with own tool registry",
+        "Recursion limit: 3 levels deep (enforced by runner config)",
+        "Sub-agent reports back as structured result",
+        "Timeout per sub-agent (configurable, default 5 min)",
+        "Parallel sub-agents via ParallelAgent::SharedState",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Phase 3.1 — depends on Phase 2. Uses SequentialAgent / ParallelAgent"
+    },
+    {
+      "id": "US-017",
+      "title": "Knowledge base (KMS)",
+      "description": "As a user, I want a project wiki that the agent can search on demand.",
+      "acceptanceCriteria": [
+        ".kms/<name>/pages/*.md directory structure",
+        ".kms/<name>/index.md table of contents",
+        "KmsRead tool: read a KMS page",
+        "KmsSearch tool: full-text search across KMS pages",
+        "KmsWrite tool: agent creates/edits KMS pages",
+        "/kms list shows attached knowledge bases",
+        "KMS TOC injected into system prompt every turn",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Phase 3.2 — depends on Phase 2. Uses #[tool] macro"
+    },
+    {
+      "id": "US-018",
+      "title": "Secrets management — OS keychain",
+      "description": "As a user, I want API keys stored in OS keychain instead of .env files.",
+      "acceptanceCriteria": [
+        "macOS: Keychain via security CLI",
+        "Linux: Secret Service (libsecret)",
+        "Windows: Credential Manager",
+        ".env fallback for CI",
+        "/key set <provider> stores key interactively",
+        "/key list lists stored providers (masked)",
+        "Keys NEVER written to config files or logs",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Phase 3.3 — depends on Phase 1. Custom implementation"
+    },
+    {
+      "id": "US-019",
+      "title": "Streaming & cancellation (enhance adk-runner defaults)",
+      "description": "As a user, I want real-time token streaming and cancellation.",
+      "acceptanceCriteria": [
+        "Use adk-runner's built-in event streaming",
+        "Tokens displayed as they arrive",
+        "Ctrl+C cancels current generation",
+        "Partial response saved to session on cancel",
+        "Graceful shutdown: finish current tool call before exit",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Phase 3.4 — depends on US-008. Uses adk-runner events"
+    },
+    {
+      "id": "US-020",
+      "title": "Cost tracking",
+      "description": "As a user, I want to track token usage and costs across sessions.",
+      "acceptanceCriteria": [
+        "Token counting per request (input + output) from adk-runner events",
+        "Cost estimation using adk-anthropic pricing data (extend to all providers)",
+        "Daily/session/project cost aggregation",
+        "/cost command shows current session cost",
+        "/cost today / /cost week / /cost project <name> variants",
+        "Budget alert when approaching limit",
+        "Cost data persisted in session DB",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Phase 3.5 — depends on US-007, US-019. Uses adk-anthropic pricing data"
+    },
+    {
+      "id": "US-021",
+      "title": "Agent teams (multi-process coordination)",
+      "description": "As a user, I want multiple agents working in parallel using adk-rust's ParallelAgent + A2A protocol.",
+      "acceptanceCriteria": [
+        "Use adk-server A2A v1.0.0 for inter-agent communication",
+        "Lead agent spawns worker agents as separate processes",
+        "Shared mailbox: file-based message queue",
+        "Each worker in own tmux pane + optional git worktree",
+        "/team start / /team status / /team stop commands",
+        "Merge coordination: lead merges branches when workers done",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Phase 3.6 — depends on US-016. Uses adk-server A2A v1.0.0"
+    }
+  ]
+}

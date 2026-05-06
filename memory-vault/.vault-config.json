@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "vault_path": "./memory-vault",
+  "created": "2026-05-06",
+  "stats": {
+    "total_memcells": 2,
+    "total_events": 3,
+    "total_foresights": 1,
+    "total_episodes": 1,
+    "pending_foresights": 1
+  },
+  "config": {
+    "consolidation_threshold": 5,
+    "profile_max_items": 25,
+    "profile_compact_threshold": 37,
+    "profile_compact_ratio": 0.7,
+    "archive_after_days": 90,
+    "default_retrieval_mode": "grep_llm",
+    "agentic_round1_limit": 20,
+    "agentic_final_limit": 20,
+    "foresight_default_duration_days": 7,
+    "cluster_similarity_threshold": 0.65,
+    "cluster_max_time_gap_days": 7
+  },
+  "counters": {
+    "event": 3,
+    "foresight": 1,
+    "episode": 1,
+    "cluster": 1,
+    "reflection": 0
+  }
+}
