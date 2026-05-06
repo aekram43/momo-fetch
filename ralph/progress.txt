@@ -9,6 +9,47 @@ Started: Wed May  6 23:34:32 +07 2026
 - Borrow checker: clone provider/model strings before mutable borrow when switching providers
 - All "never used" warnings are expected for placeholder code in scaffold phase
 
+### adk-rust 0.7.0 API Reference (verified from source)
+
+**Tool creation via #[tool] macro:**
+- Signature: `async fn name(args: ArgsType) -> Result<Value, AdkError>` or with ctx: `async fn name(ctx: Arc<dyn ToolContext>, args: ArgsType) -> Result<Value, AdkError>`
+- Args type must impl `Deserialize` + `JsonSchema` (from schemars crate)
+- Doc comment becomes tool description. Generates zero-sized struct in PascalCase
+- Attributes: `#[tool(read_only)]`, `#[tool(concurrency_safe)]`, `#[tool(long_running)]`
+
+**Tool creation via FunctionTool::new():**
+- `FunctionTool::new("name", "description", handler_fn).with_read_only(true).with_parameters_schema::<ArgsType>()`
+- Handler: `async fn(Arc<dyn ToolContext>, Value) -> Result<Value>`
+
+**Provider constructors (from adk-model):**
+- Anthropic: `AnthropicClient::new(AnthropicConfig::new("key", "model"))?`
+- OpenAI: `OpenAIClient::new(OpenAIConfig::new("key", "model"))?`
+- DeepSeek: `DeepSeekClient::chat("key")?` or `DeepSeekClient::reasoner("key")?`
+- Groq: `GroqClient::new(GroqConfig::new("key", "model"))?`
+- Ollama: `OllamaModel::new(OllamaConfig::new("llama3.2"))?`
+- OpenRouter: `OpenRouterClient::new(OpenRouterConfig::new("key", "model"))?`
+- Custom: `OpenAICompatible::new(OpenAICompatibleConfig::new("key", "model").with_base_url("url").with_provider_name("name"))?`
+- Convenience: `adk_rust::provider_from_env() -> Result<Arc<dyn Llm>>`
+
+**LlmAgentBuilder (from adk-agent):**
+- `LlmAgentBuilder::new("name").model(Arc::new(model)).instruction("system prompt").tool(Arc::new(tool)).build()?`
+- Key methods: `.description()`, `.temperature()`, `.max_output_tokens()`, `.max_iterations()`, `.tool_timeout()`, `.before_tool_callback()`, `.after_tool_callback()`, `.tool_confirmation_policy()`, `.require_tool_confirmation("name")`, `.sub_agent()`
+
+**Runner (from adk-runner):**
+- `Runner::new(RunnerConfig { app_name, agent, session_service, ... })?` or `Runner::builder().app_name("x").agent(arc).session_service(arc).build()?`
+- Run: `runner.run(user_id, session_id, content).await?` returns `EventStream` (Pin<Box<dyn Stream<Item = Result<Event>>>>)
+- Interrupt: `runner.interrupt("session-id") -> bool`
+
+**SqliteSessionService (feature: `sqlite` on adk-session):**
+- `SqliteSessionService::new("sqlite:///path/to/db").await?` then `service.migrate().await?`
+- Needs `adk-session = { version = "0.7.0", features = ["sqlite"] }` — NOT included in adk-rust standard feature
+
+**Key types (from adk-core):**
+- `Content::new("user").with_text("message")`, `Part::Text{text}`, `Event{id, author, llm_response, actions}`
+- `LlmRequest::new(model, contents)`, `LlmResponse{content, usage_metadata, finish_reason}`
+- `EventStream = Pin<Box<dyn Stream<Item = Result<Event>> + Send>>`
+- `use adk_rust::prelude::*;` for all common types
+
 ---
 
 ## Wed May 7 01:15 +07 2026 - US-001
