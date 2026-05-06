@@ -4,6 +4,9 @@ Started: Wed May  6 23:34:32 +07 2026
 ## Codebase Patterns
 - adk-rust 0.7.0 is the current version (PRD said 0.6.0 but that doesn't exist — use 0.7.0)
 - adk-rust features for providers: only `anthropic` and `gemini` are direct features. For openai/deepseek/ollama/groq/openrouter, use `adk-model` crate directly with its features
+- **Import pattern for adk-model providers**: `use adk_model::anthropic::{AnthropicClient, AnthropicConfig}` etc. — NOT from `adk_rust::prelude::*` (prelude re-exports are gated by adk-rust features, not adk-model features)
+- `adk_rust::prelude::Llm` trait is always available from adk-core
+- `dotenvy::dotenv()` is called in `cli/mod.rs` at startup — .env file loading is already wired up
 - reqwest 0.13 TLS feature is `rustls` (not `rustls-tls` as in older versions)
 - path-clean 0.1 takes `&self` reference, not owned PathBuf
 - Borrow checker: clone provider/model strings before mutable borrow when switching providers
@@ -66,4 +69,22 @@ Started: Wed May  6 23:34:32 +07 2026
   - path-clean 0.1 API: `PathClean::clean(&pathbuf)` takes a reference
   - Borrow checker pattern: clone strings from immutable borrow before calling mutable methods
   - The SDS code examples use types that may not match exact adk-rust 0.7.0 API — need to verify against actual crate API when implementing each story
+---
+
+## Wed May 7 15:30 +07 2026 - US-002
+- Implemented ProviderManager with real `Arc<dyn Llm>` instances from adk-model
+- Auto-detect provider from env vars: ANTHROPIC_API_KEY → OPENAI_API_KEY → DEEPSEEK_API_KEY → GROQ_API_KEY → OPENROUTER_API_KEY → Ollama (fallback)
+- `switch()`, `switch_model()`, `switch_provider()` methods create new LLM instances and hot-swap the current model
+- `/model <name>`, `/provider <name>`, `/models` slash commands updated with proper error handling and colored output
+- CLI overrides (`--model`, `--provider`) use the new `switch_model()`/`switch_provider()` API
+- Custom endpoints (OpenAI-compatible) supported via `OpenAICompatible` + `OpenAICompatibleConfig`
+- `dotenvy::dotenv()` already called in `cli/mod.rs` for .env file loading
+- Files changed: src/providers.rs (full rewrite), src/cli/commands.rs, src/cli/mod.rs
+- **Learnings for future iterations:**
+  - Provider types (OpenAIClient, DeepSeekClient, etc.) must be imported from `adk_model::module` directly, NOT from `adk_rust::prelude::*` — the prelude re-exports are gated by features on the `adk-rust` crate, not `adk-model`
+  - `adk_rust::prelude::Llm` trait is always available (from adk-core)
+  - DeepSeek has `DeepSeekClient::chat()` and `DeepSeekClient::reasoner()` constructors (not a generic `new()`)
+  - `OllamaModel::new()` takes `OllamaConfig::new("model-name")` — no API key needed
+  - `OpenAICompatible` is in `adk_model::openai_compatible` — useful for custom endpoints
+  - `adk_rust::provider_from_env()` only checks ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY — not deepseek/groq/openrouter. Our `ProviderManager::from_env()` handles all 6 providers
 ---

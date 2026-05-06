@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Phase 1.2 — depends on US-001. Uses adk-model providers + provider_from_env()"
     },
     {
