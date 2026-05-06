@@ -69,6 +69,8 @@ impl Command {
 
     /// Execute the command against the harness.
     pub async fn execute(&self, harness: &mut Harness) -> anyhow::Result<bool> {
+        use colored::Colorize;
+
         match self {
             Self::Help => {
                 println!("{}", Self::help_text());
@@ -76,21 +78,69 @@ impl Command {
             }
             Self::Quit => Ok(false),
             Self::Model { name } => {
-                let provider = harness.provider_mgr().current_provider().to_string();
-                harness.provider_mgr_mut().switch(&provider, name);
-                println!("Switched to model: {name}");
-                Ok(true)
+                if name.is_empty() {
+                    // Show current model
+                    println!(
+                        "Current: {}/{}",
+                        harness.provider_mgr().current_provider(),
+                        harness.provider_mgr().current_model_name()
+                    );
+                    return Ok(true);
+                }
+                match harness.provider_mgr_mut().switch_model(name) {
+                    Ok(()) => {
+                        println!(
+                            "{} Switched to {}/{}",
+                            "✓".green(),
+                            harness.provider_mgr().current_provider(),
+                            harness.provider_mgr().current_model_name()
+                        );
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        println!("{} {e}", "✗".red());
+                        Ok(true)
+                    }
+                }
             }
             Self::Provider { name } => {
-                let model = harness.provider_mgr().current_model_name().to_string();
-                harness.provider_mgr_mut().switch(name, &model);
-                println!("Switched to provider: {name}");
-                Ok(true)
+                if name.is_empty() {
+                    println!(
+                        "Current: {}/{}",
+                        harness.provider_mgr().current_provider(),
+                        harness.provider_mgr().current_model_name()
+                    );
+                    return Ok(true);
+                }
+                match harness.provider_mgr_mut().switch_provider(name) {
+                    Ok(()) => {
+                        println!(
+                            "{} Switched to {}/{}",
+                            "✓".green(),
+                            harness.provider_mgr().current_provider(),
+                            harness.provider_mgr().current_model_name()
+                        );
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        println!("{} {e}", "✗".red());
+                        Ok(true)
+                    }
+                }
             }
             Self::Models => {
                 println!("Available providers/models:");
-                for (provider, model) in harness.provider_mgr().list_available() {
-                    println!("  {provider}: {model}");
+                let current_provider = harness.provider_mgr().current_provider();
+                let current_model = harness.provider_mgr().current_model_name();
+                for info in harness.provider_mgr().list_available() {
+                    let marker = if info.provider == current_provider
+                        && info.default_model == current_model
+                    {
+                        " ← current"
+                    } else {
+                        ""
+                    };
+                    println!("  {}: {}{marker}", info.provider, info.default_model);
                 }
                 Ok(true)
             }
@@ -143,9 +193,9 @@ impl Command {
     fn help_text() -> &'static str {
         r#"Available commands:
   /help                Show this help message
-  /model <name>        Switch model
-  /provider <name>     Switch provider
-  /models              List available models
+  /model [name]        Switch model (or show current)
+  /provider [name]     Switch provider (or show current)
+  /models              List available providers/models
   /sessions            List past sessions
   /resume <id>         Resume a session
   /cost                Show session cost

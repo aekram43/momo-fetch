@@ -43,11 +43,12 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
     // Apply CLI overrides
     if let Some(provider) = &args.provider {
         if let Some(model) = &args.model {
-            harness.provider_mgr_mut().switch(provider, model);
+            harness.provider_mgr_mut().switch(provider, model)?;
+        } else {
+            harness.provider_mgr_mut().switch_provider(provider)?;
         }
     } else if let Some(model) = &args.model {
-        let provider = harness.provider_mgr().current_provider().to_string();
-        harness.provider_mgr_mut().switch(&provider, model);
+        harness.provider_mgr_mut().switch_model(model)?;
     }
 
     match &args.prompt {
