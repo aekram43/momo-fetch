@@ -45,6 +45,18 @@ impl FilesystemSandbox {
     /// Resolve a path and ensure it's within the sandbox root.
     pub fn resolve_path(&self, relative: &str) -> anyhow::Result<PathBuf> {
         let cleaned = path_clean::PathClean::clean(&PathBuf::from(relative));
+
+        // Early check: reject paths that escape upward via ..
+        // After cleaning, if the path starts with ../ it will escape the root.
+        let cleaned_str = cleaned.to_string_lossy();
+        if cleaned_str.starts_with("..") {
+            anyhow::bail!(
+                "Path traversal blocked: '{}' resolves outside sandbox",
+                relative
+            );
+        }
+
+        // Join with root
         let resolved = self.root.join(&cleaned);
 
         // For existing paths, canonicalize to resolve symlinks
@@ -56,6 +68,8 @@ impl FilesystemSandbox {
                     resolved.file_name().unwrap_or_default(),
                 )
             } else {
+                // Neither path nor parent exists — use the resolved path as-is
+                // (the early check above already rejected upward traversal)
                 resolved
             }
         } else {

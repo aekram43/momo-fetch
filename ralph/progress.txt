@@ -88,3 +88,25 @@ Started: Wed May  6 23:34:32 +07 2026
   - `OpenAICompatible` is in `adk_model::openai_compatible` — useful for custom endpoints
   - `adk_rust::provider_from_env()` only checks ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY — not deepseek/groq/openrouter. Our `ProviderManager::from_env()` handles all 6 providers
 ---
+
+## Wed May 7 22:00 +07 2026 - US-003
+- Implemented FileRead, FileWrite, FileEdit tools using `adk_tool` #[tool] macro
+- Each tool uses sandbox path scoping via thread-local context pattern
+- FileRead: reads file with line numbers, optional range filter (e.g., "1-50")
+- FileWrite: creates parent dirs, atomic write (temp file + rename)
+- FileEdit: uniqueness check (old_string must appear exactly once), atomic write
+- Added `build_tool_registry()` function returning `Vec<Arc<dyn Tool>>` for agent registration
+- Fixed sandbox `resolve_path()` to detect `..` traversal early (before joining with root)
+- Added `adk-tool = "0.6"` and `schemars = "0.8"` to Cargo.toml (required by #[tool] macro)
+- 14 tests pass (6 new file tool tests + 8 existing)
+- Files changed: Cargo.toml, Cargo.lock, src/tools/file.rs, src/tools/mod.rs, src/sandbox/mod.rs
+- **Learnings for future iterations:**
+  - `#[tool]` macro from `adk_rust_macros` generates code referencing `adk_tool` directly — must have `adk-tool` as direct Cargo.toml dependency (transitive dep not enough)
+  - `schemars` 0.8 is required for `JsonSchema` derive on arg structs — also must be direct dep
+  - The `#[tool]` macro generates a PascalCase struct (e.g., `file_read` → `FileRead`) implementing `Tool`, accessible as `file::FileRead`
+  - Tool function signature: `async fn name(args: ArgsType) -> Result<Value, AdkError>` — no ctx needed for simple tools
+  - Thread-local context pattern works well for sandbox access in #[tool] functions (avoids `Arc<dyn ToolContext>` complexity)
+  - `AdkError::tool(msg)` produces `"tool.internal: {msg}"` in Display
+  - `parse_line_range("10-20", 100)` returns `(9, 20)` — 0-indexed start, 1-indexed end. Use `take(end - start)` not `take(end - start + 1)`
+  - Sandbox `resolve_path` bug: when path contains `../../` and neither file nor parent exists, the raw path (with `..`) is returned and `starts_with` passes as string prefix. Fixed by adding early `..` check on cleaned path
+---
