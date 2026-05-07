@@ -342,3 +342,26 @@ Started: Wed May  6 23:34:32 +07 2026
   - When filtering by project in `collect_candidates()`, the project field comes from YAML frontmatter — always parse frontmatter before checking
   - `parser::parse_frontmatter()` returns `(Option<serde_yaml::Value>, &str)` — the body is a slice of the original content, not owned
 ---
+
+## Thu May 7 23:59 +07 2026 - US-014
+- Implemented Memory vault Consolidation & Reflection
+- `mem_consolidate` tool: cluster MemCells by project + keyword similarity (Jaccard, threshold 0.65), create cluster notes in `clusters/cluster-NNN.md`, update agent profile with learned traits
+- Profile operations: ADD / UPDATE / DELETE on `5-profile/agent-profile.md` with key-value pairs and confidence scores
+- Profile compaction: when items > 37 (configurable via `profile_compact_threshold`), compact to ~17 by keeping highest-confidence items
+- `mem_validate_foresights` tool: scan all pending foresights, mark those past their `end_time` as expired
+- `mem_reflect` tool: generate weekly (7 days) or monthly (30 days) reflection notes in `6-reflections/weekly/` or `6-reflections/monthly/`, with theme extraction and activity summaries
+- `VaultStats` updated with `total_clusters`, `total_reflections`, `profile_items` fields
+- Reflection index now scans actual reflection files (was hardcoded "no entries")
+- Lifecycle functions updated from async stubs to real sync implementations
+- 137 tests pass (14 new: 8 vault unit tests + 6 tool integration tests)
+- Files changed: src/memory/types.rs (Cluster, ProfileItem, ProfileOp, Reflection types + VaultStats fields), src/memory/vault.rs (consolidate/validate_foresights/reflect/profile methods + helpers + tests), src/memory/lifecycle.rs (real implementations replacing stubs), src/tools/memory.rs (3 new tools + tests), src/tools/mod.rs (register new tools), ralph/prd.json (US-014 passes: true)
+- **Learnings for future iterations:**
+  - Jaccard similarity for keyword clustering: `|intersection| / |union|` on lowercase keyword sets. Threshold 0.65 means ~65% keyword overlap required
+  - Profile compaction is triggered by `maybe_compact_profile()` inside `consolidate()` — automatically fires when `profile_items > profile_compact_threshold` (default 37)
+  - `collect_memcell_data()` walks all memcell files and parses keywords from `**Keywords**:` lines in the body — this relies on the format established in US-012
+  - `detect_clusters()` groups by project first, then checks Jaccard similarity within each project group — avoids cross-project false positives
+  - Foresight validation is time-based: checks if `end_time <= today` for pending foresights. No LLM judgment — that can be layered on in future iterations
+  - Reflection `extract_themes()` counts keyword frequency across recent MemCells and takes the top 5 — simple but effective
+  - `std::collections::HashSet<String>` for Jaccard (not `HashSet<&str>`) — `to_lowercase()` produces owned Strings
+  - `str::find()` only takes 1 argument in Rust (not 2 like some other languages) — use slicing + find for "find after position N"
+---

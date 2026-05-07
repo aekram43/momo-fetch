@@ -414,6 +414,138 @@ pub async fn mem_profile(args: MemProfileArgs) -> Result<Value, AdkError> {
     }
 }
 
+// ─── MemConsolidate ──────────────────────────────────────────────
+
+/// Arguments for the mem_consolidate tool.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct MemConsolidateArgs {}
+
+/// Consolidate memories into clusters and update agent profile.
+///
+/// Detects clusters of related MemCells using keyword similarity (Jaccard)
+/// and same-project grouping (threshold: 0.65). Creates cluster notes and
+/// updates the agent profile with learned traits. When profile items exceed 37,
+/// triggers automatic compaction to ~17 items.
+#[tool]
+pub async fn mem_consolidate(_args: MemConsolidateArgs) -> Result<Value, AdkError> {
+    let vault_arc = get_vault()?;
+    let mut vault = vault_arc.lock().map_err(|e| {
+        AdkError::tool(format!("mem_consolidate: vault lock failed: {e}"))
+    })?;
+
+    let result = vault
+        .consolidate()
+        .map_err(|e| AdkError::tool(format!("mem_consolidate: consolidation failed: {e}")))?;
+
+    let profile_ops: Vec<Value> = result
+        .profile_ops
+        .iter()
+        .map(|op| {
+            let op_type = match op.operation {
+                crate::memory::types::ProfileOp::Add => "ADD",
+                crate::memory::types::ProfileOp::Update => "UPDATE",
+                crate::memory::types::ProfileOp::Delete => "DELETE",
+            };
+            json!({
+                "operation": op_type,
+                "key": op.key,
+                "success": op.success,
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "clusters_created": result.clusters_created,
+        "profile_operations": profile_ops,
+        "profile_compacted": result.profile_compacted,
+        "total_clusters": vault.stats().total_clusters,
+        "profile_items": vault.stats().profile_items,
+    }))
+}
+
+// ─── MemValidateForesights ───────────────────────────────────────
+
+/// Arguments for the mem_validate_foresights tool.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct MemValidateForesightsArgs {}
+
+/// Validate pending foresight predictions.
+///
+/// Checks all foresights with "pending" status that have passed their
+/// prediction window end date. Marks expired foresights accordingly
+/// and returns a summary of validations performed.
+#[tool]
+pub async fn mem_validate_foresights(_args: MemValidateForesightsArgs) -> Result<Value, AdkError> {
+    let vault_arc = get_vault()?;
+    let mut vault = vault_arc.lock().map_err(|e| {
+        AdkError::tool(format!("mem_validate_foresights: vault lock failed: {e}"))
+    })?;
+
+    let validations = vault
+        .validate_foresights()
+        .map_err(|e| AdkError::tool(format!("mem_validate_foresights: validation failed: {e}")))?;
+
+    let json_validations: Vec<Value> = validations
+        .iter()
+        .map(|v| {
+            json!({
+                "foresight_id": v.foresight_id,
+                "previous_status": v.previous_status,
+                "new_status": v.new_status,
+                "reason": v.reason,
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "validations": json_validations,
+        "total_validated": json_validations.len(),
+        "pending_foresights_remaining": vault.stats().pending_foresights,
+    }))
+}
+
+// ─── MemReflect ──────────────────────────────────────────────────
+
+/// Arguments for the mem_reflect tool.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct MemReflectArgs {
+    /// Reflection period: "weekly" (last 7 days) or "monthly" (last 30 days)
+    pub period: Option<String>,
+}
+
+/// Generate a weekly or monthly reflection from recent memories.
+///
+/// Analyzes MemCells, events, foresights, and clusters for the specified
+/// period. Extracts key themes, summarizes activity, and writes a reflection
+/// note to `6-reflections/weekly/` or `6-reflections/monthly/`.
+#[tool]
+pub async fn mem_reflect(args: MemReflectArgs) -> Result<Value, AdkError> {
+    let vault_arc = get_vault()?;
+    let mut vault = vault_arc.lock().map_err(|e| {
+        AdkError::tool(format!("mem_reflect: vault lock failed: {e}"))
+    })?;
+
+    let period_str = args.period.as_deref().unwrap_or("weekly");
+    let period: crate::memory::types::ReflectionPeriod = period_str
+        .parse()
+        .map_err(|e: String| AdkError::tool(format!("mem_reflect: {e}")))?;
+
+    let result = vault
+        .reflect(&period)
+        .map_err(|e| AdkError::tool(format!("mem_reflect: reflection failed: {e}")))?;
+
+    Ok(json!({
+        "reflection_id": result.id,
+        "period": period_str,
+        "date_range": result.date_range,
+        "memcell_count": result.memcell_count,
+        "themes": result.themes,
+        "foresights_validated": result.foresights_validated,
+        "summary": result.summary,
+        "total_reflections": vault.stats().total_reflections,
+    }))
+}
+
 // ─── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -682,6 +814,133 @@ mod tests {
 
         assert_eq!(result["profile_type"], "agent");
         assert_eq!(result["found"], false);
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_consolidate_tool_empty() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        let result = mem_consolidate(MemConsolidateArgs {}).await.unwrap();
+
+        assert!(result["clusters_created"].as_array().unwrap().is_empty());
+        assert!(result["profile_operations"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(result["profile_compacted"], false);
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_consolidate_tool_with_data() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        // Create enough MemCells for consolidation
+        for i in 0..6 {
+            mem_write(MemWriteArgs {
+                project: "test-project".into(),
+                topic: format!("Rust async patterns {}", i),
+                context: "Working on async code".into(),
+                actions: vec![],
+                outcome: "Done".into(),
+                keywords: vec!["rust".into(), "async".into(), "tokio".into()],
+            })
+            .await
+            .unwrap();
+        }
+
+        let result = mem_consolidate(MemConsolidateArgs {}).await.unwrap();
+
+        let clusters = result["clusters_created"].as_array().unwrap();
+        assert!(!clusters.is_empty());
+        assert!(result["total_clusters"].as_u64().unwrap() > 0);
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_validate_foresights_tool() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        // Create data but no expired foresights
+        mem_extract(MemExtractArgs {
+            memcell_ref: "2026-05-07#MemCell 001".into(),
+            project: "test".into(),
+            topic: "Test".into(),
+            context: "ctx".into(),
+            actions: vec![],
+            outcome: "ok".into(),
+            keywords: vec!["architecture".into()],
+        })
+        .await
+        .unwrap();
+
+        let result = mem_validate_foresights(MemValidateForesightsArgs {})
+            .await
+            .unwrap();
+
+        // Future foresights should not be validated (still pending)
+        assert!(result["validations"].as_array().unwrap().is_empty());
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_reflect_tool_weekly() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        // Create some data
+        mem_write(MemWriteArgs {
+            project: "test".into(),
+            topic: "Test reflection".into(),
+            context: "Testing weekly reflection".into(),
+            actions: vec![],
+            outcome: "Done".into(),
+            keywords: vec!["test".into(), "reflection".into()],
+        })
+        .await
+        .unwrap();
+
+        let result = mem_reflect(MemReflectArgs {
+            period: Some("weekly".into()),
+        })
+        .await
+        .unwrap();
+
+        assert!(result["reflection_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("weekly-"));
+        assert_eq!(result["period"], "weekly");
+        assert!(result["memcell_count"].as_u64().unwrap() >= 1);
+        assert!(result["total_reflections"].as_u64().unwrap() >= 1);
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_reflect_tool_monthly() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        let result = mem_reflect(MemReflectArgs {
+            period: Some("monthly".into()),
+        })
+        .await
+        .unwrap();
+
+        assert!(result["reflection_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("monthly-"));
+        assert_eq!(result["period"], "monthly");
 
         clear_vault();
     }

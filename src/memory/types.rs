@@ -121,6 +121,12 @@ pub struct VaultStats {
     pub total_episodes: u64,
     #[serde(default)]
     pub pending_foresights: u64,
+    #[serde(default)]
+    pub total_clusters: u64,
+    #[serde(default)]
+    pub total_reflections: u64,
+    #[serde(default)]
+    pub profile_items: u64,
 }
 
 impl Default for VaultStats {
@@ -131,6 +137,9 @@ impl Default for VaultStats {
             total_foresights: 0,
             total_episodes: 0,
             pending_foresights: 0,
+            total_clusters: 0,
+            total_reflections: 0,
+            profile_items: 0,
         }
     }
 }
@@ -261,4 +270,100 @@ pub struct ExtractionResult {
     pub events_created: Vec<String>,
     pub foresights_created: Vec<String>,
     pub episode_id: Option<String>,
+}
+
+/// A cluster of related MemCells grouped by topic similarity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Cluster {
+    pub id: String,
+    pub topic: String,
+    pub project: String,
+    pub memcell_refs: Vec<String>,
+    pub keywords: Vec<String>,
+    pub created: String,
+    pub similarity: f64,
+}
+
+/// A profile item representing a learned trait or preference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileItem {
+    pub key: String,
+    pub value: String,
+    pub confidence: f64,
+    pub source: String,
+    pub updated: String,
+}
+
+/// Profile operation type (LLM-driven).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProfileOp {
+    Add,
+    Update,
+    Delete,
+}
+
+/// Result of a profile operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileOpResult {
+    pub operation: ProfileOp,
+    pub key: String,
+    pub value: Option<String>,
+    pub success: bool,
+}
+
+/// Result of a consolidation operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsolidationResult {
+    pub clusters_created: Vec<String>,
+    pub profile_ops: Vec<ProfileOpResult>,
+    pub profile_compacted: bool,
+}
+
+/// A reflection (weekly or monthly synthesis).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Reflection {
+    pub id: String,
+    pub period: ReflectionPeriod,
+    pub date_range: String,
+    pub summary: String,
+    pub themes: Vec<String>,
+    pub foresights_validated: u32,
+    pub memcell_count: u32,
+}
+
+/// Reflection period type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReflectionPeriod {
+    Weekly,
+    Monthly,
+}
+
+impl std::fmt::Display for ReflectionPeriod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Weekly => write!(f, "weekly"),
+            Self::Monthly => write!(f, "monthly"),
+        }
+    }
+}
+
+impl std::str::FromStr for ReflectionPeriod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "weekly" => Ok(Self::Weekly),
+            "monthly" => Ok(Self::Monthly),
+            _ => Err(format!("Unknown reflection period: {s}. Use 'weekly' or 'monthly'.")),
+        }
+    }
+}
+
+/// Result of foresight validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForesightValidation {
+    pub foresight_id: String,
+    pub previous_status: String,
+    pub new_status: String,
+    pub reason: String,
 }

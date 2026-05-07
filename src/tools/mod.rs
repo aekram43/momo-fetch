@@ -48,5 +48,8 @@ pub fn build_tool_registry(
         Arc::new(memory::MemSearch),
         Arc::new(memory::MemGraph),
         Arc::new(memory::MemProfile),
+        Arc::new(memory::MemConsolidate),
+        Arc::new(memory::MemValidateForesights),
+        Arc::new(memory::MemReflect),
     ]
 }

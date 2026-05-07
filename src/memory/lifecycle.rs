@@ -1,4 +1,4 @@
-use crate::memory::types::ExtractionResult;
+use crate::memory::types::{ConsolidationResult, ExtractionResult, ForesightValidation, Reflection, ReflectionPeriod};
 use crate::memory::vault::ObsidianVault;
 
 /// Extract events, foresights, and episodes from MemCells.
@@ -17,20 +17,24 @@ pub fn extract_from_memcell(
     vault.extract_from_memcell(memcell_ref, project, topic, context, actions, outcome, keywords)
 }
 
-/// Consolidate memories into clusters and update agent profile (placeholder).
-pub async fn consolidate(_vault: &mut ObsidianVault) -> anyhow::Result<()> {
-    // TODO: Implement in US-014
-    Ok(())
+/// Consolidate memories into clusters and update agent profile.
+///
+/// Detects clusters of related MemCells using keyword similarity (Jaccard)
+/// and same-project grouping, then updates the agent profile with learned traits.
+pub fn consolidate(vault: &mut ObsidianVault) -> anyhow::Result<ConsolidationResult> {
+    vault.consolidate()
 }
 
-/// Generate a reflection (weekly/monthly) from memories (placeholder).
-pub async fn reflect(_vault: &ObsidianVault, _period: &str) -> anyhow::Result<String> {
-    // TODO: Implement in US-014
-    Ok("Reflection: not yet implemented".into())
+/// Generate a reflection (weekly/monthly) from memories.
+///
+/// Summarizes recent MemCells and extracts key themes for the given period.
+pub fn reflect(vault: &mut ObsidianVault, period: &ReflectionPeriod) -> anyhow::Result<Reflection> {
+    vault.reflect(period)
 }
 
-/// Validate pending foresight predictions (placeholder).
-pub async fn validate_foresights(_vault: &ObsidianVault) -> anyhow::Result<Vec<String>> {
-    // TODO: Implement in US-014
-    Ok(vec![])
+/// Validate pending foresight predictions.
+///
+/// Checks foresights that have passed their end_time and marks them as expired.
+pub fn validate_foresights(vault: &mut ObsidianVault) -> anyhow::Result<Vec<ForesightValidation>> {
+    vault.validate_foresights()
 }
