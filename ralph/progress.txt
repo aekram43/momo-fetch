@@ -2,6 +2,7 @@
 Started: Wed May  6 23:34:32 +07 2026
 
 ## Codebase Patterns
+- EventStream consumption: `use adk_rust::futures::StreamExt;` then `stream.next().await` in `tokio::select!` with `ctrl_c()` for cancellation — `event.is_final_response()` is the break condition
 - adk-rust 0.7.0 is the current version (PRD said 0.6.0 but that doesn't exist — use 0.7.0)
 - adk-rust `"sessions"` feature does NOT include sqlite — must add `adk-session = { version = "0.7.0", features = ["sqlite"] }` separately in Cargo.toml
 - adk-rust features for providers: only `anthropic` and `gemini` are direct features. For openai/deepseek/ollama/groq/openrouter, use `adk-model` crate directly with its features
@@ -201,4 +202,48 @@ Started: Wed May  6 23:34:32 +07 2026
   - `Session` trait's `state()` returns `&dyn State` (immutable) — direct mutation requires going through the service API
   - `SessionService` trait is `Arc`-safe — wrap in `Arc<dyn SessionService>` for sharing with runner
   - The `CreateRequest` auto-generates a UUID when `session_id: None`
+---
+
+## Thu May 7 23:59 +07 2026 - US-008
+- Implemented custom CLI REPL using rustyline with full feature set
+- Streaming token output via adk-runner EventStream with `StreamExt::next()` and `tokio::select!`
+- Ctrl+C cancellation: catches SIGINT via `tokio::signal::ctrl_c()` and calls `harness.interrupt()` — partial response preserved in session
+- All slash commands implemented: /help, /model, /provider, /models, /sessions, /resume, /cost, /mem, /kms, /skill list, /mcp list, /quit
+- Stub commands for future stories: /cost (US-020), /mem (US-012-014), /kms (US-017), /skill list (US-015), /mcp list (US-011)
+- Multi-line input: code block detection (opens with ```, closes with ```), backslash continuation
+- Colored output: tool calls in yellow, errors in red, success (✓) in green, dimmed tool responses
+- MoMo banner: ASCII pitbull head in bright_white, MOMO text in bright_cyan bold, tagline in dimmed
+- `!` shell escape runs command directly in sandbox root directory
+- Prompt shows current model name in dimmed text
+- Startup info: version, provider/model, session ID, loaded context files
+- History persisted to `~/.config/agent-harness/history.txt`
+- 71 tests pass (no new tests — REPL is interactive, hard to unit test)
+- Files changed: src/cli/banner.rs (new), src/cli/repl.rs (full rewrite with streaming), src/cli/commands.rs (all slash commands), src/cli/mod.rs (CLI arg parsing), src/harness.rs (run_turn, interrupt, switch methods), Cargo.toml, Cargo.lock
+- **Learnings for future iterations:**
+  - `EventStream` is `Pin<Box<dyn Stream<Item = Result<Event>> + Send>>` — use `StreamExt::next()` to consume, NOT `for await` (which requires `futures::StreamExt` in scope)
+  - `adk_rust::futures::StreamExt` re-exports `futures::StreamExt` — use this import for `.next()` on EventStream
+  - `Part::FunctionCall { name, args, .. }` and `Part::FunctionResponse { function_response, .. }` are the variants for tool call display
+  - `event.is_final_response()` checks if the turn is complete — use this as the break condition in the stream loop
+  - `event.actions.tool_confirmation` contains tool approval request data for HITL
+  - `event.llm_response.error_message` is an `Option<String>` — check with `if let Some(ref err)` pattern
+  - rustyline `DefaultEditor::new()` is sufficient — no need for custom editor config for basic REPL
+  - NO_COLOR env var handling: check `std::env::var("NO_COLOR").is_err()` to determine if color should be used
+  - `dirs::home_dir()` provides `~/.config/agent-harness/` path for history and config files
+---
+
+## Thu May 7 23:45 +07 2026 - US-009
+- Implemented one-shot mode (-p flag) with full streaming support
+- `agent-harness -p 'prompt'` runs a single turn then exits
+- stdin pipe support: `cat file.md | agent-harness -p 'summarize'` concatenates stdin to prompt with separator
+- Exit codes: 0 on success, 1 on error (via anyhow error propagation in main.rs)
+- stdout/stderr split: agent text output to stdout (for piping), tool calls/errors to stderr
+- Streaming output: consumes EventStream with `StreamExt::next()`, prints tokens as they arrive
+- CLI flags already wired from US-008: --model, --provider, --project, --permission, --resume
+- 75 tests pass (4 new oneshot unit tests: summarize_args, summarize_response)
+- Files changed: src/cli/oneshot.rs (full rewrite)
+- **Learnings for future iterations:**
+  - One-shot mode should NOT use Ctrl+C handling (no `tokio::select!` with `ctrl_c()`) — the process just runs to completion
+  - Tool calls go to stderr in one-shot mode so that stdout only contains the agent's text response (useful for piping: `agent-harness -p 'explain' > output.txt`)
+  - The `atty_check()` with `libc::isatty()` is already established for stdin detection — no need for `atty` crate
+  - `consume_stream_oneshot()` returns `bool` for success/failure — the error propagation goes through `anyhow::Result` in `main.rs` which maps to exit code 1
 ---

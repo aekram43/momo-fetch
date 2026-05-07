@@ -133,8 +133,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1.7 — depends on US-002, US-005, US-006. Uses adk-cli base + adk-runner streaming"
+      "passes": true,
+      "notes": "Phase 1.7 — depends on US-002, US-005, US-006. Custom REPL using rustyline with streaming output, Ctrl+C cancellation, all slash commands, multi-line input (code blocks + backslash continuation), colored output, MoMo banner. Stub commands for /cost, /mem, /kms, /skill list, /mcp list (implemented in later stories)."
     },
     {
       "id": "US-009",
@@ -152,8 +152,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1.8 — depends on US-008. Uses adk-runner"
+      "passes": true,
+      "notes": "Phase 1.8 — depends on US-008. Uses adk-runner. Implemented one-shot mode with streaming output, stdin pipe support, proper exit codes (0 success, 1 error), tool calls to stderr, agent text to stdout."
     },
     {
       "id": "US-010",
