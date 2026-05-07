@@ -14,12 +14,20 @@ use crate::sandbox::FilesystemSandbox;
 /// Returns a vector of `Arc<dyn Tool>` ready for registration
 /// with `LlmAgentBuilder::tool()`.
 pub fn build_tool_registry(sandbox: Arc<FilesystemSandbox>) -> Vec<Arc<dyn Tool>> {
-    // Set sandbox for the current thread so tools can access it
-    file::set_sandbox(sandbox);
+    // Set sandbox for all tool modules
+    file::set_sandbox(sandbox.clone());
+    shell::set_sandbox(sandbox.clone());
+    search::set_sandbox(sandbox);
 
     vec![
+        // File tools
         Arc::new(file::FileRead),
         Arc::new(file::FileWrite),
         Arc::new(file::FileEdit),
+        // Shell tool
+        Arc::new(shell::ShellExec),
+        // Search tools
+        Arc::new(search::Grep),
+        Arc::new(search::Glob),
     ]
 }
