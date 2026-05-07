@@ -1,4 +1,6 @@
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use adk_rust::futures::StreamExt;
 use adk_rust::{EventStream, Part};
@@ -54,6 +56,12 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
 
     println!("Type /help for commands, Ctrl+D to quit.\n");
 
+    // Graceful shutdown state: set to true when user wants to exit
+    // but a tool call is still running. The stream consumer checks this
+    // and finishes the current tool call before breaking.
+    let shutting_down = Arc::new(AtomicBool::new(false));
+    let turn_active = Arc::new(AtomicBool::new(false));
+
     let mut rl = DefaultEditor::new()?;
     let history_path =
         dirs::home_dir().map(|h| h.join(".config/agent-harness/history.txt"));
@@ -66,6 +74,12 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
     }
 
     loop {
+        // If shutting down signal was set by Ctrl+D during a turn, exit now
+        if shutting_down.load(Ordering::Relaxed) && !turn_active.load(Ordering::Relaxed) {
+            println!("Goodbye!");
+            break;
+        }
+
         let prompt = format!(
             "{}> ",
             harness.provider_mgr().current_model_name().dimmed()
@@ -84,7 +98,18 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
                 if let Some(cmd) = super::commands::Command::parse(trimmed) {
                     match cmd.execute(harness).await {
                         Ok(true) => continue,
-                        Ok(false) => break,
+                        Ok(false) => {
+                            // /quit — if a turn is somehow still active, wait gracefully
+                            if turn_active.load(Ordering::Relaxed) {
+                                shutting_down.store(true, Ordering::Relaxed);
+                                // Wait for the active turn to complete
+                                while turn_active.load(Ordering::Relaxed) {
+                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                }
+                            }
+                            println!("Goodbye!");
+                            break;
+                        }
                         Err(e) => eprintln!("{}", format!("Error: {e}").red()),
                     }
                     continue;
@@ -103,15 +128,47 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
                     continue;
                 }
 
-                // Run turn with streaming
-                run_turn_streaming(harness, &full_input).await;
+                // Reset shutting_down for the new turn
+                shutting_down.store(false, Ordering::Relaxed);
+
+                // Run turn with streaming and graceful shutdown support
+                run_turn_streaming(harness, &full_input, &shutting_down, &turn_active).await;
+
+                // If shutting_down was set during the turn (e.g., Ctrl+C during
+                // graceful shutdown), exit now
+                if shutting_down.load(Ordering::Relaxed) {
+                    println!("Goodbye!");
+                    break;
+                }
             }
             Err(ReadlineError::Interrupted) => {
-                // Ctrl+C during input
+                // Ctrl+C during input — cancel any active turn
+                if turn_active.load(Ordering::Relaxed) {
+                    shutting_down.store(true, Ordering::Relaxed);
+                    harness.interrupt();
+                    // Wait for the turn to gracefully complete
+                    while turn_active.load(Ordering::Relaxed) {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                    println!("Goodbye!");
+                    break;
+                }
                 println!("^C");
                 continue;
             }
             Err(ReadlineError::Eof) => {
+                // Ctrl+D — graceful shutdown
+                if turn_active.load(Ordering::Relaxed) {
+                    shutting_down.store(true, Ordering::Relaxed);
+                    println!(
+                        "\n{} Waiting for current operation to finish...",
+                        "\u{23f3}".yellow()
+                    );
+                    // Wait for the active turn to complete gracefully
+                    while turn_active.load(Ordering::Relaxed) {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                }
                 println!("Goodbye!");
                 break;
             }
@@ -181,19 +238,40 @@ fn read_multiline_continuation(rl: &mut DefaultEditor, first_line: &str) -> Stri
 }
 
 /// Run a single conversational turn with streaming output.
-async fn run_turn_streaming(harness: &Harness, input: &str) {
+async fn run_turn_streaming(
+    harness: &Harness,
+    input: &str,
+    shutting_down: &Arc<AtomicBool>,
+    turn_active: &Arc<AtomicBool>,
+) {
+    turn_active.store(true, Ordering::Relaxed);
     match harness.run_turn(input).await {
         Ok(stream) => {
-            consume_stream(harness, stream).await;
+            consume_stream(harness, stream, shutting_down).await;
         }
         Err(e) => {
             println!("{} {}", "\u{2717}".red(), format!("{e}").red());
         }
     }
+    turn_active.store(false, Ordering::Relaxed);
 }
 
-/// Consume an EventStream with colored output and Ctrl+C cancellation.
-async fn consume_stream(harness: &Harness, mut stream: EventStream) {
+/// Consume an EventStream with colored output, Ctrl+C cancellation, and
+/// graceful shutdown support.
+///
+/// Graceful shutdown behavior:
+/// - When `shutting_down` is true and we're waiting for a tool response,
+///   we continue consuming until the tool finishes (FunctionResponse received)
+///   rather than breaking immediately.
+/// - When `shutting_down` is true and we're just streaming text,
+///   we break immediately.
+/// - Ctrl+C during normal operation cancels the generation (existing behavior).
+/// - Ctrl+C during graceful shutdown forces an immediate exit.
+async fn consume_stream(
+    harness: &Harness,
+    mut stream: EventStream,
+    shutting_down: &Arc<AtomicBool>,
+) {
     let mut in_tool_call = false;
     let mut has_output = false;
 
@@ -269,6 +347,12 @@ async fn consume_stream(harness: &Harness, mut stream: EventStream) {
                         if event.is_final_response() {
                             break;
                         }
+
+                        // Graceful shutdown: if not in a tool call, break
+                        // (tool calls will be allowed to finish)
+                        if shutting_down.load(Ordering::Relaxed) && !in_tool_call {
+                            break;
+                        }
                     }
                     Some(Err(e)) => {
                         println!("\n{} Stream error: {}", "\u{2717}".red(), e);
@@ -278,6 +362,14 @@ async fn consume_stream(harness: &Harness, mut stream: EventStream) {
                 }
             }
             _ = tokio::signal::ctrl_c() => {
+                if shutting_down.load(Ordering::Relaxed) {
+                    // Second Ctrl+C during graceful shutdown — force exit
+                    harness.interrupt();
+                    println!("\n^C Force quit");
+                    break;
+                }
+                // Normal Ctrl+C — cancel generation but allow partial response
+                // to be saved in session (adk-runner handles session persistence)
                 harness.interrupt();
                 println!("\n^C Generation cancelled");
                 break;

@@ -3,6 +3,7 @@ Started: Wed May  6 23:34:32 +07 2026
 
 ## Codebase Patterns
 - EventStream consumption: `use adk_rust::futures::StreamExt;` then `stream.next().await` in `tokio::select!` with `ctrl_c()` for cancellation — `event.is_final_response()` is the break condition
+- **adk-runner cancellation is cooperative**: `interrupt()` sets a CancellationToken, but cancellation is only checked between stream events, NOT during tool execution. Tool calls always complete naturally.
 - adk-rust 0.7.0 is the current version (PRD said 0.6.0 but that doesn't exist — use 0.7.0)
 - adk-rust `"sessions"` feature does NOT include sqlite — must add `adk-session = { version = "0.7.0", features = ["sqlite"] }` separately in Cargo.toml
 - adk-rust features for providers: only `anthropic` and `gemini` are direct features. For openai/deepseek/ollama/groq/openrouter, use `adk-model` crate directly with its features
@@ -460,4 +461,23 @@ Started: Wed May  6 23:34:32 +07 2026
   - Rust Edition 2024: `std::env::set_var()` and `remove_var()` are unsafe — avoid in tests; use keychain-only tests instead
   - Env var always takes priority over keychain — this means if `ANTHROPIC_API_KEY` is set, it overrides whatever is in the keychain. This is intentional for runtime overrides
   - `keyring-core` handles macOS Keychain, Linux Secret Service (via dbus), and Windows Credential Manager transparently via the same API
+---
+
+## Thu May 7 23:59 +07 2026 - US-019
+- Enhanced REPL streaming with graceful shutdown support
+- Graceful shutdown: Ctrl+D during active tool call waits for tool to finish before exit (shows hourglass message)
+- Ctrl+C during idle input → normal cancel (continue REPL)
+- Ctrl+C during active turn → cancel generation, partial response saved to session via adk-runner's session persistence
+- Ctrl+C during graceful shutdown (second Ctrl+C) → force quit immediately
+- Double Ctrl+C pattern: first cancels gracefully, second forces exit
+- `shutting_down` and `turn_active` AtomicBool flags coordinate between REPL loop and stream consumer
+- Partial response saved on cancel: adk-runner's cancellation is cooperative — it checks `CancellationToken.is_cancelled()` between stream events. Events already yielded are persisted to session. Tool calls in progress complete naturally because cancellation is only checked between events, not during tool execution.
+- Existing streaming behavior (token display, tool call indicators, colored output) preserved
+- 181 tests pass (no new tests — graceful shutdown is interactive behavior, hard to unit test)
+- Files changed: src/cli/repl.rs (graceful shutdown logic, AtomicBool coordination, stream consumer enhancement), ralph/prd.json (US-019 passes: true)
+- **Learnings for future iterations:**
+  - adk-runner's `interrupt()` sets a `CancellationToken` — the runner checks `is_cancelled()` between stream events, NOT during tool execution. This means tool calls always complete naturally, then cancellation is detected on the next event loop iteration.
+  - `CancellationToken` from `tokio_util` — same crate adk-runner uses internally. Our graceful shutdown uses `Arc<AtomicBool>` which is sufficient for REPL-loop coordination.
+  - The `turn_active` flag is set/unset around `run_turn_streaming()` in the REPL loop — the `consume_stream` function doesn't need it because it only reads `shutting_down`.
+  - Session persistence during cancellation is automatic — adk-runner yields events to the stream, and the session service appends them. When we `interrupt()`, already-yielded events are in the session; future events simply aren't produced.
 ---

@@ -329,8 +329,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Phase 3.4 — depends on US-008. Uses adk-runner events"
+      "passes": true,
+      "notes": "Phase 3.4 — depends on US-008. Uses adk-runner events. Enhanced REPL with graceful shutdown: Ctrl+C during idle = normal cancel, Ctrl+C during turn = cancel generation (partial saved), Ctrl+C during graceful shutdown = force quit, Ctrl+D during turn = wait for tool to finish then exit. Double Ctrl+C forces immediate exit."
     },
     {
       "id": "US-020",
