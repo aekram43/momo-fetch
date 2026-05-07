@@ -98,8 +98,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1.5 — depends on US-003, US-004. Uses adk-sandbox + ToolConfirmationPolicy"
+      "passes": true,
+      "notes": "Phase 1.5 — depends on US-003, US-004. Custom sandbox with .agentignore (ignore crate GitignoreBuilder), ToolConfirmationPolicy mapping, 3 permission modes. adk-sandbox not used (feature not enabled) — built our own layer that integrates with adk-rust's HITL."
     },
     {
       "id": "US-007",

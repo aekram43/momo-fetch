@@ -6,6 +6,7 @@ Started: Wed May  6 23:34:32 +07 2026
 - adk-rust features for providers: only `anthropic` and `gemini` are direct features. For openai/deepseek/ollama/groq/openrouter, use `adk-model` crate directly with its features
 - **Import pattern for adk-model providers**: `use adk_model::anthropic::{AnthropicClient, AnthropicConfig}` etc. — NOT from `adk_rust::prelude::*` (prelude re-exports are gated by adk-rust features, not adk-model features)
 - `adk_rust::prelude::Llm` trait is always available from adk-core
+- **adk-rust types re-exported**: `adk_rust::ToolConfirmationPolicy`, `adk_rust::ToolConfirmationDecision`, etc. (via `pub use adk_core::*`)
 - `dotenvy::dotenv()` is called in `cli/mod.rs` at startup — .env file loading is already wired up
 - reqwest 0.13 TLS feature is `rustls` (not `rustls-tls` as in older versions)
 - path-clean 0.1 takes `&self` reference, not owned PathBuf
@@ -17,6 +18,9 @@ Started: Wed May  6 23:34:32 +07 2026
 - **Rust Edition 2024 guarded strings**: `"#"` triggers "unprefixed guarded string literal" — use `std::iter::repeat('#').take(n).collect::<String>()`
 - **Regex patterns with `"`**: always use `r#"..."#` or `r##"..."##` delimiters — a single broken raw string causes cascading parser errors across the whole file
 - **Always fix the FIRST compiler error first** — subsequent errors are often cascading from the first one
+- **macOS symlink**: `/var` → `/private/var`, `/tmp` → `/private/tmp` — always `canonicalize()` before comparing paths with `starts_with()`
+- **ignore crate**: use `GitignoreBuilder::add_line(None, pattern)` for programmatic loading, NOT `OverrideBuilder` or `GitignoreBuilder::add(path)`
+- **Sandbox `.agentignore`**: loaded from non-canonicalized root path (before `canonicalize()`), then root is canonicalized — this ensures the file is found via its original path
 
 ### adk-rust 0.7.0 API Reference (verified from source)
 
@@ -156,4 +160,25 @@ Started: Wed May  6 23:34:32 +07 2026
   - Web tools don't need sandbox context — they operate on URLs, not local filesystem paths
   - `reqwest::Client::builder().timeout().redirect().build()` for custom HTTP client config
   - `content.is_char_boundary(idx)` for safe UTF-8 string slicing during truncation
+---
+
+## Fri May 7 23:45 +07 2026 - US-006
+- Implemented full filesystem sandbox with safety features
+- `.agentignore` file support using `ignore::gitignore::GitignoreBuilder` (full .gitignore format compatibility: patterns, negation, comments, wildcards)
+- `is_ignored()` with path canonicalization for macOS symlink compatibility (`/var` → `/private/var`)
+- `check_readable()` and `check_writable()` that enforce .agentignore rules
+- 3 permission modes (Strict/Auto/Yolo) with `PermissionMode` Display/FromStr implementations
+- `ToolConfirmationPolicy` integration: `to_tool_confirmation_policy()` maps modes to adk-rust HITL policy (Strict=Always, Auto=PerTool, Yolo=Never)
+- `requires_confirmation()` for runtime per-tool checks (destructive command detection in Auto mode)
+- Config loading from 3 levels: CLI flag > `.harness/settings.json` > `~/.config/agent-harness/settings.json`
+- `SettingsFile` struct for both global and project-level settings
+- 64 tests pass (17 new sandbox tests: 6 path scoping + 3 destructive detection + 5 agentignore + 3 permission mode)
+- Files changed: src/sandbox/mod.rs (full rewrite), src/config/mod.rs (rewrite with SettingsFile + 3-level config)
+- **Learnings for future iterations:**
+  - `ignore::overrides::Override` doesn't work well for file-scoped ignore rules — use `ignore::gitignore::GitignoreBuilder::add_line()` instead
+  - macOS `/var` symlinks to `/private/var` — `canonicalize()` is needed for both sandbox root AND input paths in `is_ignored()` to avoid false positives
+  - `GitignoreBuilder::add(path)` returns `Option<()>`, not `Result` — use `add_line(None, pattern)` for programmatic pattern loading
+  - adk-rust `ToolConfirmationPolicy` is available via `adk_rust::ToolConfirmationPolicy` (re-exported from adk-core through `pub use adk_core::*`)
+  - `ToolConfirmationPolicy::PerTool(BTreeSet<String>)` uses `with_tool(name)` builder pattern
+  - `PermissionMode::from_str()` with case-insensitive parsing is useful for config files
 ---

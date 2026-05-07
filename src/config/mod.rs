@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
+use std::str::FromStr;
+
 use crate::cli::CliArgs;
 use crate::sandbox::PermissionMode;
 
@@ -12,6 +14,22 @@ pub struct HarnessConfig {
     pub session_db_path: PathBuf,
     pub permission_mode: PermissionMode,
     pub provider: ProviderSettings,
+}
+
+/// Settings file schema (both global and project-level).
+///
+/// Global: `~/.config/agent-harness/settings.json`
+/// Project: `<project>/.harness/settings.json`
+///
+/// CLI flags override both; project overrides global.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SettingsFile {
+    /// Default provider name
+    pub default_provider: Option<String>,
+    /// Default model name
+    pub default_model: Option<String>,
+    /// Permission mode: "strict" (default), "auto", "yolo"
+    pub permission_mode: Option<String>,
 }
 
 /// Provider-related settings.
@@ -32,6 +50,12 @@ impl Default for ProviderSettings {
 
 impl HarnessConfig {
     /// Build config from CLI arguments.
+    ///
+    /// Settings are loaded in priority order:
+    /// 1. CLI flags (highest)
+    /// 2. Project-level `.harness/settings.json`
+    /// 3. Global `~/.config/agent-harness/settings.json`
+    /// 4. Defaults (lowest)
     pub fn from_cli_args(args: &CliArgs) -> anyhow::Result<Self> {
         let project_path = match &args.project {
             Some(p) => PathBuf::from(p),
@@ -42,19 +66,35 @@ impl HarnessConfig {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("agent-harness");
 
-        let permission_mode = match args.permission.as_str() {
-            "auto" => PermissionMode::Auto,
-            "yolo" => PermissionMode::Yolo,
-            _ => PermissionMode::Strict,
+        // Load global settings
+        let global_settings = Self::load_settings_file(&config_dir.join("settings.json"));
+
+        // Load project settings (overrides global)
+        let project_settings =
+            Self::load_settings_file(&project_path.join(".harness/settings.json"));
+
+        // Determine permission mode: CLI flag > project settings > global settings > default
+        let permission_mode = if args.permission != "strict" {
+            // CLI explicitly specified (strict is the default, so if it's different, it was set)
+            PermissionMode::from_str(&args.permission).unwrap_or(PermissionMode::Strict)
+        } else if let Some(ref mode) = project_settings.permission_mode {
+            PermissionMode::from_str(mode).unwrap_or(PermissionMode::Strict)
+        } else if let Some(ref mode) = global_settings.permission_mode {
+            PermissionMode::from_str(mode).unwrap_or(PermissionMode::Strict)
+        } else {
+            PermissionMode::Strict
         };
 
-        // Load settings file if exists
-        let settings_path = config_dir.join("settings.json");
-        let provider = if settings_path.exists() {
-            let content = std::fs::read_to_string(&settings_path)?;
-            serde_json::from_str(&content).unwrap_or_default()
-        } else {
-            ProviderSettings::default()
+        // Determine provider settings: project > global > defaults
+        let provider = ProviderSettings {
+            default_provider: project_settings
+                .default_provider
+                .or(global_settings.default_provider)
+                .unwrap_or_else(|| "anthropic".into()),
+            default_model: project_settings
+                .default_model
+                .or(global_settings.default_model)
+                .unwrap_or_else(|| "claude-sonnet-4-20250514".into()),
         };
 
         Ok(Self {
@@ -64,5 +104,15 @@ impl HarnessConfig {
             permission_mode,
             provider,
         })
+    }
+
+    /// Load a settings file, returning default if it doesn't exist or can't be parsed.
+    fn load_settings_file(path: &PathBuf) -> SettingsFile {
+        if path.exists() {
+            let content = std::fs::read_to_string(path).unwrap_or_default();
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            SettingsFile::default()
+        }
     }
 }
