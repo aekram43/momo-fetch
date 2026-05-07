@@ -295,8 +295,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Phase 3.2 — depends on Phase 2. Uses #[tool] macro"
+      "passes": true,
+      "notes": "Phase 3.2 — depends on Phase 2. Uses #[tool] macro. Implemented KmsRead, KmsSearch, KmsWrite tools with thread-local sandbox context. /kms list shows all KBs with page counts. index.md auto-updated on write. KMS TOC already injected via ContextBuilder from US-010. 18 new tests."
     },
     {
       "id": "US-018",

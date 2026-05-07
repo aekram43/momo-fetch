@@ -417,3 +417,23 @@ Started: Wed May  6 23:34:32 +07 2026
   - `ProviderManager::from_current()` wraps an existing `Arc<dyn Llm>` without re-reading env vars — Arc::clone is cheap since it shares the same underlying model instance
   - `sanitize_name()` for agent names: take(30) chars, replace non-alphanumeric with '-', trim dashes from edges
 ---
+
+## Thu May 7 23:59 +07 2026 - US-017
+- Implemented Knowledge base (KMS) with 3 tools using #[tool] macro
+- KmsRead tool: read a page from `.kms/<kb>/pages/<name>.md` with path traversal protection
+- KmsSearch tool: full-text search across all KBs (or filter by KB), case-insensitive, returns match count + snippet
+- KmsWrite tool: create or update pages, auto-creates KB directory structure, updates `index.md` with new entries (atomic write)
+- `/kms list` command shows all knowledge bases with page counts and index status
+- KMS TOC already injected into system prompt via ContextBuilder (from US-010)
+- Thread-local sandbox context pattern for KMS tools (same as file/shell/search)
+- 18 new tests (unit + integration): sanitize_name, extract_snippet, count_matches, update_index (new/append/existing), kms_read (found/not found/with .md extension), kms_search (all/filtered/no kms dir), kms_write (create/update/new KB), list_knowledge_bases (with entries/empty)
+- 174 tests pass total
+- Files changed: src/tools/kms.rs (new), src/tools/mod.rs (register Kms tools), src/cli/commands.rs (/kms list), ralph/prd.json (US-017 passes: true)
+- **Learnings for future iterations:**
+  - KMS tools use the same thread-local sandbox pattern as other tools — `set_sandbox(Arc<FilesystemSandbox>)` gives access to project root
+  - `update_index()` must create the KB directory with `create_dir_all()` before writing index.md — test was failing because the test only created `pages/` subdirectory, not the parent KB dir
+  - `sanitize_name()` strips path separators and special chars to prevent path traversal — KMS tools operate within `.kms/` which is inside the sandbox, but defense in depth is still needed
+  - `extract_snippet()` uses word boundary detection (newline/period/space) for clean context extraction — rfind for start, find for end
+  - The `#[tool]` macro generates PascalCase struct names: `kms_read` → `KmsRead`, `kms_search` → `KmsSearch`, `kms_write` → `KmsWrite`
+  - KMS tools are registered in BOTH `build_tool_registry()` and `build_sub_agent_tool_registry()` — sub-agents should also have access to the project wiki
+---
