@@ -26,6 +26,9 @@ Started: Wed May  6 23:34:32 +07 2026
 - **std::fs::DirEntry**: has `file_name()` NOT `file_stem()` — strip `.md` extension manually with `strip_suffix(".md")`
 - **Thread-local mutable context**: use `Arc<Mutex<T>>` for types with mutable state (vault), `Arc<T>` for immutable (sandbox) — `std::sync::Mutex` is fine for quick I/O operations with no await points
 - **`build_tool_registry`** takes `(sandbox: Arc<FilesystemSandbox>, vault: Arc<Mutex<ObsidianVault>>)` — all callers must provide both
+- **Sub-agent thread-local context**: must be set BEFORE `runner.run_str()`, not during agent build — Runner invokes tools on the same tokio thread pool so thread-locals are visible during tool execution
+- **ProviderManager::from_current()** wraps an existing `Arc<dyn Llm>` without re-reading env vars — use for sub-agent context sharing
+- **ParallelAgent::new().with_shared_state()** for shared-memory parallel sub-agents; `SequentialAgent::new()` for ordered execution
 
 ### adk-rust 0.7.0 API Reference (verified from source)
 
@@ -387,4 +390,30 @@ Started: Wed May  6 23:34:32 +07 2026
   - `SkillDocument::engineer_prompt_block(max_chars)` generates a `[skill:name]...[/skill]` block for injection — but we use our own simpler format for system prompt context
   - The injector module uses `adk_plugin` — if we want per-message auto-injection in the future, we'd need that dependency. Current approach injects all skills into system prompt which is simpler
   - `SelectionPolicy { top_k: 3, min_score: 0.5 }` is a reasonable default — returns up to 3 matches with score >= 0.5
+---
+
+## Thu May 7 23:59 +07 2026 - US-016
+- Implemented sub-agent orchestration using adk-rust's SequentialAgent and ParallelAgent
+- Task tool using #[tool] macro: delegate subtasks to isolated sub-agents with own tool registry
+- Two execution modes: sequential (one after another) and parallel (all at once via ParallelAgent::SharedState)
+- Recursion depth tracking: MAX_RECURSION_DEPTH = 3, enforced via `depth` field on TaskContext
+  - At depth < 3: sub-agents get Task tool and can spawn further sub-agents
+  - At depth >= 3: Task tool excluded from registry, recursion limit error returned if attempted
+- Thread-local TaskContext pattern for sub-agent dependencies (provider, sandbox, vault, system prompt, depth)
+- ProviderManager::from_current() for lightweight context sharing without re-reading env vars
+- build_sub_agent_tool_registry() in tools/mod.rs for restricted tool set (no Task tool)
+- Structured result reporting: JSON with `response` (text), `total_tool_calls` (count)
+- Configurable timeout per sub-agent (default 5 min), max 10 subtasks per task
+- In-memory session service for sub-agents (no persistence needed for child tasks)
+- max_iterations(50) on sub-agents to prevent runaway execution
+- 156 tests pass (10 new: sanitize_name, deserialization variants, depth tracking)
+- Files changed: src/tools/task.rs (new), src/tools/mod.rs (add mod + build_sub_agent_tool_registry), src/harness.rs (set task context with depth:0), src/providers.rs (from_current constructor), ralph/prd.json (US-016 passes: true)
+- **Learnings for future iterations:**
+  - `ParallelAgent::new(name, agents).with_shared_state()` enables shared memory between parallel sub-agents
+  - `SequentialAgent::new(name, agents)` runs agents one after another, passing results forward
+  - Thread-local task context must be set BEFORE the runner executes, not during build — the Runner invokes tools on the same tokio thread pool, so the context is visible during tool execution
+  - Recursion depth is tracked via thread-local TaskContext, not via Runner config — the Runner doesn't have a built-in depth limit concept
+  - `adk_session::InMemorySessionService::new()` creates a lightweight session store for sub-agents that don't need persistence
+  - `ProviderManager::from_current()` wraps an existing `Arc<dyn Llm>` without re-reading env vars — Arc::clone is cheap since it shares the same underlying model instance
+  - `sanitize_name()` for agent names: take(30) chars, replace non-alphanumeric with '-', trim dashes from edges
 ---
