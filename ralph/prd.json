@@ -277,8 +277,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Phase 3.1 — depends on Phase 2. Uses SequentialAgent / ParallelAgent"
+      "passes": true,
+      "notes": "Phase 3.1 — depends on Phase 2. Uses SequentialAgent / ParallelAgent. Implemented Task tool with recursion depth tracking (max 3 levels), sequential/parallel modes, configurable timeout, structured result reporting."
     },
     {
       "id": "US-017",

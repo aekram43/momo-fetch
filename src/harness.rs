@@ -141,6 +141,19 @@ impl Harness {
             system_prompt.push_str(&skill_ctx);
         }
 
+        // Set task context so the Task tool can spawn sub-agents
+        crate::tools::task::set_task_context(crate::tools::task::TaskContext {
+            provider_mgr: ProviderManager::from_current(
+                provider_mgr.current(),
+                provider_mgr.current_provider().to_string(),
+                provider_mgr.current_model_name().to_string(),
+            ),
+            sandbox: sandbox.clone(),
+            vault: vault.clone(),
+            system_prompt: system_prompt.clone(),
+            depth: 0,
+        });
+
         let mut agent_builder = LlmAgentBuilder::new("agent-harness")
             .model(provider_mgr.current())
             .instruction(&system_prompt);

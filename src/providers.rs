@@ -108,6 +108,23 @@ impl ProviderManager {
         self.current.clone()
     }
 
+    /// Create a ProviderManager wrapping an existing LLM instance.
+    ///
+    /// Used by sub-agent spawning to share the same model without
+    /// re-reading environment variables.
+    pub fn from_current(
+        llm: Arc<dyn Llm>,
+        provider: String,
+        model: String,
+    ) -> Self {
+        Self {
+            current: llm,
+            current_provider: provider,
+            current_model: model,
+            custom_endpoints: HashMap::new(),
+        }
+    }
+
     /// Get current provider name.
     pub fn current_provider(&self) -> &str {
         &self.current_provider
