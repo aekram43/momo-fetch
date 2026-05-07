@@ -263,3 +263,28 @@ Started: Wed May  6 23:34:32 +07 2026
   - `project_path` field on ContextBuilder is currently unused — may be needed for future KMS/memory injection
   - Relative path display uses `strip_prefix(&cwd)` — works well for showing `./AGENTS.md` or full path for files outside cwd
 ---
+
+## Wed May 7 23:59 +07 2026 - US-011
+- Implemented MCP integration using adk-tool's built-in McpServerManager
+- Created `McpService` struct wrapping `McpServerManager` with config persistence to `.harness/mcp.json`
+- Auto-start: all configured (non-disabled) servers start on Harness::build()
+- Background health monitoring starts automatically when servers are configured
+- MCP tools auto-registered with agent via `LlmAgentBuilder::toolset()` — McpServerManager implements Toolset trait
+- McpServerManager handles tool name collision resolution with `{server_id}__{tool_name}` prefixing
+- Slash commands: `/mcp list` (shows servers with status), `/mcp add <name> <command> [args...]`, `/mcp remove <name>`
+- Graceful shutdown on REPL/one-shot exit via `harness.mcp_service().shutdown()`
+- Elicitation handler: `AutoDeclineElicitationHandler` — declines all server elicitation requests (safe default)
+- REPL startup shows MCP server count and running status
+- Adding/removing servers triggers runner rebuild to update agent tool registry
+- 90 tests pass (6 new MCP tests: json parsing, empty service, start_all, add/remove with persistence, config round-trip)
+- Files changed: src/mcp/mod.rs (new), src/main.rs (add mod mcp), src/harness.rs (integrate McpService), src/cli/commands.rs (MCP slash commands), src/cli/repl.rs (MCP startup display), src/cli/mod.rs (shutdown hook)
+- **Learnings for future iterations:**
+  - `McpServerManager` implements `Toolset` trait — register via `LlmAgentBuilder::toolset(Arc::new(manager))`, NOT `.tool()`
+  - `McpServerManager::new(configs)` takes `HashMap<String, McpServerConfig>` — configs are cloned into the manager
+  - `McpServerManager` doesn't expose configs after creation — need to maintain a parallel `configs` HashMap in our wrapper for persistence
+  - `McpServerConfig` uses `#[serde(rename_all = "camelCase")]` — JSON fields are `autoApprove`, `restartPolicy`, etc.
+  - `AutoDeclineElicitationHandler` is the safe default — servers that request user input via elicitation are declined automatically
+  - `ServerStatus` derives `Debug` — can format with `{:?}` for display
+  - Tool name collision: McpServerManager internally uses `PrefixedTool` wrapper to add `{server_id}__{tool_name}` when tools from different servers have the same name
+  - `LlmAgentBuilder` has both `.tool(Arc<dyn Tool>)` for individual tools AND `.toolset(Arc<dyn Toolset>)` for bulk registration — can use both together
+---

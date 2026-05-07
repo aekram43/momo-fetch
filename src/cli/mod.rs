@@ -53,7 +53,15 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
     }
 
     match &args.prompt {
-        Some(prompt) => oneshot::run(&harness, prompt).await,
-        None => repl::run(&mut harness).await,
+        Some(prompt) => {
+            let result = oneshot::run(&harness, prompt).await;
+            let _ = harness.mcp_service().shutdown().await;
+            result
+        }
+        None => {
+            let result = repl::run(&mut harness).await;
+            let _ = harness.mcp_service().shutdown().await;
+            result
+        }
     }
 }

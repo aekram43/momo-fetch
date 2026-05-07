@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod context;
 mod harness;
+mod mcp;
 mod memory;
 mod providers;
 mod sandbox;

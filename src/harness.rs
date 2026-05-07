@@ -6,6 +6,7 @@ use adk_rust::{Content, EventStream, ToolConfirmationPolicy};
 
 use crate::config::HarnessConfig;
 use crate::context::ContextBuilder;
+use crate::mcp::McpService;
 use crate::memory::vault::ObsidianVault;
 use crate::providers::ProviderManager;
 use crate::sandbox::FilesystemSandbox;
@@ -20,6 +21,7 @@ pub struct Harness {
     context_builder: ContextBuilder,
     vault: ObsidianVault,
     session_mgr: SessionManager,
+    mcp_service: McpService,
     runner: Runner,
     current_session_id: String,
     config: HarnessConfig,
@@ -59,20 +61,46 @@ impl Harness {
             current_session_id
         };
 
+        // Initialize MCP service
+        let mcp_service = McpService::new(&config.project_path)?;
+
+        // Start all configured MCP servers
+        let start_results = mcp_service.start_all().await;
+        for (id, result) in &start_results {
+            if let Err(e) = result {
+                tracing::warn!("MCP server '{id}' failed to start: {e}");
+            }
+        }
+        if !start_results.is_empty() {
+            let running = mcp_service.running_count().await;
+            tracing::info!(
+                "MCP: {}/{} servers started",
+                running,
+                start_results.len()
+            );
+        }
+
+        // Start background health monitoring
+        if mcp_service.has_servers() {
+            mcp_service.start_monitoring();
+        }
+
         // Build Runner with Agent
         let runner = Self::build_runner(
             &provider_mgr,
             &context_builder,
-            &sandbox, // Arc<FilesystemSandbox>
+            &sandbox,
             session_mgr.service(),
+            &mcp_service,
         )?;
 
         Ok(Self {
             provider_mgr,
-            sandbox, // Arc<FilesystemSandbox>
+            sandbox,
             context_builder,
             vault,
             session_mgr,
+            mcp_service,
             runner,
             current_session_id,
             config,
@@ -85,6 +113,7 @@ impl Harness {
         context_builder: &ContextBuilder,
         sandbox: &Arc<FilesystemSandbox>,
         session_service: Arc<dyn adk_session::SessionService>,
+        mcp_service: &McpService,
     ) -> anyhow::Result<Runner> {
         let tools = crate::tools::build_tool_registry(sandbox.clone());
 
@@ -105,8 +134,14 @@ impl Harness {
             }
         }
 
+        // Register built-in tools
         for tool in tools {
             agent_builder = agent_builder.tool(tool);
+        }
+
+        // Register MCP toolset (if any servers configured)
+        if mcp_service.has_servers() {
+            agent_builder = agent_builder.toolset(mcp_service.manager());
         }
 
         let agent = agent_builder.build()?;
@@ -120,13 +155,14 @@ impl Harness {
         Ok(runner)
     }
 
-    /// Rebuild the Runner (e.g., after model/provider switch).
-    fn rebuild_runner(&mut self) -> anyhow::Result<()> {
+    /// Rebuild the Runner (e.g., after model/provider switch or MCP changes).
+    pub fn rebuild_runner(&mut self) -> anyhow::Result<()> {
         self.runner = Self::build_runner(
             &self.provider_mgr,
             &self.context_builder,
             &self.sandbox,
             self.session_mgr.service(),
+            &self.mcp_service,
         )?;
         Ok(())
     }
@@ -196,6 +232,16 @@ impl Harness {
     /// Get a reference to the session manager.
     pub fn session_mgr(&self) -> &SessionManager {
         &self.session_mgr
+    }
+
+    /// Get a reference to the MCP service.
+    pub fn mcp_service(&self) -> &McpService {
+        &self.mcp_service
+    }
+
+    /// Get a mutable reference to the MCP service.
+    pub fn mcp_service_mut(&mut self) -> &mut McpService {
+        &mut self.mcp_service
     }
 
     /// Get the current session ID.

@@ -31,6 +31,18 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
         println!("Loaded context from: {}", paths.join(", "));
     }
 
+    // Show MCP servers
+    let mcp = harness.mcp_service();
+    if mcp.has_servers() {
+        let running = mcp.running_count().await;
+        let total = mcp.configs().len();
+        println!(
+            "MCP: {}/{} servers running",
+            running.to_string().green(),
+            total,
+        );
+    }
+
     println!("Type /help for commands, Ctrl+D to quit.\n");
 
     let mut rl = DefaultEditor::new()?;

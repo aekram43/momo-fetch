@@ -185,8 +185,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Phase 2.1 — depends on Phase 1 complete. Uses adk-tool MCP client"
+      "passes": true,
+      "notes": "Phase 2.1 — depends on Phase 1 complete. Uses adk-tool MCP client. Implemented McpService wrapping McpServerManager with config persistence, /mcp add/list/remove commands, auto-start on harness build, graceful shutdown, elicitation handler, toolset registration with agent."
     },
     {
       "id": "US-012",

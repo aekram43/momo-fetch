@@ -13,6 +13,8 @@ pub enum Command {
     Kms,
     SkillList,
     McpList,
+    McpAdd { name: String, command: String },
+    McpRemove { name: String },
     Quit,
     ShellEscape { command: String },
     Unknown(String),
@@ -60,6 +62,36 @@ impl Command {
                 let sub = parts.get(1).unwrap_or(&"");
                 match *sub {
                     "list" => Some(Self::McpList),
+                    "add" => {
+                        // /mcp add <name> <command> [args...]
+                        let name = parts.get(2).unwrap_or(&"").to_string();
+                        // Everything after "mcp add <name>" is the command
+                        let rest = input[1..].trim_start_matches("mcp add").trim();
+                        // Skip the name part to get the command
+                        let cmd = if let Some(space_pos) = rest.find(' ') {
+                            rest[space_pos..].trim().to_string()
+                        } else {
+                            String::new()
+                        };
+                        if name.is_empty() || cmd.is_empty() {
+                            Some(Self::Unknown(
+                                "/mcp add <name> <command> [args...]".to_string(),
+                            ))
+                        } else {
+                            Some(Self::McpAdd {
+                                name,
+                                command: cmd,
+                            })
+                        }
+                    }
+                    "remove" => {
+                        let name = parts.get(2).unwrap_or(&"").to_string();
+                        if name.is_empty() {
+                            Some(Self::Unknown("/mcp remove <name>".to_string()))
+                        } else {
+                            Some(Self::McpRemove { name })
+                        }
+                    }
                     _ => Some(Self::Unknown(input.to_string())),
                 }
             }
@@ -160,7 +192,90 @@ impl Command {
                 Ok(true)
             }
             Self::McpList => {
-                println!("MCP: not yet implemented");
+                let configs = harness.mcp_service().configs();
+                if configs.is_empty() {
+                    println!("No MCP servers configured.");
+                    println!("Use /mcp add <name> <command> to add a server.");
+                } else {
+                    println!("MCP servers:");
+                    let statuses = harness.mcp_service().all_statuses().await;
+                    for (id, config) in configs {
+                        let status = statuses
+                            .get(id)
+                            .map(|s| format!("{s:?}"))
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        let disabled = if config.disabled { " [disabled]" } else { "" };
+                        println!("  {id}: {status}{disabled}");
+                        println!("    command: {} {}", config.command, config.args.join(" "));
+                    }
+                }
+                Ok(true)
+            }
+            Self::McpAdd { name, command } => {
+                use std::collections::HashMap;
+
+                // Parse command string into command + args
+                let parts: Vec<&str> = command.split_whitespace().collect();
+                if parts.is_empty() {
+                    println!("{} No command specified", "\u{2717}".red());
+                    return Ok(true);
+                }
+
+                let cmd = parts[0].to_string();
+                let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+
+                let config = adk_tool::mcp::manager::McpServerConfig {
+                    command: cmd,
+                    args,
+                    env: HashMap::new(),
+                    disabled: false,
+                    auto_approve: vec![],
+                    restart_policy: None,
+                };
+
+                match harness
+                    .mcp_service_mut()
+                    .add_server(name.clone(), config, true)
+                    .await
+                {
+                    Ok(()) => {
+                        println!(
+                            "{} Added MCP server '{name}' and starting...",
+                            "\u{2713}".green()
+                        );
+                        // Rebuild runner to include new MCP tools
+                        if let Err(e) = harness.rebuild_runner() {
+                            println!("{} Server added but runner rebuild failed: {e}", "\u{2717}".red());
+                        }
+                    }
+                    Err(e) => {
+                        println!("{} Failed to add MCP server '{name}': {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
+            Self::McpRemove { name } => {
+                match harness.mcp_service_mut().remove_server(&name).await {
+                    Ok(()) => {
+                        println!(
+                            "{} Removed MCP server '{name}'",
+                            "\u{2713}".green()
+                        );
+                        // Rebuild runner to remove MCP tools
+                        if let Err(e) = harness.rebuild_runner() {
+                            println!(
+                                "{} Server removed but runner rebuild failed: {e}",
+                                "\u{2717}".red()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        println!(
+                            "{} Failed to remove MCP server '{name}': {e}",
+                            "\u{2717}".red()
+                        );
+                    }
+                }
                 Ok(true)
             }
             Self::Sessions => {
@@ -230,6 +345,8 @@ impl Command {
   /kms                 Knowledge base status
   /skill list          List installed skills
   /mcp list            List MCP servers
+  /mcp add <n> <cmd>   Add MCP server (e.g., /mcp add fs npx -y @mcp/filesystem /tmp)
+  /mcp remove <name>   Remove MCP server
   /quit                Exit
   !<command>           Run shell command directly"#
     }
