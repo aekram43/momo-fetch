@@ -247,3 +247,19 @@ Started: Wed May  6 23:34:32 +07 2026
   - The `atty_check()` with `libc::isatty()` is already established for stdin detection — no need for `atty` crate
   - `consume_stream_oneshot()` returns `bool` for success/failure — the error propagation goes through `anyhow::Result` in `main.rs` which maps to exit code 1
 ---
+
+## Wed May 7 23:59 +07 2026 - US-010
+- Implemented AGENTS.md / CLAUDE.md context injection with full directory walking
+- ContextBuilder walks up from project_path discovering: AGENTS.md, CLAUDE.md, .harness/AGENTS.md
+- Files closer to cwd have higher priority (reversed order so closer files appear last in system prompt)
+- Relative path display: "Loaded context from: ./AGENTS.md, ../CLAUDE.md" using strip_prefix against cwd
+- Added `loaded_file_relative_paths()` helper method for clean CLI display
+- No files found → continues without error (empty agents_md_content)
+- KMS TOC also included in system prompt when .kms/ directory exists
+- 84 tests pass (9 new context tests: discovery, priority, empty, prompt content, KMS)
+- Files changed: src/context/mod.rs (added tests + relative path method), src/cli/repl.rs (use relative path display)
+- **Learnings for future iterations:**
+  - The ContextBuilder was already scaffolded in US-001 and wired into Harness in US-008 — this story was mainly about validating correctness and adding tests
+  - `project_path` field on ContextBuilder is currently unused — may be needed for future KMS/memory injection
+  - Relative path display uses `strip_prefix(&cwd)` — works well for showing `./AGENTS.md` or full path for files outside cwd
+---

@@ -168,8 +168,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1.10 — depends on US-008. Uses LlmAgentBuilder::instruction()"
+      "passes": true,
+      "notes": "Phase 1.10 — depends on US-008. Uses LlmAgentBuilder::instruction(). Implemented directory-walking context discovery with relative path display and priority ordering. 9 new tests."
     },
     {
       "id": "US-011",
