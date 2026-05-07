@@ -29,5 +29,8 @@ pub fn build_tool_registry(sandbox: Arc<FilesystemSandbox>) -> Vec<Arc<dyn Tool>
         // Search tools
         Arc::new(search::Grep),
         Arc::new(search::Glob),
+        // Web tools
+        Arc::new(web::WebSearch),
+        Arc::new(web::WebFetch),
     ]
 }

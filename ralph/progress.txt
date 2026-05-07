@@ -11,6 +11,12 @@ Started: Wed May  6 23:34:32 +07 2026
 - path-clean 0.1 takes `&self` reference, not owned PathBuf
 - Borrow checker: clone provider/model strings before mutable borrow when switching providers
 - All "never used" warnings are expected for placeholder code in scaffold phase
+- Each tool module (file, shell, search) has its own `thread_local!` sandbox context — register via `set_sandbox()` in `build_tool_registry()`
+- Edition 2024 implicit borrow: use `if let Some(x)` not `if let Some(ref x)` when matching on reference types
+- **Rust Edition 2024 raw strings**: `r"..."` CANNOT contain `"` — must use `r#"..."#` or `r##"..."##`
+- **Rust Edition 2024 guarded strings**: `"#"` triggers "unprefixed guarded string literal" — use `std::iter::repeat('#').take(n).collect::<String>()`
+- **Regex patterns with `"`**: always use `r#"..."#` or `r##"..."##` delimiters — a single broken raw string causes cascading parser errors across the whole file
+- **Always fix the FIRST compiler error first** — subsequent errors are often cascading from the first one
 
 ### adk-rust 0.7.0 API Reference (verified from source)
 
@@ -109,4 +115,45 @@ Started: Wed May  6 23:34:32 +07 2026
   - `AdkError::tool(msg)` produces `"tool.internal: {msg}"` in Display
   - `parse_line_range("10-20", 100)` returns `(9, 20)` — 0-indexed start, 1-indexed end. Use `take(end - start)` not `take(end - start + 1)`
   - Sandbox `resolve_path` bug: when path contains `../../` and neither file nor parent exists, the raw path (with `..`) is returned and `starts_with` passes as string prefix. Fixed by adding early `..` check on cleaned path
+---
+
+## Thu May 7 23:45 +07 2026 - US-004
+- Implemented ShellExec, Grep, Glob tools using `adk_tool` #[tool] macro
+- ShellExec: runs shell commands via `sh -c` with configurable timeout (default 120s), runs in sandbox root directory
+- Destructive command detection: rm -rf /, rm -rf ~, git push --force, git reset --hard, DROP TABLE, DELETE FROM, mkfs, dd if=, chmod 777 / — returns `needs_approval: true` JSON instead of executing
+- Output truncation at 50KB to prevent overwhelming agent context
+- Grep: regex search across files with optional path scoping, glob filter, and case-insensitive mode; limits results to 200 matches
+- Glob: find files by pattern with results relative to sandbox root
+- Each tool module has its own thread-local sandbox context (separate from file.rs)
+- `!` shell escape already wired in `commands.rs` — runs command directly in sandbox root
+- 33 tests pass (19 new: 10 shell tests + 9 search tests)
+- Files changed: src/tools/shell.rs (full rewrite), src/tools/search.rs (full rewrite), src/tools/mod.rs (register new tools)
+- **Learnings for future iterations:**
+  - Each tool module needs its own `thread_local!` sandbox context (shell, search, file all separate) — they can't share because `set_sandbox` is per-module
+  - Edition 2024 implicitly borrows in match patterns — `if let Some(ref x)` should be `if let Some(x)` when matching on a reference type
+  - The #[tool] macro generates PascalCase structs: `shell_exec` → `ShellExec`, `grep` → `Grep`, `glob` → `Glob` — register as `Arc::new(shell::ShellExec)`, `Arc::new(search::Grep)`, `Arc::new(search::Glob)`
+  - Destructive detection is in sandbox but called from shell tool — sandbox returns `DestructiveCheck` struct; tool converts to JSON response with `needs_approval: true`
+  - `glob::Pattern` can match against filename OR path — use `matches_path()` for relative path matching
+---
+
+## Thu May 7 23:45 +07 2026 - US-005
+- Implemented WebSearch and WebFetch tools using `adk_tool` #[tool] macro
+- WebSearch: dual-provider search — Serper.dev API (primary, needs SERPER_API_KEY) or DuckDuckGo HTML parsing (fallback, no key needed)
+- WebFetch: fetch URL content with HTML→text and HTML→markdown conversion, configurable format and max_length, safe UTF-8 truncation
+- Rate limiter using `OnceLock<RateLimiter>` with sliding window (default: 10 requests per 60 seconds, global across threads)
+- HTML utilities: remove_script_style, strip_all_tags, decode_html_entities, percent_decode, html_to_text, html_to_markdown
+- DuckDuckGo HTML parser: regex-based extraction of result links (uddg parameter), titles, and snippets
+- HTML→Markdown conversion: headers, bold/italic, links, code blocks, inline code, list items, entity decoding
+- Web tools don't need sandbox scoping (operate on URLs, not local files)
+- 47 tests pass (14 new web tests: 10 unit + 4 async integration)
+- Files changed: src/tools/web.rs (full rewrite), src/tools/mod.rs (register WebSearch + WebFetch)
+- **Learnings for future iterations:**
+  - Rust Edition 2024: raw strings `r"..."` CANNOT contain `"` characters — must use `r#"..."#` or `r##"..."##`
+  - Rust Edition 2024: `"#".repeat(n)` triggers "unprefixed guarded string literal" — use `std::iter::repeat('#').take(n).collect::<String>()` instead
+  - Regex patterns with `"` need `r#"..."#` or `r##"..."##` raw string delimiters in Edition 2024
+  - A single broken raw string at line 165 caused 23+ cascading parser errors — always fix the FIRST error first
+  - `OnceLock<RateLimiter>` with `Mutex<Vec<Instant>>` is `Sync` — safe for global static rate limiter since `Instant` is `Send + Sync`
+  - Web tools don't need sandbox context — they operate on URLs, not local filesystem paths
+  - `reqwest::Client::builder().timeout().redirect().build()` for custom HTTP client config
+  - `content.is_char_boundary(idx)` for safe UTF-8 string slicing during truncation
 ---

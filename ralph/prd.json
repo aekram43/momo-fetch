@@ -66,8 +66,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1.4 — depends on US-001. Uses #[tool] macro"
+      "passes": true,
+      "notes": "Phase 1.4 — depends on US-001. Uses #[tool] macro. Implemented ShellExec, Grep, Glob with destructive command detection and needs_approval flag. ! shell escape already wired in commands.rs."
     },
     {
       "id": "US-005",
@@ -81,8 +81,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1.9 — depends on US-001. Uses #[tool] macro"
+      "passes": true,
+      "notes": "Phase 1.9 — depends on US-001. Uses #[tool] macro. Implemented WebSearch (Serper.dev + DuckDuckGo fallback) and WebFetch (HTML to text/markdown) with rate limiting (10 req/min)."
     },
     {
       "id": "US-006",
