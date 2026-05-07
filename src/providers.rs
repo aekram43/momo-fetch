@@ -32,34 +32,36 @@ pub struct ProviderManager {
 }
 
 impl ProviderManager {
-    /// Auto-detect provider from environment variables.
+    /// Auto-detect provider from environment variables or OS keychain.
     ///
     /// Priority order:
-    /// 1. `ANTHROPIC_API_KEY` → Anthropic Claude
-    /// 2. `OPENAI_API_KEY` → OpenAI GPT
-    /// 3. `DEEPSEEK_API_KEY` → DeepSeek
-    /// 4. `GROQ_API_KEY` → Groq
-    /// 5. `OPENROUTER_API_KEY` → OpenRouter
+    /// 1. `ANTHROPIC_API_KEY` env or keychain → Anthropic Claude
+    /// 2. `OPENAI_API_KEY` env or keychain → OpenAI GPT
+    /// 3. `DEEPSEEK_API_KEY` env or keychain → DeepSeek
+    /// 4. `GROQ_API_KEY` env or keychain → Groq
+    /// 5. `OPENROUTER_API_KEY` env or keychain → OpenRouter
     /// 6. Fallback → Ollama (localhost)
     pub fn from_env() -> anyhow::Result<Self> {
+        use crate::config::secrets::SecretStore;
+
         let (provider, model, llm): (String, String, Arc<dyn Llm>) =
-            if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            if let Ok(key) = SecretStore::get("anthropic") {
                 let model = "claude-sonnet-4-20250514".to_string();
                 let client = AnthropicClient::new(AnthropicConfig::new(&key, &model))?;
                 ("anthropic".into(), model, Arc::new(client))
-            } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            } else if let Ok(key) = SecretStore::get("openai") {
                 let model = "gpt-4o".to_string();
                 let client = OpenAIClient::new(OpenAIConfig::new(&key, &model))?;
                 ("openai".into(), model, Arc::new(client))
-            } else if let Ok(key) = std::env::var("DEEPSEEK_API_KEY") {
+            } else if let Ok(key) = SecretStore::get("deepseek") {
                 let model = "deepseek-chat".to_string();
                 let client = DeepSeekClient::chat(&key)?;
                 ("deepseek".into(), model, Arc::new(client))
-            } else if let Ok(key) = std::env::var("GROQ_API_KEY") {
+            } else if let Ok(key) = SecretStore::get("groq") {
                 let model = "llama-3.3-70b-versatile".to_string();
                 let client = GroqClient::new(GroqConfig::new(&key, &model))?;
                 ("groq".into(), model, Arc::new(client))
-            } else if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+            } else if let Ok(key) = SecretStore::get("openrouter") {
                 let model = "anthropic/claude-sonnet-4".to_string();
                 let client = OpenRouterClient::new(OpenRouterConfig::new(&key, &model))?;
                 ("openrouter".into(), model, Arc::new(client))
@@ -135,38 +137,40 @@ impl ProviderManager {
         &self.current_model
     }
 
-    /// List available providers based on configured API keys.
+    /// List available providers based on configured API keys (env or keychain).
     pub fn list_available(&self) -> Vec<ProviderInfo> {
+        use crate::config::secrets::SecretStore;
+
         let mut list = Vec::new();
-        if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        if SecretStore::get("anthropic").is_ok() {
             list.push(ProviderInfo {
                 provider: "anthropic".into(),
                 default_model: "claude-sonnet-4-20250514".into(),
                 available: true,
             });
         }
-        if std::env::var("OPENAI_API_KEY").is_ok() {
+        if SecretStore::get("openai").is_ok() {
             list.push(ProviderInfo {
                 provider: "openai".into(),
                 default_model: "gpt-4o".into(),
                 available: true,
             });
         }
-        if std::env::var("DEEPSEEK_API_KEY").is_ok() {
+        if SecretStore::get("deepseek").is_ok() {
             list.push(ProviderInfo {
                 provider: "deepseek".into(),
                 default_model: "deepseek-chat".into(),
                 available: true,
             });
         }
-        if std::env::var("GROQ_API_KEY").is_ok() {
+        if SecretStore::get("groq").is_ok() {
             list.push(ProviderInfo {
                 provider: "groq".into(),
                 default_model: "llama-3.3-70b-versatile".into(),
                 available: true,
             });
         }
-        if std::env::var("OPENROUTER_API_KEY").is_ok() {
+        if SecretStore::get("openrouter").is_ok() {
             list.push(ProviderInfo {
                 provider: "openrouter".into(),
                 default_model: "anthropic/claude-sonnet-4".into(),
@@ -193,22 +197,24 @@ impl ProviderManager {
 
     /// Create a model instance for any supported provider.
     fn create_model(&self, provider: &str, model: &str) -> anyhow::Result<Arc<dyn Llm>> {
+        use crate::config::secrets::SecretStore;
+
         match provider {
             "anthropic" => {
-                let key = std::env::var("ANTHROPIC_API_KEY")
-                    .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY not set"))?;
+                let key = SecretStore::get("anthropic")
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 let client = AnthropicClient::new(AnthropicConfig::new(&key, model))?;
                 Ok(Arc::new(client))
             }
             "openai" => {
-                let key = std::env::var("OPENAI_API_KEY")
-                    .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY not set"))?;
+                let key = SecretStore::get("openai")
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 let client = OpenAIClient::new(OpenAIConfig::new(&key, model))?;
                 Ok(Arc::new(client))
             }
             "deepseek" => {
-                let key = std::env::var("DEEPSEEK_API_KEY")
-                    .map_err(|_| anyhow::anyhow!("DEEPSEEK_API_KEY not set"))?;
+                let key = SecretStore::get("deepseek")
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 // Use chat() for deepseek-chat models, reasoner() for deepseek-reasoner
                 if model.contains("reasoner") {
                     let client = DeepSeekClient::reasoner(&key)?;
@@ -219,8 +225,8 @@ impl ProviderManager {
                 }
             }
             "groq" => {
-                let key = std::env::var("GROQ_API_KEY")
-                    .map_err(|_| anyhow::anyhow!("GROQ_API_KEY not set"))?;
+                let key = SecretStore::get("groq")
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 let client = GroqClient::new(GroqConfig::new(&key, model))?;
                 Ok(Arc::new(client))
             }
@@ -229,8 +235,8 @@ impl ProviderManager {
                 Ok(Arc::new(client))
             }
             "openrouter" => {
-                let key = std::env::var("OPENROUTER_API_KEY")
-                    .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY not set"))?;
+                let key = SecretStore::get("openrouter")
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
                 let client = OpenRouterClient::new(OpenRouterConfig::new(&key, model))?;
                 Ok(Arc::new(client))
             }

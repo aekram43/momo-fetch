@@ -26,6 +26,7 @@ tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 rustyline = "18"
 colored = "2"
+rpassword = "7"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -48,6 +49,7 @@ tempfile = "3"
 reqwest = { version = "0.13", features = ["json", "rustls"] }
 
 # Configuration & secrets
+keyring-core = "1.0"
 dotenvy = "0.15"
 dirs = "6"
 

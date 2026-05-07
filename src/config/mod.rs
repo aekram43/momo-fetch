@@ -1,3 +1,5 @@
+pub mod secrets;
+
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 

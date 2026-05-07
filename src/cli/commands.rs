@@ -16,6 +16,9 @@ pub enum Command {
     McpList,
     McpAdd { name: String, command: String },
     McpRemove { name: String },
+    KeySet { provider: String },
+    KeyList,
+    KeyDelete { provider: String },
     Quit,
     ShellEscape { command: String },
     Unknown(String),
@@ -105,6 +108,29 @@ impl Command {
                             Some(Self::Unknown("/mcp remove <name>".to_string()))
                         } else {
                             Some(Self::McpRemove { name })
+                        }
+                    }
+                    _ => Some(Self::Unknown(input.to_string())),
+                }
+            }
+            &"key" => {
+                let sub = parts.get(1).unwrap_or(&"");
+                match *sub {
+                    "set" => {
+                        let provider = parts.get(2).unwrap_or(&"").to_string();
+                        if provider.is_empty() {
+                            Some(Self::Unknown("/key set <provider>".to_string()))
+                        } else {
+                            Some(Self::KeySet { provider })
+                        }
+                    }
+                    "list" | "" => Some(Self::KeyList),
+                    "delete" | "rm" => {
+                        let provider = parts.get(2).unwrap_or(&"").to_string();
+                        if provider.is_empty() {
+                            Some(Self::Unknown("/key delete <provider>".to_string()))
+                        } else {
+                            Some(Self::KeyDelete { provider })
                         }
                     }
                     _ => Some(Self::Unknown(input.to_string())),
@@ -414,6 +440,91 @@ impl Command {
                 eprint!("{}", String::from_utf8_lossy(&output.stderr));
                 Ok(true)
             }
+            Self::KeySet { provider } => {
+                use crate::config::secrets::{SecretStore, default_model_for_provider};
+
+                println!("Enter API key for {provider} (default model: {}):", default_model_for_provider(provider));
+                println!("  (The key will be stored in your OS keychain)");
+
+                // Read key from stdin without echo
+                let key = rpassword::prompt_password("API key: ")
+                    .map_err(|e| anyhow::anyhow!("Failed to read input: {e}"))?;
+
+                if key.is_empty() {
+                    println!("{} No key provided", "\u{2717}".red());
+                    return Ok(true);
+                }
+
+                // Validate: warn if key looks too short
+                if key.len() < 8 {
+                    println!(
+                        "{} Warning: key seems very short ({} chars). Proceeding anyway...",
+                        "\u{26a0}".yellow(),
+                        key.len()
+                    );
+                }
+
+                match SecretStore::set(&provider, &key) {
+                    Ok(()) => {
+                        println!(
+                            "{} Stored API key for '{provider}' in OS keychain",
+                            "\u{2713}".green()
+                        );
+                        println!(
+                            "  You can now use /provider {} or /model {}",
+                            provider, default_model_for_provider(provider)
+                        );
+                    }
+                    Err(e) => {
+                        println!("{} Failed to store key: {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
+            Self::KeyList => {
+                use crate::config::secrets::{SecretStore, mask_key};
+
+                let entries = SecretStore::list();
+                if entries.is_empty() {
+                    println!("No secrets found.");
+                    println!("Use /key set <provider> to store an API key.");
+                    println!("Or set environment variables (e.g., ANTHROPIC_API_KEY).");
+                } else {
+                    println!("Secrets (env vars take priority over keychain):");
+                    for (provider, source) in &entries {
+                        let key = SecretStore::get(provider);
+                        let masked = match &key {
+                            Ok(k) => format!("{} ({} chars)", mask_key(k), k.len()),
+                            Err(_) => "(error reading)".to_string(),
+                        };
+                        let source_marker = match source.as_str() {
+                            "env" => " [env]".dimmed().to_string(),
+                            "keychain" => " [keychain]".dimmed().to_string(),
+                            "both" => " [env+keychain]".dimmed().to_string(),
+                            "none" => " [no key needed]".dimmed().to_string(),
+                            _ => String::new(),
+                        };
+                        println!("  {provider}: {masked}{source_marker}");
+                    }
+                }
+                Ok(true)
+            }
+            Self::KeyDelete { provider } => {
+                use crate::config::secrets::SecretStore;
+
+                match SecretStore::delete(provider) {
+                    Ok(()) => {
+                        println!(
+                            "{} Deleted API key for '{provider}' from OS keychain",
+                            "\u{2713}".green()
+                        );
+                    }
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
             Self::Unknown(cmd) => {
                 println!("Unknown command: {cmd}");
                 println!("Type /help for available commands.");
@@ -438,6 +549,9 @@ impl Command {
   /mcp list            List MCP servers
   /mcp add <n> <cmd>   Add MCP server (e.g., /mcp add fs npx -y @mcp/filesystem /tmp)
   /mcp remove <name>   Remove MCP server
+  /key set <provider>  Store API key in OS keychain
+  /key list            List stored providers (keys masked)
+  /key delete <name>   Delete API key from keychain
   /quit                Exit
   !<command>           Run shell command directly"#
     }

@@ -29,6 +29,9 @@ Started: Wed May  6 23:34:32 +07 2026
 - **Sub-agent thread-local context**: must be set BEFORE `runner.run_str()`, not during agent build — Runner invokes tools on the same tokio thread pool so thread-locals are visible during tool execution
 - **ProviderManager::from_current()** wraps an existing `Arc<dyn Llm>` without re-reading env vars — use for sub-agent context sharing
 - **ParallelAgent::new().with_shared_state()** for shared-memory parallel sub-agents; `SequentialAgent::new()` for ordered execution
+- **Secret management**: `SecretStore::get(provider)` checks env var first, then OS keychain — used by all provider creation in ProviderManager. Never store secrets in config files or logs
+- **keyring-core 1.0.0**: cross-platform keychain API — same Entry/Service pattern for macOS Keychain, Linux Secret Service, Windows Credential Manager
+- **Key tests in CI**: wrap `SecretStore::set()` in an `if is_err() { return; }` guard — keychain may not be available in headless/CI environments
 
 ### adk-rust 0.7.0 API Reference (verified from source)
 
@@ -436,4 +439,25 @@ Started: Wed May  6 23:34:32 +07 2026
   - `extract_snippet()` uses word boundary detection (newline/period/space) for clean context extraction — rfind for start, find for end
   - The `#[tool]` macro generates PascalCase struct names: `kms_read` → `KmsRead`, `kms_search` → `KmsSearch`, `kms_write` → `KmsWrite`
   - KMS tools are registered in BOTH `build_tool_registry()` and `build_sub_agent_tool_registry()` — sub-agents should also have access to the project wiki
+---
+
+## Fri May 7 16:00 +07 2026 - US-018
+- Implemented OS keychain secret management using keyring-core 1.0
+- SecretStore: `get(provider)` (env priority, keychain fallback), `set(provider, key)`, `delete(provider)`, `list()` (with source detection: env/keychain/both/none)
+- ProviderManager updated: `from_env()`, `create_model()`, `list_available()` all use SecretStore instead of direct `std::env::var()` calls
+- Slash commands: `/key set <provider>` (interactive password prompt via rpassword), `/key list` (masked keys with source), `/key delete <provider>`
+- Error types: SecretError (NotFound, KeyringError, NotSet) with helpful messages suggesting env var or /key set
+- Helper: `mask_key()` shows first 4 + last 4 chars, middle masked with asterisks
+- Helper: `default_model_for_provider()` for context in /key set command
+- .env fallback works automatically — env vars take priority over keychain
+- 181 tests pass (7 new: env_var_for_known, env_var_for_custom, mask_key variants, default_model, list_without_secrets, get_fallback, set_get_delete_roundtrip)
+- Files changed: Cargo.toml (keyring-core, rpassword), src/config/secrets.rs (new), src/config/mod.rs (pub mod secrets), src/providers.rs (use SecretStore), src/cli/commands.rs (KeySet/KeyList/KeyDelete commands + help text)
+- **Learnings for future iterations:**
+  - `keyring-core` 1.0.0 uses `keyring_core::Entry::new(service, user)` for keychain entries — `get_password()` reads, `set_password()` writes, `delete_credential()` removes
+  - `keyring_core::Error::NoEntry` variant means "secret not found" — must be handled explicitly for graceful fallback
+  - In environments without a keychain (CI, headless), `Entry::new()` and `set_password()` can fail — tests must handle this gracefully (skip test if keychain unavailable)
+  - `rpassword::prompt_password()` reads input without echo — perfect for API key entry in REPL
+  - Rust Edition 2024: `std::env::set_var()` and `remove_var()` are unsafe — avoid in tests; use keychain-only tests instead
+  - Env var always takes priority over keychain — this means if `ANTHROPIC_API_KEY` is set, it overrides whatever is in the keychain. This is intentional for runtime overrides
+  - `keyring-core` handles macOS Keychain, Linux Secret Service (via dbus), and Windows Credential Manager transparently via the same API
 ---
