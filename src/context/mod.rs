@@ -90,6 +90,19 @@ impl ContextBuilder {
         &self.agents_md_content
     }
 
+    /// Get relative paths of loaded context files for display.
+    pub fn loaded_file_relative_paths(&self) -> Vec<String> {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        self.agents_md_content
+            .iter()
+            .map(|(p, _)| {
+                p.strip_prefix(&cwd)
+                    .map(|rel| format!("./{}", rel.display()))
+                    .unwrap_or_else(|_| format!("{}", p.display()))
+            })
+            .collect()
+    }
+
     fn load_kms_toc(project_path: &Path) -> anyhow::Result<Option<String>> {
         let kms_dir = project_path.join(".kms");
         if !kms_dir.exists() {
@@ -111,5 +124,172 @@ impl ContextBuilder {
         } else {
             Ok(Some(tocs.join("\n\n")))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_discovers_agents_md_in_project_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("AGENTS.md"), "# Project instructions\nUse Rust 2024 edition").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        assert_eq!(ctx.agents_md_content.len(), 1);
+        assert!(ctx.agents_md_content[0].1.contains("Use Rust 2024 edition"));
+    }
+
+    #[test]
+    fn test_discovers_claude_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("CLAUDE.md"), "# Claude instructions").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        assert_eq!(ctx.agents_md_content.len(), 1);
+        assert!(ctx.agents_md_content[0].1.contains("Claude instructions"));
+    }
+
+    #[test]
+    fn test_discovers_harness_agents_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        let harness_dir = project.join(".harness");
+        fs::create_dir_all(&harness_dir).unwrap();
+        fs::write(harness_dir.join("AGENTS.md"), "# Harness-specific rules").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        assert_eq!(ctx.agents_md_content.len(), 1);
+        assert!(ctx.agents_md_content[0].1.contains("Harness-specific rules"));
+    }
+
+    #[test]
+    fn test_walks_up_directory_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Root has AGENTS.md
+        fs::write(tmp.path().join("AGENTS.md"), "# Root instructions").unwrap();
+
+        // Project subdir has CLAUDE.md
+        let project = tmp.path().join("subdir").join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("CLAUDE.md"), "# Project instructions").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        // Should find both: root AGENTS.md and project CLAUDE.md
+        assert!(ctx.agents_md_content.len() >= 2);
+
+        // Closer files (project) should be last (higher priority)
+        let last = ctx.agents_md_content.last().unwrap();
+        assert!(last.1.contains("Project instructions"));
+    }
+
+    #[test]
+    fn test_closer_files_override_further() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Root has AGENTS.md with root content
+        fs::write(tmp.path().join("AGENTS.md"), "# Root level").unwrap();
+
+        // Project also has AGENTS.md with project content
+        let project = tmp.path().join("deep").join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("AGENTS.md"), "# Project level").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        let prompt = ctx.system_prompt();
+
+        // Both should appear, with project level content coming last
+        assert!(prompt.contains("Root level"));
+        assert!(prompt.contains("Project level"));
+
+        // Project content appears after root content (higher priority)
+        let root_pos = prompt.find("Root level").unwrap();
+        let project_pos = prompt.find("Project level").unwrap();
+        assert!(project_pos > root_pos, "Project (closer) should come after root (further)");
+    }
+
+    #[test]
+    fn test_no_files_no_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("empty-project");
+        fs::create_dir_all(&project).unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        assert!(ctx.agents_md_content.is_empty());
+
+        // System prompt should still work
+        let prompt = ctx.system_prompt();
+        assert!(prompt.contains("You are Agent Harness"));
+    }
+
+    #[test]
+    fn test_system_prompt_contains_base_instruction() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        let prompt = ctx.system_prompt();
+        assert!(prompt.contains("You are Agent Harness"));
+        assert!(prompt.contains("AI coding assistant"));
+    }
+
+    #[test]
+    fn test_system_prompt_includes_context_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("AGENTS.md"), "Always use tabs for indentation").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        let prompt = ctx.system_prompt();
+        assert!(prompt.contains("Always use tabs for indentation"));
+        assert!(prompt.contains("--- Context from"));
+    }
+
+    #[test]
+    fn test_kms_toc_included_in_prompt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        let kms_dir = project.join(".kms").join("conventions");
+        fs::create_dir_all(kms_dir.join("pages")).unwrap();
+        fs::write(kms_dir.join("index.md"), "# Conventions\n- Use Rust 2024").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        let prompt = ctx.system_prompt();
+        assert!(prompt.contains("Project Knowledge Base"));
+        assert!(prompt.contains("Use Rust 2024"));
     }
 }

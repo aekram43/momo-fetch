@@ -25,17 +25,9 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
     let short_id = &sid[..8.min(sid.len())];
     println!("Session: {short_id}");
 
-    // Show loaded context files
-    let loaded = harness.context_builder().loaded_files();
-    if !loaded.is_empty() {
-        let paths: Vec<&str> = loaded
-            .iter()
-            .map(|(p, _)| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("?")
-            })
-            .collect();
+    // Show loaded context files with relative paths
+    let paths = harness.context_builder().loaded_file_relative_paths();
+    if !paths.is_empty() {
         println!("Loaded context from: {}", paths.join(", "));
     }
 
