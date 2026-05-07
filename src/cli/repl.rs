@@ -13,6 +13,10 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
         harness.provider_mgr().current_provider(),
         harness.provider_mgr().current_model_name(),
     );
+    println!(
+        "Session: {}",
+        &harness.current_session_id()[..8.min(harness.current_session_id().len())]
+    );
     println!("Type /help for commands, Ctrl+D to quit.\n");
 
     let mut rl = DefaultEditor::new()?;

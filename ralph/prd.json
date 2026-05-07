@@ -115,8 +115,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Phase 1.6 — depends on US-001. Uses adk-session SQLite"
+      "passes": true,
+      "notes": "Phase 1.6 — depends on US-001. Uses adk-session SQLite. Implemented SessionManager wrapping SqliteSessionService with create/list/get/delete/resume. /sessions and /resume slash commands wired. Auto-creates session on startup; --resume flag for CLI resumption."
     },
     {
       "id": "US-008",

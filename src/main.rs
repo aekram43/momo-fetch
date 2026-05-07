@@ -5,6 +5,7 @@ mod harness;
 mod memory;
 mod providers;
 mod sandbox;
+mod session;
 mod tools;
 
 use clap::Parser;

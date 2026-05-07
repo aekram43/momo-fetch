@@ -3,6 +3,7 @@ Started: Wed May  6 23:34:32 +07 2026
 
 ## Codebase Patterns
 - adk-rust 0.7.0 is the current version (PRD said 0.6.0 but that doesn't exist — use 0.7.0)
+- adk-rust `"sessions"` feature does NOT include sqlite — must add `adk-session = { version = "0.7.0", features = ["sqlite"] }` separately in Cargo.toml
 - adk-rust features for providers: only `anthropic` and `gemini` are direct features. For openai/deepseek/ollama/groq/openrouter, use `adk-model` crate directly with its features
 - **Import pattern for adk-model providers**: `use adk_model::anthropic::{AnthropicClient, AnthropicConfig}` etc. — NOT from `adk_rust::prelude::*` (prelude re-exports are gated by adk-rust features, not adk-model features)
 - `adk_rust::prelude::Llm` trait is always available from adk-core
@@ -181,4 +182,23 @@ Started: Wed May  6 23:34:32 +07 2026
   - adk-rust `ToolConfirmationPolicy` is available via `adk_rust::ToolConfirmationPolicy` (re-exported from adk-core through `pub use adk_core::*`)
   - `ToolConfirmationPolicy::PerTool(BTreeSet<String>)` uses `with_tool(name)` builder pattern
   - `PermissionMode::from_str()` with case-insensitive parsing is useful for config files
+---
+
+## Thu May 7 23:45 +07 2026 - US-007
+- Implemented SessionManager wrapping adk-session SqliteSessionService with SQLite persistence
+- Session auto-creation on Harness startup, with optional `--resume <id>` CLI flag
+- `/sessions` command lists all sessions (most recently updated first) with event count and timestamp
+- `/resume <id>` command switches to an existing session
+- Harness tracks `current_session_id` and exposes `new_session()` / `resume_session()` methods
+- SessionManager also provides `new_in_memory()` for test isolation
+- In-memory and SQLite integration tests: 7 new tests (71 total pass)
+- Files changed: Cargo.toml (added adk-session sqlite), src/main.rs (mod session), src/session.rs (new), src/harness.rs (integrate SessionManager), src/config/mod.rs (resume_session_id), src/cli/commands.rs (sessions + resume), src/cli/repl.rs (session display)
+- **Learnings for future iterations:**
+  - `adk-rust` `"sessions"` feature does NOT include sqlite — must add `adk-session = { version = "0.7.0", features = ["sqlite"] }` as separate Cargo.toml dependency
+  - `SqliteSessionService::new("sqlite:path?mode=rwc")` — use `?mode=rwc` for read-write-create; parent dir must exist
+  - `migrate()` is idempotent — safe to call on every startup; creates sessions, events, app_states, user_states tables
+  - `Events` trait uses `.len()` not `.count()` (it's not an Iterator)
+  - `Session` trait's `state()` returns `&dyn State` (immutable) — direct mutation requires going through the service API
+  - `SessionService` trait is `Arc`-safe — wrap in `Arc<dyn SessionService>` for sharing with runner
+  - The `CreateRequest` auto-generates a UUID when `session_id: None`
 ---

@@ -165,11 +165,38 @@ impl Command {
                 Ok(true)
             }
             Self::Sessions => {
-                println!("Sessions: not yet implemented");
+                match harness.session_mgr().list_sessions().await {
+                    Ok(sessions) => {
+                        if sessions.is_empty() {
+                            println!("No sessions found.");
+                        } else {
+                            println!("Sessions:");
+                            let current_id = harness.current_session_id();
+                            for s in &sessions {
+                                let marker = if s.id == current_id { " ← current" } else { "" };
+                                println!("  {s}{marker}");
+                            }
+                        }
+                    }
+                    Err(e) => println!("{} Failed to list sessions: {e}", "✗".red()),
+                }
                 Ok(true)
             }
             Self::Resume { id } => {
-                println!("Resume session {id}: not yet implemented");
+                if id.is_empty() {
+                    println!("{} Usage: /resume <session-id>", "✗".red());
+                    return Ok(true);
+                }
+                match harness.resume_session(id).await {
+                    Ok(()) => {
+                        println!(
+                            "{} Resumed session {}",
+                            "✓".green(),
+                            harness.current_session_id()
+                        );
+                    }
+                    Err(e) => println!("{} Failed to resume session: {e}", "✗".red()),
+                }
                 Ok(true)
             }
             Self::ShellEscape { command } => {

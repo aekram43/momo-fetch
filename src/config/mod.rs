@@ -14,6 +14,7 @@ pub struct HarnessConfig {
     pub session_db_path: PathBuf,
     pub permission_mode: PermissionMode,
     pub provider: ProviderSettings,
+    pub resume_session_id: Option<String>,
 }
 
 /// Settings file schema (both global and project-level).
@@ -103,6 +104,7 @@ impl HarnessConfig {
             session_db_path: config_dir.join("sessions.db"),
             permission_mode,
             provider,
+            resume_session_id: args.resume.clone(),
         })
     }
 

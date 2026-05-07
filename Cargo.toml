@@ -16,6 +16,7 @@ adk-model = { version = "0.7.0", features = [
     "openai", "anthropic", "deepseek", "ollama", "groq", "openrouter"
 ] }
 adk-tool = "0.6"
+adk-session = { version = "0.7.0", features = ["sqlite"] }
 schemars = "0.8"
 
 # Async runtime
