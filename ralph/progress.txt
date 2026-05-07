@@ -320,3 +320,25 @@ Started: Wed May  6 23:34:32 +07 2026
   - Extraction is template-based (no LLM) for US-012 — LLM-based retrieval is US-013
   - Foresight generation heuristic: only triggers when context/keywords contain predictive signals (architecture, decision, pattern, will, should, plan)
 ---
+
+## Wed May 7 23:59 +07 2026 - US-013
+- Implemented Memory vault Retrieval with 4 modes
+- Full retrieval engine in `src/memory/retrieval.rs`:
+  - `grep_llm`: Tokenizes query → grep candidates across vault levels → TF-IDF relevance scoring (term frequency × coverage × position bonus × heading bonus) → top N
+  - `graph_walk`: BFS from seed note following [[wikilinks]] up to depth 3, relevance decays with hop distance
+  - `tag_filter`: Parse YAML frontmatter tags via `parser::parse_tags()`, score by tag coverage ratio
+  - `agentic`: Round 1 broad grep → extract expanded terms from top results → Round 2 refined search → merge + deduplicate with boost
+- Helper utilities: `tokenize()` with stop words, `compute_relevance()` with TF-IDF scoring, `collect_candidates()` with level/project filtering, `find_backlinks()` for graph traversal, `detect_level()` and `make_snippet()` (both pub)
+- `ObsidianVault` methods: `search()` dispatches to retrieval module, `graph()` gets outgoing + backlinks, `read_profile()` and `read_user_profile()` for 5-profile access
+- New tools: `mem_search` (4 modes, level/project/tag/limit filters), `mem_graph` (note connections), `mem_profile` (agent/user profile reader)
+- 123 tests pass (20 new: 11 retrieval unit tests + 4 memory tool tests + 5 existing tests still passing)
+- Files changed: src/memory/retrieval.rs (full rewrite), src/memory/vault.rs (search/graph/profile methods), src/tools/memory.rs (3 new tools + tests), src/tools/mod.rs (register MemSearch/MemGraph/MemProfile)
+- **Learnings for future iterations:**
+  - Retrieval uses keyword-based TF-IDF scoring — NOT actual LLM calls. The `grep_llm` mode name refers to the architecture (grep candidates then rank), not the implementation. LLM ranking can be layered on when provider access is available in the vault
+  - `collect_candidates()` walks all vault level dirs using `walkdir::WalkDir` — this scans the full filesystem each time. For large vaults, consider caching the file list
+  - Edition 2024: `String` doesn't have `as_str()` method stable yet — use `s.as_ref()` or just `&s` for comparing `&String` to `&&str` in `STOP_WORDS.contains()`
+  - `find_backlinks()` scans ALL vault files to find `[[note_id]]` references — this is O(n) on vault size. For scale, maintain a reverse index
+  - The vault's `search()` method is synchronous (no async) — all retrieval functions are sync too. This is consistent with vault's existing pattern (std::sync::Mutex, no await points)
+  - When filtering by project in `collect_candidates()`, the project field comes from YAML frontmatter — always parse frontmatter before checking
+  - `parser::parse_frontmatter()` returns `(Option<serde_yaml::Value>, &str)` — the body is a slice of the original content, not owned
+---

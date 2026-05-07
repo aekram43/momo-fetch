@@ -45,5 +45,8 @@ pub fn build_tool_registry(
         Arc::new(memory::MemExtract),
         Arc::new(memory::MemStats),
         Arc::new(memory::MemRead),
+        Arc::new(memory::MemSearch),
+        Arc::new(memory::MemGraph),
+        Arc::new(memory::MemProfile),
     ]
 }

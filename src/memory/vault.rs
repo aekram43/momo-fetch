@@ -312,10 +312,76 @@ impl ObsidianVault {
         }
     }
 
-    /// Search using specified retrieval mode (placeholder for US-013).
-    pub fn search(&self, _query: &MemoryQuery) -> anyhow::Result<Vec<MemoryResult>> {
-        // TODO: Implement retrieval modes in US-013
-        Ok(vec![])
+    /// Search using specified retrieval mode.
+    pub fn search(&self, query: &MemoryQuery) -> anyhow::Result<Vec<MemoryResult>> {
+        match query.mode {
+            crate::memory::types::RetrievalMode::GrepLlm => {
+                crate::memory::retrieval::grep_llm(self, query)
+            }
+            crate::memory::types::RetrievalMode::GraphWalk => {
+                crate::memory::retrieval::graph_walk(self, query)
+            }
+            crate::memory::types::RetrievalMode::TagFilter => {
+                crate::memory::retrieval::tag_filter(self, query)
+            }
+            crate::memory::types::RetrievalMode::Agentic => {
+                crate::memory::retrieval::agentic(self, query)
+            }
+        }
+    }
+
+    /// Get connected notes (outgoing wikilinks + backlinks) for a note.
+    pub fn graph(&self, note_id: &str) -> anyhow::Result<Vec<MemoryResult>> {
+        let mut results = Vec::new();
+
+        // Outgoing links: parse wikilinks from the note content
+        if let Some((_, content)) = self.read_note(note_id)? {
+            let links = parser::extract_wikilinks(&content);
+            for link in links {
+                let clean_id = link.split('#').next().unwrap_or(&link).to_string();
+                if let Some((path, link_content)) = self.read_note(&clean_id)? {
+                    results.push(MemoryResult {
+                        ref_id: clean_id,
+                        level: crate::memory::retrieval::detect_level(&path),
+                        relevance_score: 0.9,
+                        snippet: crate::memory::retrieval::make_snippet(&link_content, &[]),
+                        path,
+                    });
+                }
+            }
+        }
+
+        // Backlinks: find all notes that reference this note
+        let backlinks = crate::memory::retrieval::find_backlinks(self, note_id)?;
+        results.extend(backlinks);
+
+        // Deduplicate by ref_id
+        let mut seen = std::collections::HashSet::new();
+        results.retain(|r| seen.insert(r.ref_id.clone()));
+
+        Ok(results)
+    }
+
+    /// Read the agent profile from the vault.
+    pub fn read_profile(&self) -> anyhow::Result<Option<(PathBuf, String)>> {
+        let profile_path = self.vault_path.join("5-profile").join("agent-profile.md");
+        if profile_path.exists() {
+            let content = std::fs::read_to_string(&profile_path)?;
+            Ok(Some((profile_path, content)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Read the user profile from the vault.
+    pub fn read_user_profile(&self) -> anyhow::Result<Option<(PathBuf, String)>> {
+        let profile_path = self.vault_path.join("5-profile").join("user-profile.md");
+        if profile_path.exists() {
+            let content = std::fs::read_to_string(&profile_path)?;
+            Ok(Some((profile_path, content)))
+        } else {
+            Ok(None)
+        }
     }
 
     // ─── Config Persistence ──────────────────────────────────────

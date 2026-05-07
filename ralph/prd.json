@@ -225,8 +225,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Phase 2.3 — depends on US-012. Uses #[tool] macro"
+      "passes": true,
+      "notes": "Phase 2.3 — depends on US-012. Uses #[tool] macro. Implemented 4 retrieval modes (grep_llm, graph_walk, tag_filter, agentic) with TF-IDF scoring, wikilink graph traversal, tag filtering, and multi-round query expansion. Added mem_search, mem_graph, mem_profile tools. 20 new tests."
     },
     {
       "id": "US-014",

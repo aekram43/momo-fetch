@@ -248,6 +248,172 @@ pub async fn mem_read(args: MemReadArgs) -> Result<Value, AdkError> {
     }
 }
 
+// ─── MemSearch ───────────────────────────────────────────────────
+
+/// Arguments for the mem_search tool.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct MemSearchArgs {
+    /// Natural language search query
+    pub query: String,
+    /// Retrieval mode: grep_llm (default), graph_walk, tag_filter, agentic
+    pub mode: Option<String>,
+    /// Filter by memory levels: memcell, event, foresight, episode, profile, cluster
+    pub levels: Option<Vec<String>>,
+    /// Filter by project name
+    pub project: Option<String>,
+    /// Filter by tags (used primarily with tag_filter mode)
+    pub tags: Option<Vec<String>>,
+    /// Maximum number of results (default: 20)
+    pub limit: Option<usize>,
+}
+
+/// Search the memory vault using multiple retrieval strategies.
+///
+/// Supports 4 retrieval modes:
+/// - `grep_llm` (default): Keyword search with relevance scoring
+/// - `graph_walk`: Follow [[wikilinks]] from a seed note ID
+/// - `tag_filter`: Filter by YAML frontmatter tags
+/// - `agentic`: Multi-round search with query expansion
+///
+/// Results include relevance_score (0-1) and content snippets.
+#[tool]
+pub async fn mem_search(args: MemSearchArgs) -> Result<Value, AdkError> {
+    let vault_arc = get_vault()?;
+    let vault = vault_arc.lock().map_err(|e| {
+        AdkError::tool(format!("mem_search: vault lock failed: {e}"))
+    })?;
+
+    let mode_str = args.mode.as_deref().unwrap_or("grep_llm");
+    let mode: crate::memory::types::RetrievalMode = mode_str
+        .parse()
+        .map_err(|e: String| AdkError::tool(format!("mem_search: {e}")))?;
+
+    let query = crate::memory::types::MemoryQuery {
+        query: args.query,
+        mode,
+        levels: args.levels,
+        project: args.project,
+        tags: args.tags,
+        limit: args.limit.unwrap_or(20),
+    };
+
+    let results = vault
+        .search(&query)
+        .map_err(|e| AdkError::tool(format!("mem_search: search failed: {e}")))?;
+
+    let json_results: Vec<Value> = results
+        .iter()
+        .map(|r| {
+            json!({
+                "ref_id": r.ref_id,
+                "level": r.level,
+                "relevance_score": (r.relevance_score * 100.0).round() / 100.0,
+                "snippet": r.snippet,
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "results": json_results,
+        "total": json_results.len(),
+        "mode": mode_str,
+    }))
+}
+
+// ─── MemGraph ────────────────────────────────────────────────────
+
+/// Arguments for the mem_graph tool.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct MemGraphArgs {
+    /// Note ID to explore connections from (e.g., "fact-0001", "pred-0001")
+    pub note_id: String,
+}
+
+/// Get connected notes (outgoing wikilinks + backlinks) for a vault note.
+///
+/// Traverses the wikilink graph starting from the specified note:
+/// - Outgoing: notes linked FROM this note via [[wikilinks]]
+/// - Backlinks: notes that link TO this note
+///
+/// Useful for exploring related context around a specific memory.
+#[tool]
+pub async fn mem_graph(args: MemGraphArgs) -> Result<Value, AdkError> {
+    let vault_arc = get_vault()?;
+    let vault = vault_arc.lock().map_err(|e| {
+        AdkError::tool(format!("mem_graph: vault lock failed: {e}"))
+    })?;
+
+    let connections = vault
+        .graph(&args.note_id)
+        .map_err(|e| AdkError::tool(format!("mem_graph: graph traversal failed: {e}")))?;
+
+    let json_connections: Vec<Value> = connections
+        .iter()
+        .map(|r| {
+            json!({
+                "ref_id": r.ref_id,
+                "level": r.level,
+                "relevance_score": (r.relevance_score * 100.0).round() / 100.0,
+                "snippet": r.snippet,
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "note_id": args.note_id,
+        "connections": json_connections,
+        "total": json_connections.len(),
+    }))
+}
+
+// ─── MemProfile ──────────────────────────────────────────────────
+
+/// Arguments for the mem_profile tool.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct MemProfileArgs {
+    /// Which profile to read: "agent" (default) or "user"
+    pub profile_type: Option<String>,
+}
+
+/// Read agent or user profile from the memory vault.
+///
+/// Returns the contents of the agent or user profile note from the vault.
+/// The agent profile (`5-profile/agent-profile.md`) tracks learned preferences,
+/// patterns, and behavioral traits. The user profile (`5-profile/user-profile.md`)
+/// tracks user preferences, project context, and communication style.
+#[tool]
+pub async fn mem_profile(args: MemProfileArgs) -> Result<Value, AdkError> {
+    let vault_arc = get_vault()?;
+    let vault = vault_arc.lock().map_err(|e| {
+        AdkError::tool(format!("mem_profile: vault lock failed: {e}"))
+    })?;
+
+    let profile_type = args.profile_type.as_deref().unwrap_or("agent");
+
+    let result = match profile_type {
+        "agent" => vault.read_profile(),
+        "user" => vault.read_user_profile(),
+        _ => Err(anyhow::anyhow!("Unknown profile type: {profile_type}. Use 'agent' or 'user'.")),
+    };
+
+    match result {
+        Ok(Some((path, content))) => Ok(json!({
+            "profile_type": profile_type,
+            "path": path.to_string_lossy(),
+            "content": content,
+            "found": true,
+        })),
+        Ok(None) => Ok(json!({
+            "profile_type": profile_type,
+            "found": false,
+            "message": format!("No {} profile found in vault", profile_type),
+        })),
+        Err(e) => Err(AdkError::tool(format!(
+            "mem_profile: failed to read {profile_type} profile: {e}"
+        ))),
+    }
+}
+
 // ─── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -368,6 +534,154 @@ mod tests {
         .unwrap();
 
         assert_eq!(result2["found"], false);
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_search_tool_grep_llm() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        // Create some data
+        mem_extract(MemExtractArgs {
+            memcell_ref: "2026-05-07#MemCell 001".into(),
+            project: "test".into(),
+            topic: "Rust async patterns".into(),
+            context: "Learning about tokio async runtime".into(),
+            actions: vec![],
+            outcome: "Async works well".into(),
+            keywords: vec!["rust".into(), "async".into(), "tokio".into()],
+        })
+        .await
+        .unwrap();
+
+        // Search for it
+        let result = mem_search(MemSearchArgs {
+            query: "rust async tokio".into(),
+            mode: Some("grep_llm".into()),
+            levels: None,
+            project: None,
+            tags: None,
+            limit: Some(10),
+        })
+        .await
+        .unwrap();
+
+        assert!(result["total"].as_u64().unwrap() > 0);
+        assert_eq!(result["mode"], "grep_llm");
+
+        let results = result["results"].as_array().unwrap();
+        assert!(!results.is_empty());
+        assert!(results[0]["ref_id"].is_string());
+        assert!(results[0]["relevance_score"].as_f64().unwrap() > 0.0);
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_search_tool_tag_filter() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        // Create data with tags
+        mem_extract(MemExtractArgs {
+            memcell_ref: "2026-05-07#MemCell 001".into(),
+            project: "test".into(),
+            topic: "Test Topic".into(),
+            context: "ctx".into(),
+            actions: vec![],
+            outcome: "ok".into(),
+            keywords: vec!["rust".into(), "async".into()],
+        })
+        .await
+        .unwrap();
+
+        let result = mem_search(MemSearchArgs {
+            query: String::new(),
+            mode: Some("tag_filter".into()),
+            levels: None,
+            project: None,
+            tags: Some(vec!["rust".into()]),
+            limit: Some(10),
+        })
+        .await
+        .unwrap();
+
+        assert!(result["total"].as_u64().unwrap() > 0);
+        assert_eq!(result["mode"], "tag_filter");
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_graph_tool() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        // Create notes with wikilinks
+        mem_extract(MemExtractArgs {
+            memcell_ref: "2026-05-07#MemCell 001".into(),
+            project: "test".into(),
+            topic: "Graph test".into(),
+            context: "Testing graph traversal".into(),
+            actions: vec![],
+            outcome: "ok".into(),
+            keywords: vec!["graph".into()],
+        })
+        .await
+        .unwrap();
+
+        // Get the event ID
+        let vault_guard = vault.lock().unwrap();
+        let event_id = format!("fact-{:04}", vault_guard.counters().event);
+        drop(vault_guard);
+
+        let result = mem_graph(MemGraphArgs {
+            note_id: event_id.clone(),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result["note_id"], event_id);
+        // connections may be empty if no backlinks exist yet
+        assert!(result["total"].as_u64().is_some());
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_profile_tool_missing() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        // No profile created yet
+        let result = mem_profile(MemProfileArgs {
+            profile_type: Some("agent".into()),
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result["found"], false);
+        assert_eq!(result["profile_type"], "agent");
+
+        clear_vault();
+    }
+
+    #[tokio::test]
+    async fn test_mem_profile_tool_default_agent() {
+        let (_tmpdir, vault) = setup_vault();
+        set_vault(vault.clone());
+
+        // Default should be agent profile
+        let result = mem_profile(MemProfileArgs {
+            profile_type: None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result["profile_type"], "agent");
+        assert_eq!(result["found"], false);
 
         clear_vault();
     }
