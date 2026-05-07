@@ -1,9 +1,20 @@
+use crate::memory::types::ExtractionResult;
 use crate::memory::vault::ObsidianVault;
 
-/// Extract events, foresights, and episodes from MemCells (placeholder).
-pub async fn extract(_vault: &ObsidianVault) -> anyhow::Result<()> {
-    // TODO: Implement in US-012
-    Ok(())
+/// Extract events, foresights, and episodes from MemCells.
+///
+/// This is a convenience wrapper around `ObsidianVault::extract_from_memcell()`.
+pub fn extract_from_memcell(
+    vault: &mut ObsidianVault,
+    memcell_ref: &str,
+    project: &str,
+    topic: &str,
+    context: &str,
+    actions: &[crate::memory::types::ActionRecord],
+    outcome: &str,
+    keywords: &[&str],
+) -> anyhow::Result<ExtractionResult> {
+    vault.extract_from_memcell(memcell_ref, project, topic, context, actions, outcome, keywords)
 }
 
 /// Consolidate memories into clusters and update agent profile (placeholder).

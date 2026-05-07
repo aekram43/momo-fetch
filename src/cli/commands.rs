@@ -180,7 +180,22 @@ impl Command {
                 Ok(true)
             }
             Self::Mem => {
-                println!("Memory: not yet implemented");
+                let vault_arc = harness.vault();
+                let vault = vault_arc.lock().map_err(|e| anyhow::anyhow!("vault lock: {e}"))?;
+                let stats = vault.stats();
+                let counters = vault.counters();
+
+                println!("Memory Vault Status:");
+                println!("  MemCells:    {}", stats.total_memcells);
+                println!("  Events:      {} (next: fact-{:04})", stats.total_events, counters.event + 1);
+                println!("  Foresights:  {} ({} pending, next: pred-{:04})", stats.total_foresights, stats.pending_foresights, counters.foresight + 1);
+                println!("  Episodes:    {} (next: ep-{:04})", stats.total_episodes, counters.episode + 1);
+                println!("  Clusters:    {}", counters.cluster);
+                println!("  Reflections: {}", counters.reflection);
+                println!();
+                println!("Vault path: {}", vault.path().display());
+                println!();
+                println!("Use mem_write and mem_extract tools to interact with the vault.");
                 Ok(true)
             }
             Self::Kms => {

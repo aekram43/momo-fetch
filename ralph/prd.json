@@ -204,8 +204,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Phase 2.2 — depends on Phase 1. Main differentiator. Uses #[tool] macro + AfterToolCallback"
+      "passes": true,
+      "notes": "Phase 2.2 — depends on Phase 1. Main differentiator. Implemented mem_write/mem_extract/mem_read/mem_stats tools with #[tool] macro, ObsidianVault with daily log files, extraction engine (events/foresights/episodes), config persistence, index regeneration."
     },
     {
       "id": "US-013",

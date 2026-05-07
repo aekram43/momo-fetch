@@ -23,6 +23,9 @@ Started: Wed May  6 23:34:32 +07 2026
 - **macOS symlink**: `/var` → `/private/var`, `/tmp` → `/private/tmp` — always `canonicalize()` before comparing paths with `starts_with()`
 - **ignore crate**: use `GitignoreBuilder::add_line(None, pattern)` for programmatic loading, NOT `OverrideBuilder` or `GitignoreBuilder::add(path)`
 - **Sandbox `.agentignore`**: loaded from non-canonicalized root path (before `canonicalize()`), then root is canonicalized — this ensures the file is found via its original path
+- **std::fs::DirEntry**: has `file_name()` NOT `file_stem()` — strip `.md` extension manually with `strip_suffix(".md")`
+- **Thread-local mutable context**: use `Arc<Mutex<T>>` for types with mutable state (vault), `Arc<T>` for immutable (sandbox) — `std::sync::Mutex` is fine for quick I/O operations with no await points
+- **`build_tool_registry`** takes `(sandbox: Arc<FilesystemSandbox>, vault: Arc<Mutex<ObsidianVault>>)` — all callers must provide both
 
 ### adk-rust 0.7.0 API Reference (verified from source)
 
@@ -287,4 +290,33 @@ Started: Wed May  6 23:34:32 +07 2026
   - `ServerStatus` derives `Debug` — can format with `{:?}` for display
   - Tool name collision: McpServerManager internally uses `PrefixedTool` wrapper to add `{server_id}__{tool_name}` when tools from different servers have the same name
   - `LlmAgentBuilder` has both `.tool(Arc<dyn Tool>)` for individual tools AND `.toolset(Arc<dyn Toolset>)` for bulk registration — can use both together
+---
+
+## Wed May 7 23:59 +07 2026 - US-012
+- Implemented Memory vault — Write & Extract lifecycle
+- Full ObsidianVault engine with write_memcell(), extract_from_memcell(), save_config(), regenerate_index()
+- mem_write tool: append MemCell to daily log (1-memcells/YYYY/MM/YYYY-MM-DD.md) with YAML frontmatter, topic, context, actions, outcome, keywords
+- mem_extract tool: extract events (2-events/fact-NNNN.md), foresights (3-foresights/pred-NNNN.md), episodes (4-episodes/ep-NNNN.md) from MemCell data
+- mem_read tool: read specific note by ID (fact-NNNN, pred-NNNN, ep-NNNN, cluster-NNN)
+- mem_stats tool: vault statistics (counts, counters, next IDs)
+- Extraction engine: template-based event/foresight generation from MemCell keywords + topic + outcome
+- Foresight generation only triggers on predictive keywords (architecture, decision, strategy, pattern, etc.)
+- Episode generation: daily grouping with append-to-existing support
+- .vault-config.json counters updated after every write/extract (atomic temp+rename)
+- index.md regenerated after every write/extract with full vault table of contents
+- /mem slash command updated to show vault statistics
+- Vault wrapped in Arc<Mutex<>> for thread-safe sharing between Harness and tools
+- Thread-local vault context pattern (same as sandbox) for #[tool] macro tools
+- 103 tests pass (12 new: 7 vault unit tests + 4 memory tool tests + 1 lifecycle test)
+- Files changed: src/memory/types.rs (rewrite with VaultConfig/VaultStats/VaultSettings/VaultCounters), src/memory/vault.rs (full implementation), src/memory/lifecycle.rs (updated), src/tools/memory.rs (full rewrite with #[tool] tools), src/tools/mod.rs (register 4 memory tools), src/harness.rs (Arc<Mutex<ObsidianVault>>, vault in tool registry), src/cli/commands.rs (/mem stats display)
+- **Learnings for future iterations:**
+  - Vault uses `std::sync::Mutex` (not tokio) since operations are quick filesystem I/O — no await points while holding the lock
+  - `std::fs::DirEntry` has `file_name()` NOT `file_stem()` — must strip extension manually with `strip_suffix(".md")`
+  - `std::fs::DirEntry::file_type()` returns `Result<FileType>` not `FileType` — must unwrap with `.map(|ft| ft.is_file())`
+  - TempDir must be kept alive (not dropped) during tests — use `(TempDir, Arc<Mutex<Vault>>)` tuple
+  - `serde_yaml::Value` from `parse_frontmatter` can't be consumed and then re-borrowed — use `.as_ref()` for multiple accesses
+  - Thread-local vault context needs `Arc<Mutex<ObsidianVault>>` (not bare `ObsidianVault`) because vault has mutable state
+  - `build_tool_registry` now takes two args: `(sandbox, vault)` — all callers must be updated
+  - Extraction is template-based (no LLM) for US-012 — LLM-based retrieval is US-013
+  - Foresight generation heuristic: only triggers when context/keywords contain predictive signals (architecture, decision, pattern, will, should, plan)
 ---

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use adk_rust::agent::LlmAgentBuilder;
 use adk_rust::runner::Runner;
@@ -19,7 +19,7 @@ pub struct Harness {
     provider_mgr: ProviderManager,
     sandbox: Arc<FilesystemSandbox>,
     context_builder: ContextBuilder,
-    vault: ObsidianVault,
+    vault: Arc<Mutex<ObsidianVault>>,
     session_mgr: SessionManager,
     mcp_service: McpService,
     runner: Runner,
@@ -32,7 +32,7 @@ impl Harness {
     /// This is the main entry point after CLI argument parsing.
     pub async fn build(config: HarnessConfig) -> anyhow::Result<Self> {
         // Initialize memory vault
-        let vault = ObsidianVault::open(&config.vault_path)?;
+        let vault = Arc::new(Mutex::new(ObsidianVault::open(&config.vault_path)?));
 
         // Initialize provider
         let provider_mgr = ProviderManager::from_env()?;
@@ -44,7 +44,9 @@ impl Harness {
         )?);
 
         // Build context (AGENTS.md + KMS + memory)
-        let context_builder = ContextBuilder::new(&config.project_path, &vault)?;
+        let vault_guard = vault.lock().map_err(|e| anyhow::anyhow!("vault lock: {e}"))?;
+        let context_builder = ContextBuilder::new(&config.project_path, &vault_guard)?;
+        drop(vault_guard);
 
         // Initialize session service (SQLite)
         let session_mgr = SessionManager::new(&config.session_db_path).await?;
@@ -90,6 +92,7 @@ impl Harness {
             &provider_mgr,
             &context_builder,
             &sandbox,
+            &vault,
             session_mgr.service(),
             &mcp_service,
         )?;
@@ -112,10 +115,11 @@ impl Harness {
         provider_mgr: &ProviderManager,
         context_builder: &ContextBuilder,
         sandbox: &Arc<FilesystemSandbox>,
+        vault: &Arc<Mutex<ObsidianVault>>,
         session_service: Arc<dyn adk_session::SessionService>,
         mcp_service: &McpService,
     ) -> anyhow::Result<Runner> {
-        let tools = crate::tools::build_tool_registry(sandbox.clone());
+        let tools = crate::tools::build_tool_registry(sandbox.clone(), vault.clone());
 
         let policy = sandbox.to_tool_confirmation_policy();
 
@@ -161,6 +165,7 @@ impl Harness {
             &self.provider_mgr,
             &self.context_builder,
             &self.sandbox,
+            &self.vault,
             self.session_mgr.service(),
             &self.mcp_service,
         )?;
@@ -224,8 +229,8 @@ impl Harness {
         &self.context_builder
     }
 
-    /// Get a reference to the memory vault.
-    pub fn vault(&self) -> &ObsidianVault {
+    /// Get a reference to the memory vault (Arc<Mutex<>>).
+    pub fn vault(&self) -> &Arc<Mutex<ObsidianVault>> {
         &self.vault
     }
 
