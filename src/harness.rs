@@ -11,6 +11,7 @@ use crate::memory::vault::ObsidianVault;
 use crate::providers::ProviderManager;
 use crate::sandbox::FilesystemSandbox;
 use crate::session::SessionManager;
+use crate::skill::SkillService;
 
 /// Central orchestrator for the agent harness.
 ///
@@ -22,6 +23,7 @@ pub struct Harness {
     vault: Arc<Mutex<ObsidianVault>>,
     session_mgr: SessionManager,
     mcp_service: McpService,
+    skill_service: SkillService,
     runner: Runner,
     current_session_id: String,
     config: HarnessConfig,
@@ -87,6 +89,12 @@ impl Harness {
             mcp_service.start_monitoring();
         }
 
+        // Initialize skill service
+        let skill_service = SkillService::new(&config.project_path)?;
+        if skill_service.has_skills() {
+            tracing::info!("Skills: {} loaded", skill_service.skill_count());
+        }
+
         // Build Runner with Agent
         let runner = Self::build_runner(
             &provider_mgr,
@@ -95,6 +103,7 @@ impl Harness {
             &vault,
             session_mgr.service(),
             &mcp_service,
+            &skill_service,
         )?;
 
         Ok(Self {
@@ -104,6 +113,7 @@ impl Harness {
             vault,
             session_mgr,
             mcp_service,
+            skill_service,
             runner,
             current_session_id,
             config,
@@ -118,14 +128,22 @@ impl Harness {
         vault: &Arc<Mutex<ObsidianVault>>,
         session_service: Arc<dyn adk_session::SessionService>,
         mcp_service: &McpService,
+        skill_service: &SkillService,
     ) -> anyhow::Result<Runner> {
         let tools = crate::tools::build_tool_registry(sandbox.clone(), vault.clone());
 
         let policy = sandbox.to_tool_confirmation_policy();
 
+        // Build system prompt with skill context
+        let mut system_prompt = context_builder.system_prompt().to_string();
+        if let Some(skill_ctx) = skill_service.build_skill_context() {
+            system_prompt.push_str("\n\n");
+            system_prompt.push_str(&skill_ctx);
+        }
+
         let mut agent_builder = LlmAgentBuilder::new("agent-harness")
             .model(provider_mgr.current())
-            .instruction(context_builder.system_prompt());
+            .instruction(&system_prompt);
 
         // Set tool confirmation policy based on permission mode
         match policy {
@@ -168,6 +186,7 @@ impl Harness {
             &self.vault,
             self.session_mgr.service(),
             &self.mcp_service,
+            &self.skill_service,
         )?;
         Ok(())
     }
@@ -247,6 +266,16 @@ impl Harness {
     /// Get a mutable reference to the MCP service.
     pub fn mcp_service_mut(&mut self) -> &mut McpService {
         &mut self.mcp_service
+    }
+
+    /// Get a reference to the skill service.
+    pub fn skill_service(&self) -> &SkillService {
+        &self.skill_service
+    }
+
+    /// Get a mutable reference to the skill service.
+    pub fn skill_service_mut(&mut self) -> &mut SkillService {
+        &mut self.skill_service
     }
 
     /// Get the current session ID.

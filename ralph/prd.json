@@ -260,8 +260,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Phase 2.5 — depends on Phase 1. Uses adk-skill"
+      "passes": true,
+      "notes": "Phase 2.5 — depends on Phase 1. Uses adk-skill 0.7.0 via adk-rust skills feature. SkillService wraps SkillIndex with discovery from .skills/, .claude/skills/, .harness/skills/. /skill list and /skill install implemented. Auto-match via select_skills(). Skill context injected into system prompt."
     },
     {
       "id": "US-016",

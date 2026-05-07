@@ -7,6 +7,7 @@ mod memory;
 mod providers;
 mod sandbox;
 mod session;
+mod skill;
 mod tools;
 
 use clap::Parser;

@@ -12,6 +12,7 @@ pub enum Command {
     Mem,
     Kms,
     SkillList,
+    SkillInstall { git_url: String },
     McpList,
     McpAdd { name: String, command: String },
     McpRemove { name: String },
@@ -55,6 +56,14 @@ impl Command {
                 let sub = parts.get(1).unwrap_or(&"");
                 match *sub {
                     "list" => Some(Self::SkillList),
+                    "install" => {
+                        let git_url = parts.get(2).unwrap_or(&"").to_string();
+                        if git_url.is_empty() {
+                            Some(Self::Unknown("/skill install <git-url>".to_string()))
+                        } else {
+                            Some(Self::SkillInstall { git_url })
+                        }
+                    }
                     _ => Some(Self::Unknown(input.to_string())),
                 }
             }
@@ -203,7 +212,53 @@ impl Command {
                 Ok(true)
             }
             Self::SkillList => {
-                println!("Skills: not yet implemented");
+                let skills = harness.skill_service().index().skills();
+                if skills.is_empty() {
+                    println!("No skills installed.");
+                    println!("Use /skill install <git-url> to install a skill.");
+                    println!("Skills can also be placed in .skills/ or .claude/skills/ or .harness/skills/");
+                } else {
+                    println!("Installed skills ({}):", skills.len());
+                    for skill in skills {
+                        let trigger_marker = if skill.trigger { " [explicit]" } else { "" };
+                        let version_marker = skill
+                            .version
+                            .as_ref()
+                            .map(|v| format!(" v{v}"))
+                            .unwrap_or_default();
+                        let tags = if skill.tags.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [{}]", skill.tags.join(", "))
+                        };
+                        println!(
+                            "  {}{}: {}{}{}",
+                            skill.name, version_marker, skill.description, tags, trigger_marker
+                        );
+                        println!("    {}", skill.path.display());
+                    }
+                }
+                Ok(true)
+            }
+            Self::SkillInstall { git_url } => {
+                match harness.skill_service_mut().install_from_git(git_url) {
+                    Ok(name) => {
+                        println!(
+                            "{} Installed skill '{name}'",
+                            "\u{2713}".green()
+                        );
+                        // Rebuild runner to include new skill context
+                        if let Err(e) = harness.rebuild_runner() {
+                            println!(
+                                "{} Skill installed but runner rebuild failed: {e}",
+                                "\u{2717}".red()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        println!("{} Failed to install skill: {e}", "\u{2717}".red());
+                    }
+                }
                 Ok(true)
             }
             Self::McpList => {
@@ -359,6 +414,7 @@ impl Command {
   /mem                 Memory status
   /kms                 Knowledge base status
   /skill list          List installed skills
+  /skill install <url> Install skill from git URL
   /mcp list            List MCP servers
   /mcp add <n> <cmd>   Add MCP server (e.g., /mcp add fs npx -y @mcp/filesystem /tmp)
   /mcp remove <name>   Remove MCP server

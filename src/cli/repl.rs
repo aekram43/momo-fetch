@@ -43,6 +43,15 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
         );
     }
 
+    // Show skills
+    let skills = harness.skill_service();
+    if skills.has_skills() {
+        println!(
+            "Skills: {} loaded",
+            skills.skill_count().to_string().green(),
+        );
+    }
+
     println!("Type /help for commands, Ctrl+D to quit.\n");
 
     let mut rl = DefaultEditor::new()?;

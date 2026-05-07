@@ -365,3 +365,26 @@ Started: Wed May  6 23:34:32 +07 2026
   - `std::collections::HashSet<String>` for Jaccard (not `HashSet<&str>`) — `to_lowercase()` produces owned Strings
   - `str::find()` only takes 1 argument in Rust (not 2 like some other languages) — use slicing + find for "find after position N"
 ---
+
+## Thu May 7 23:59 +07 2026 - US-015
+- Implemented Skill system using adk-skill 0.7.0 (via adk-rust `skills` feature)
+- Created `SkillService` wrapping `SkillIndex` with discovery from 3 directories: `.skills/`, `.claude/skills/`, `.harness/skills/`
+- `load_skill_index_with_extras()` from adk-skill scans all directories and deduplicates by name (project-local wins)
+- `build_skill_context()` generates a markdown block listing all skills for system prompt injection
+- `match_skills()` uses adk-skill `select_skills()` with weighted lexical overlap scoring (name: 4.0, description: 2.5, tags: 2.0, body: 1.0)
+- `install_from_git()` clones a git repo into `.harness/skills/<name>/` and reloads the index
+- Skill context auto-injected into system prompt via `Harness::build_runner()` — agent sees available skills every turn
+- `/skill list` shows all discovered skills with name, version, description, tags, and file path
+- `/skill install <git-url>` installs a skill from a git URL (shallow clone)
+- REPL startup shows skill count when skills are loaded
+- 146 tests pass (9 new: empty service, harness dir discovery, .skills/ dir, .claude/skills/ dir, context format, match_skills, reload, install name derivation, project-local override)
+- Files changed: src/skill/mod.rs (new), src/main.rs (add mod skill), src/harness.rs (integrate SkillService), src/cli/commands.rs (SkillList, SkillInstall commands), src/cli/repl.rs (skill startup display), ralph/prd.json (US-015 passes: true)
+- **Learnings for future iterations:**
+  - `adk_skill` is re-exported through `adk_rust::skill` when the `skills` feature is enabled — no need for separate `adk-skill` Cargo.toml dependency
+  - `load_skill_index_with_extras(root, &extra_dirs)` is the right entry point when you want custom scan directories beyond `.skills/` and `.claude/skills/`
+  - adk-skill deduplicates by name — project-local (`.skills/`, `.claude/skills/`) wins over extra dirs (`.harness/skills/`)
+  - `select_skills()` uses a weighted scoring system: name match +4.0, description +2.5, tags +2.0, body +1.0, normalized by `sqrt(body_token_count)`
+  - `SkillDocument::engineer_prompt_block(max_chars)` generates a `[skill:name]...[/skill]` block for injection — but we use our own simpler format for system prompt context
+  - The injector module uses `adk_plugin` — if we want per-message auto-injection in the future, we'd need that dependency. Current approach injects all skills into system prompt which is simpler
+  - `SelectionPolicy { top_k: 3, min_score: 0.5 }` is a reasonable default — returns up to 3 matches with score >= 0.5
+---
