@@ -14,6 +14,7 @@ use crate::providers::ProviderManager;
 use crate::sandbox::FilesystemSandbox;
 use crate::session::SessionManager;
 use crate::skill::SkillService;
+use crate::team::TeamService;
 
 /// Central orchestrator for the agent harness.
 ///
@@ -26,6 +27,7 @@ pub struct Harness {
     session_mgr: SessionManager,
     mcp_service: McpService,
     skill_service: SkillService,
+    team_service: TeamService,
     cost_tracker: CostTracker,
     runner: Runner,
     current_session_id: String,
@@ -104,6 +106,9 @@ impl Harness {
             tracing::info!("Skills: {} loaded", skill_service.skill_count());
         }
 
+        // Initialize team service
+        let team_service = TeamService::new(&config.project_path)?;
+
         // Initialize cost tracker
         let cost_tracker = CostTracker::new(config_dir.join("cost.json"));
 
@@ -139,6 +144,7 @@ impl Harness {
             session_mgr,
             mcp_service,
             skill_service,
+            team_service,
             cost_tracker,
             runner,
             current_session_id,
@@ -336,6 +342,16 @@ impl Harness {
     /// Get a mutable reference to the skill service.
     pub fn skill_service_mut(&mut self) -> &mut SkillService {
         &mut self.skill_service
+    }
+
+    /// Get a reference to the team service.
+    pub fn team_service(&self) -> &TeamService {
+        &self.team_service
+    }
+
+    /// Get a mutable reference to the team service.
+    pub fn team_service_mut(&mut self) -> &mut TeamService {
+        &mut self.team_service
     }
 
     /// Get a reference to the cost tracker.

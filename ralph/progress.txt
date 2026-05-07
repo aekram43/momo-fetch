@@ -512,4 +512,29 @@ Started: Wed May  6 23:34:32 +07 2026
   - `serde(default)` on struct fields handles backward compatibility when loading old JSON files
   - Project name from `Path::file_name()` gives directory basename — good enough for cost tracking
 ---
+
+## Thu May 7 17:00 +07 2026 - US-021
+- Implemented agent teams with multi-process coordination
+- TeamService: manages team lifecycle — start, status, stop, merge
+- File-based mailbox (Mailbox): inter-agent communication via `.harness/mailbox/` JSON files with atomic writes, send/receive/peek/clear operations
+- TmuxManager: creates tmux sessions and per-worker panes, sends commands to panes, kills sessions on stop
+- WorktreeManager: creates/removes git worktrees for worker isolation, merges branches, deletes branches after merge
+- Worker spawning: each worker runs as a separate `agent-harness -p '<task>'` process in its own tmux pane
+- Worker definitions: name, task description, optional branch name, optional git worktree flag
+- /team start: interactive worker definition via stdin, validates tmux and git availability
+- /team status: polls mailbox for worker updates (ready/progress/completed/failed), shows per-worker status
+- /team stop: kills tmux session, cleans up worktrees and branches, clears mailbox
+- /team merge: merges completed workers' branches back into current branch, cleans up worktrees
+- Team state persisted to `.harness/team.json` with atomic writes
+- Max 8 workers per team, auto-generated team IDs with timestamp
+- Fixed borrow checker issue in status(): extracted mailbox_path before mutable borrow, used boolean flag for completion check
+- 222 tests pass (22 team tests: status display, sanitization, serialization, mailbox operations, service lifecycle)
+- Files changed: src/team/mod.rs (fix borrow issue, remove unused imports), src/cli/commands.rs (fix unused assignment warning), ralph/prd.json (US-021 passes: true)
+- **Learnings for future iterations:**
+  - **Borrow checker pattern for nested state mutation**: When `status()` needs to read mailbox path from state AND mutate state, extract the path into a local variable before any mutable borrow: `let mailbox_path = self.state.as_ref().unwrap().mailbox_path.clone();`
+  - **Two-phase borrow pattern**: Collect all external data (mailbox messages) into a local variable first, THEN apply mutations. Never mix immutable and mutable borrows of the same field in a loop.
+  - **adk-server A2A is NOT used**: The PRD mentioned A2A but the implementation uses a simpler file-based mailbox pattern. This avoids a dependency on adk-server and works without network infrastructure. Workers communicate by writing JSON files.
+  - **Worker isolation**: Workers run as separate `agent-harness -p` processes in tmux panes, not as in-process sub-agents. This provides true process isolation but means workers can't share the same LLM connection or memory vault.
+  - **tmux is optional**: Team works without tmux (workers just don't get pane isolation). `TmuxManager::is_available()` checks for tmux presence.
+  - **Git worktrees are optional**: Workers can share the project root or get isolated worktrees. `WorktreeManager::is_git_repo()` checks before creating worktrees.
 ---

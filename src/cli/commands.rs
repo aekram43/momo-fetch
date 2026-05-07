@@ -23,6 +23,10 @@ pub enum Command {
     KeySet { provider: String },
     KeyList,
     KeyDelete { provider: String },
+    TeamStart,
+    TeamStatus,
+    TeamStop,
+    TeamMerge,
     Quit,
     ShellEscape { command: String },
     Unknown(String),
@@ -154,6 +158,16 @@ impl Command {
                             Some(Self::KeyDelete { provider })
                         }
                     }
+                    _ => Some(Self::Unknown(input.to_string())),
+                }
+            }
+            &"team" => {
+                let sub = parts.get(1).unwrap_or(&"");
+                match *sub {
+                    "start" => Some(Self::TeamStart),
+                    "status" | "" => Some(Self::TeamStatus),
+                    "stop" => Some(Self::TeamStop),
+                    "merge" => Some(Self::TeamMerge),
                     _ => Some(Self::Unknown(input.to_string())),
                 }
             }
@@ -594,6 +608,188 @@ impl Command {
                 }
                 Ok(true)
             }
+            Self::TeamStart => {
+                use crate::team::WorkerDef;
+
+                // Read worker definitions from stdin
+                println!("Define worker agents (one per line, empty line to finish):");
+                println!("  Format: <name> <task> [--branch <name>] [--worktree]");
+                println!();
+
+                let mut workers = Vec::new();
+                loop {
+                    print!("  worker[{}]: ", workers.len());
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+
+                    let mut line = String::new();
+                    if std::io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
+                        break;
+                    }
+
+                    let line = line.trim();
+                    let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                    if parts.len() < 2 {
+                        println!("    {} Invalid format. Use: <name> <task>", "\u{2717}".red());
+                        continue;
+                    }
+
+                    let name = parts[0].to_string();
+                    let rest = parts[1];
+
+                    // Parse optional flags
+                    let mut branch = None;
+                    let mut use_worktree = false;
+
+                    let rest_parts: Vec<&str> = rest.split("--").collect();
+                    let task = rest_parts[0].trim().to_string();
+
+                    for flag_part in rest_parts.iter().skip(1) {
+                        let flag = flag_part.trim();
+                        if flag.starts_with("branch ") {
+                            branch = Some(flag[7..].trim().to_string());
+                        } else if flag.starts_with("branch=") {
+                            branch = Some(flag[7..].trim().to_string());
+                        } else if flag == "worktree" {
+                            use_worktree = true;
+                        }
+                    }
+
+                    workers.push(WorkerDef {
+                        name,
+                        task,
+                        branch,
+                        use_worktree: if use_worktree { Some(true) } else { None },
+                    });
+                }
+
+                if workers.is_empty() {
+                    println!("{} No workers defined. Team not started.", "\u{2717}".red());
+                    return Ok(true);
+                }
+
+                // Check tmux availability
+                if !crate::team::TmuxManager::is_available() {
+                    println!(
+                        "{} tmux not found. Workers will run in background without pane isolation.",
+                        "\u{26a0}".yellow()
+                    );
+                }
+
+                // Check git availability for worktrees
+                let has_worktree = workers.iter().any(|w| w.use_worktree.unwrap_or(false));
+                if has_worktree && !crate::team::WorktreeManager::is_git_repo(harness.sandbox().root()) {
+                    println!(
+                        "{} Not a git repository. Worktrees disabled for all workers.",
+                        "\u{26a0}".yellow()
+                    );
+                    for w in &mut workers {
+                        w.use_worktree = None;
+                    }
+                }
+
+                match harness.team_service_mut().start(workers) {
+                    Ok(team_id) => {
+                        println!(
+                            "{} Team '{team_id}' started",
+                            "\u{2713}".green()
+                        );
+                        let state = harness.team_service().state().unwrap();
+                        println!("  Workers: {}", state.workers.len());
+                        for (_, w) in &state.workers {
+                            let wt = if w.use_worktree { " [worktree]" } else { "" };
+                            let pane = if w.pane_id.is_some() { " [tmux]" } else { "" };
+                            println!("    {} (branch: {}){wt}{pane}", w.name, w.branch);
+                        }
+                        println!("  Use /team status to check progress");
+                        println!("  Use /team merge to merge completed workers");
+                        println!("  Use /team stop to stop all workers");
+                    }
+                    Err(e) => {
+                        println!("{} Failed to start team: {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
+            Self::TeamStatus => {
+                let status = harness.team_service_mut().status();
+                match status {
+                    crate::team::TeamStatus::Idle => {
+                        println!("No active team.");
+                        println!("Use /team start to create a team.");
+                    }
+                    crate::team::TeamStatus::Running | crate::team::TeamStatus::Completed => {
+                        let state = harness.team_service().state().unwrap();
+                        println!("Team: {}", state.id);
+                        println!("Status: {}", state.status);
+
+                        let mailbox = crate::team::Mailbox::open(&state.mailbox_path);
+                        let unread = mailbox.map(|m| m.unread_count("lead")).unwrap_or(0);
+                        if unread > 0 {
+                            println!("Unread messages: {unread}");
+                        }
+
+                        println!();
+                        println!("Workers:");
+                        for (_, w) in &state.workers {
+                            let result = match &w.result {
+                                Some(r) => format!(" — {}", r.chars().take(80).collect::<String>()),
+                                None => String::new(),
+                            };
+                            println!("  {}: {}{result}", w.name, w.status);
+                        }
+
+                        if matches!(state.status, crate::team::TeamStatus::Completed) {
+                            println!();
+                            println!(
+                                "{} All workers completed. Use /team merge to merge branches.",
+                                "\u{2139}".bright_blue()
+                            );
+                        }
+                    }
+                    crate::team::TeamStatus::Stopped => {
+                        println!("Team was stopped.");
+                    }
+                }
+                Ok(true)
+            }
+            Self::TeamStop => {
+                match harness.team_service_mut().stop() {
+                    Ok(()) => {
+                        println!(
+                            "{} Team stopped. Workers terminated, worktrees cleaned up.",
+                            "\u{2713}".green()
+                        );
+                    }
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
+            Self::TeamMerge => {
+                match harness.team_service_mut().merge() {
+                    Ok(results) => {
+                        if results.is_empty() {
+                            println!("No completed workers with worktrees to merge.");
+                        } else {
+                            println!("Merge results:");
+                            for r in &results {
+                                let marker = if r.success {
+                                    "\u{2713}".green().to_string()
+                                } else {
+                                    "\u{2717}".red().to_string()
+                                };
+                                println!("  {marker} {} ({}): {}", r.worker, r.branch, r.message);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
             Self::Unknown(cmd) => {
                 println!("Unknown command: {cmd}");
                 println!("Type /help for available commands.");
@@ -625,6 +821,10 @@ impl Command {
   /key set <provider>  Store API key in OS keychain
   /key list            List stored providers (keys masked)
   /key delete <name>   Delete API key from keychain
+  /team start          Start an agent team with worker agents
+  /team status         Show team status and worker progress
+  /team merge          Merge completed workers' branches
+  /team stop           Stop team and clean up worktrees
   /quit                Exit
   !<command>           Run shell command directly"#
     }

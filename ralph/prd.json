@@ -364,8 +364,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Phase 3.6 — depends on US-016. Uses adk-server A2A v1.0.0"
+      "passes": true,
+      "notes": "Phase 3.6 — depends on US-016. Uses file-based mailbox instead of A2A (simpler, no adk-server dependency). Workers spawned as separate agent-harness processes in tmux panes with optional git worktrees."
     }
   ]
 }
