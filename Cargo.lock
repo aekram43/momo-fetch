@@ -17,10 +17,10 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4a40b2c466b84a68c3ef489a82cde87715d7b6e25e033df91a0b289fd0bc8e5"
 dependencies = [
- "adk-core 0.7.0",
+ "adk-core",
  "adk-skill",
- "adk-telemetry 0.7.0",
- "adk-tool 0.7.0",
+ "adk-telemetry",
+ "adk-tool",
  "async-stream",
  "async-trait",
  "futures",
@@ -54,7 +54,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "620ce67561b1677db4792489652e9a5e0b16dee9fb59a48dc2e26f9a8027cbc1"
 dependencies = [
- "adk-core 0.7.0",
+ "adk-core",
  "async-trait",
  "serde_json",
  "tokio",
@@ -66,7 +66,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5e9dd40cc8a1ef5adf2a5f2bd8d6521256a13fb0aefa79af75bd4a0ceb5a24"
 dependencies = [
- "adk-core 0.7.0",
+ "adk-core",
  "async-trait",
  "chrono",
  "serde",
@@ -84,15 +84,15 @@ checksum = "ba783a96c2a7348fa6e5681efecb32146770f2bd66f661561625ab3b33668794"
 dependencies = [
  "adk-agent",
  "adk-artifact",
- "adk-core 0.7.0",
+ "adk-core",
  "adk-deploy",
  "adk-model",
  "adk-runner",
  "adk-server",
  "adk-session",
  "adk-skill",
- "adk-telemetry 0.7.0",
- "adk-tool 0.7.0",
+ "adk-telemetry",
+ "adk-tool",
  "anyhow",
  "axum",
  "clap",
@@ -106,22 +106,6 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
-]
-
-[[package]]
-name = "adk-core"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01a2959f62973dfd9a2e33604fb9e36ad0a0dcffa36f32485c259010c0a34ec9"
-dependencies = [
- "async-trait",
- "chrono",
- "futures",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -196,7 +180,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ea8168d82c1dd82e812f70ca93dd7b1c1c715cf1cebab9a67679c33e06044f2"
 dependencies = [
- "adk-core 0.7.0",
+ "adk-core",
  "async-trait",
  "futures",
  "jsonschema",
@@ -213,7 +197,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c9d1f3db0b2664fc2fd350e93220fa226e124891ad92e7480a787329fea15bc"
 dependencies = [
- "adk-core 0.7.0",
+ "adk-core",
  "async-trait",
  "chrono",
  "serde",
@@ -228,9 +212,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13ebd80c2f9ce7e747222da38d5314e3763554d123ce45bec8c488ea0c3bff6d"
 dependencies = [
  "adk-anthropic",
- "adk-core 0.7.0",
+ "adk-core",
  "adk-gemini",
- "adk-telemetry 0.7.0",
+ "adk-telemetry",
  "anyhow",
  "async-openai",
  "async-stream",
@@ -256,7 +240,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33abc35baf181eec44a3e4c991f6736f3f773a045b41856c18ea1bb34098a8c5"
 dependencies = [
- "adk-core 0.7.0",
+ "adk-core",
  "serde_json",
  "tokio",
  "tracing",
@@ -269,7 +253,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86b7486c7cc76d71b58bb11e0b164fc8101b804644b8f4593e771a6d090309c0"
 dependencies = [
  "adk-artifact",
- "adk-core 0.7.0",
+ "adk-core",
  "adk-plugin",
  "adk-session",
  "adk-skill",
@@ -295,7 +279,7 @@ dependencies = [
  "adk-artifact",
  "adk-auth",
  "adk-cli",
- "adk-core 0.7.0",
+ "adk-core",
  "adk-guardrail",
  "adk-memory",
  "adk-model",
@@ -304,25 +288,14 @@ dependencies = [
  "adk-server",
  "adk-session",
  "adk-skill",
- "adk-telemetry 0.7.0",
- "adk-tool 0.7.0",
+ "adk-telemetry",
+ "adk-tool",
  "anyhow",
  "async-trait",
  "futures",
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "adk-rust-macros"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8056954b4c39ce67cb6e352b8ab59b37e407e45cbe435ce3673e0252a74cf801"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -344,10 +317,10 @@ checksum = "bf171f571ca393a77af2ade1706f5c0b60c94ec5a884eb87d70811f31bee45bf"
 dependencies = [
  "adk-agent",
  "adk-artifact",
- "adk-core 0.7.0",
+ "adk-core",
  "adk-runner",
  "adk-session",
- "adk-telemetry 0.7.0",
+ "adk-telemetry",
  "anyhow",
  "async-stream",
  "async-trait",
@@ -376,7 +349,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd2f9c1b679c850f98e6843b1a43ca1cd482081379d861b06f408d5c9f33b883"
 dependencies = [
- "adk-core 0.7.0",
+ "adk-core",
  "async-trait",
  "chrono",
  "serde",
@@ -392,7 +365,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04e8189d143da60ca65f62b93fe566a7ada2259217487182dd1c806b62ca52c9"
 dependencies = [
- "adk-core 0.7.0",
+ "adk-core",
  "adk-plugin",
  "serde",
  "serde_json",
@@ -400,23 +373,6 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "walkdir",
-]
-
-[[package]]
-name = "adk-telemetry"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa1b86e5f8621f72cf62ec90bce40f1d4988dd1b054a2e8ff00012e0112d3d4c"
-dependencies = [
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -438,34 +394,13 @@ dependencies = [
 
 [[package]]
 name = "adk-tool"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86e889c5af0022664f6e73974c1576e37e36fd8d930074f52f4fa28e7938b5dd"
-dependencies = [
- "adk-core 0.6.0",
- "adk-rust-macros 0.6.0",
- "adk-telemetry 0.6.0",
- "async-trait",
- "base64",
- "futures",
- "rmcp",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "adk-tool"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "632c8e3ddca8bb364b4fe305934f4a7de176d81db82184992a90e92328582355"
 dependencies = [
- "adk-core 0.7.0",
- "adk-rust-macros 0.7.0",
- "adk-telemetry 0.7.0",
+ "adk-core",
+ "adk-rust-macros",
+ "adk-telemetry",
  "async-trait",
  "base64",
  "futures",
@@ -503,7 +438,7 @@ dependencies = [
  "adk-model",
  "adk-rust",
  "adk-session",
- "adk-tool 0.6.0",
+ "adk-tool",
  "anyhow",
  "assert_cmd",
  "chrono",

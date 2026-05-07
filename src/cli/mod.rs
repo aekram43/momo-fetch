@@ -1,3 +1,4 @@
+mod banner;
 mod commands;
 mod oneshot;
 mod repl;
@@ -40,15 +41,15 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
     let config = crate::config::HarnessConfig::from_cli_args(&args)?;
     let mut harness = crate::harness::Harness::build(config).await?;
 
-    // Apply CLI overrides
+    // Apply CLI overrides (rebuilds runner internally)
     if let Some(provider) = &args.provider {
         if let Some(model) = &args.model {
-            harness.provider_mgr_mut().switch(provider, model)?;
+            harness.switch(provider, model)?;
         } else {
-            harness.provider_mgr_mut().switch_provider(provider)?;
+            harness.switch_provider(provider)?;
         }
     } else if let Some(model) = &args.model {
-        harness.provider_mgr_mut().switch_model(model)?;
+        harness.switch_model(model)?;
     }
 
     match &args.prompt {

@@ -15,7 +15,7 @@ adk-rust = { version = "0.7.0", features = [
 adk-model = { version = "0.7.0", features = [
     "openai", "anthropic", "deepseek", "ollama", "groq", "openrouter"
 ] }
-adk-tool = "0.6"
+adk-tool = "0.7"
 adk-session = { version = "0.7.0", features = ["sqlite"] }
 schemars = "0.8"
 

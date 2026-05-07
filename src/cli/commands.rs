@@ -79,7 +79,6 @@ impl Command {
             Self::Quit => Ok(false),
             Self::Model { name } => {
                 if name.is_empty() {
-                    // Show current model
                     println!(
                         "Current: {}/{}",
                         harness.provider_mgr().current_provider(),
@@ -87,18 +86,18 @@ impl Command {
                     );
                     return Ok(true);
                 }
-                match harness.provider_mgr_mut().switch_model(name) {
+                match harness.switch_model(name) {
                     Ok(()) => {
                         println!(
                             "{} Switched to {}/{}",
-                            "✓".green(),
+                            "\u{2713}".green(),
                             harness.provider_mgr().current_provider(),
                             harness.provider_mgr().current_model_name()
                         );
                         Ok(true)
                     }
                     Err(e) => {
-                        println!("{} {e}", "✗".red());
+                        println!("{} {e}", "\u{2717}".red());
                         Ok(true)
                     }
                 }
@@ -112,18 +111,18 @@ impl Command {
                     );
                     return Ok(true);
                 }
-                match harness.provider_mgr_mut().switch_provider(name) {
+                match harness.switch_provider(name) {
                     Ok(()) => {
                         println!(
                             "{} Switched to {}/{}",
-                            "✓".green(),
+                            "\u{2713}".green(),
                             harness.provider_mgr().current_provider(),
                             harness.provider_mgr().current_model_name()
                         );
                         Ok(true)
                     }
                     Err(e) => {
-                        println!("{} {e}", "✗".red());
+                        println!("{} {e}", "\u{2717}".red());
                         Ok(true)
                     }
                 }
@@ -136,7 +135,7 @@ impl Command {
                     let marker = if info.provider == current_provider
                         && info.default_model == current_model
                     {
-                        " ← current"
+                        " \u{2190} current"
                     } else {
                         ""
                     };
@@ -173,29 +172,30 @@ impl Command {
                             println!("Sessions:");
                             let current_id = harness.current_session_id();
                             for s in &sessions {
-                                let marker = if s.id == current_id { " ← current" } else { "" };
+                                let marker =
+                                    if s.id == current_id { " \u{2190} current" } else { "" };
                                 println!("  {s}{marker}");
                             }
                         }
                     }
-                    Err(e) => println!("{} Failed to list sessions: {e}", "✗".red()),
+                    Err(e) => println!("{} Failed to list sessions: {e}", "\u{2717}".red()),
                 }
                 Ok(true)
             }
             Self::Resume { id } => {
                 if id.is_empty() {
-                    println!("{} Usage: /resume <session-id>", "✗".red());
+                    println!("{} Usage: /resume <session-id>", "\u{2717}".red());
                     return Ok(true);
                 }
                 match harness.resume_session(id).await {
                     Ok(()) => {
                         println!(
                             "{} Resumed session {}",
-                            "✓".green(),
+                            "\u{2713}".green(),
                             harness.current_session_id()
                         );
                     }
-                    Err(e) => println!("{} Failed to resume session: {e}", "✗".red()),
+                    Err(e) => println!("{} Failed to resume session: {e}", "\u{2717}".red()),
                 }
                 Ok(true)
             }

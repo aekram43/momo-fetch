@@ -1,8 +1,14 @@
+use std::sync::Arc;
+
+use adk_rust::agent::LlmAgentBuilder;
+use adk_rust::runner::Runner;
+use adk_rust::{Content, EventStream, ToolConfirmationPolicy};
+
 use crate::config::HarnessConfig;
+use crate::context::ContextBuilder;
 use crate::memory::vault::ObsidianVault;
 use crate::providers::ProviderManager;
 use crate::sandbox::FilesystemSandbox;
-use crate::context::ContextBuilder;
 use crate::session::SessionManager;
 
 /// Central orchestrator for the agent harness.
@@ -10,10 +16,11 @@ use crate::session::SessionManager;
 /// Owns the adk Runner, agent, vault, and all subsystems.
 pub struct Harness {
     provider_mgr: ProviderManager,
-    sandbox: FilesystemSandbox,
+    sandbox: Arc<FilesystemSandbox>,
     context_builder: ContextBuilder,
     vault: ObsidianVault,
     session_mgr: SessionManager,
+    runner: Runner,
     current_session_id: String,
     config: HarnessConfig,
 }
@@ -29,10 +36,10 @@ impl Harness {
         let provider_mgr = ProviderManager::from_env()?;
 
         // Initialize sandbox
-        let sandbox = FilesystemSandbox::new(
+        let sandbox = Arc::new(FilesystemSandbox::new(
             &config.project_path,
             config.permission_mode,
-        )?;
+        )?);
 
         // Build context (AGENTS.md + KMS + memory)
         let context_builder = ContextBuilder::new(&config.project_path, &vault)?;
@@ -41,10 +48,7 @@ impl Harness {
         let session_mgr = SessionManager::new(&config.session_db_path).await?;
 
         // Create a new session (or resume if session_id is provided)
-        let current_session_id = config
-            .resume_session_id
-            .clone()
-            .unwrap_or_default();
+        let current_session_id = config.resume_session_id.clone().unwrap_or_default();
 
         let current_session_id = if current_session_id.is_empty() {
             let session = session_mgr.create_session(None).await?;
@@ -55,16 +59,113 @@ impl Harness {
             current_session_id
         };
 
+        // Build Runner with Agent
+        let runner = Self::build_runner(
+            &provider_mgr,
+            &context_builder,
+            &sandbox, // Arc<FilesystemSandbox>
+            session_mgr.service(),
+        )?;
+
         Ok(Self {
             provider_mgr,
-            sandbox,
+            sandbox, // Arc<FilesystemSandbox>
             context_builder,
             vault,
             session_mgr,
+            runner,
             current_session_id,
             config,
         })
     }
+
+    /// Build the adk Runner and LlmAgent.
+    fn build_runner(
+        provider_mgr: &ProviderManager,
+        context_builder: &ContextBuilder,
+        sandbox: &Arc<FilesystemSandbox>,
+        session_service: Arc<dyn adk_session::SessionService>,
+    ) -> anyhow::Result<Runner> {
+        let tools = crate::tools::build_tool_registry(sandbox.clone());
+
+        let policy = sandbox.to_tool_confirmation_policy();
+
+        let mut agent_builder = LlmAgentBuilder::new("agent-harness")
+            .model(provider_mgr.current())
+            .instruction(context_builder.system_prompt());
+
+        // Set tool confirmation policy based on permission mode
+        match policy {
+            ToolConfirmationPolicy::Never => {}
+            ToolConfirmationPolicy::Always => {
+                agent_builder = agent_builder.tool_confirmation_policy(policy);
+            }
+            ToolConfirmationPolicy::PerTool(_) => {
+                agent_builder = agent_builder.tool_confirmation_policy(policy);
+            }
+        }
+
+        for tool in tools {
+            agent_builder = agent_builder.tool(tool);
+        }
+
+        let agent = agent_builder.build()?;
+
+        let runner = Runner::builder()
+            .app_name("agent-harness")
+            .agent(Arc::new(agent))
+            .session_service(session_service)
+            .build()?;
+
+        Ok(runner)
+    }
+
+    /// Rebuild the Runner (e.g., after model/provider switch).
+    fn rebuild_runner(&mut self) -> anyhow::Result<()> {
+        self.runner = Self::build_runner(
+            &self.provider_mgr,
+            &self.context_builder,
+            &self.sandbox,
+            self.session_mgr.service(),
+        )?;
+        Ok(())
+    }
+
+    /// Run a single conversational turn.
+    /// Returns an EventStream for the REPL to consume.
+    pub async fn run_turn(&self, input: &str) -> anyhow::Result<EventStream> {
+        let content = Content::new("user").with_text(input);
+        let stream = self
+            .runner
+            .run_str("default-user", &self.current_session_id, content)
+            .await?;
+        Ok(stream)
+    }
+
+    /// Interrupt current generation.
+    pub fn interrupt(&self) -> bool {
+        self.runner.interrupt(&self.current_session_id)
+    }
+
+    /// Switch model and rebuild runner.
+    pub fn switch_model(&mut self, model: &str) -> anyhow::Result<()> {
+        self.provider_mgr.switch_model(model)?;
+        self.rebuild_runner()
+    }
+
+    /// Switch provider and rebuild runner.
+    pub fn switch_provider(&mut self, provider: &str) -> anyhow::Result<()> {
+        self.provider_mgr.switch_provider(provider)?;
+        self.rebuild_runner()
+    }
+
+    /// Switch both provider and model, then rebuild runner.
+    pub fn switch(&mut self, provider: &str, model: &str) -> anyhow::Result<()> {
+        self.provider_mgr.switch(provider, model)?;
+        self.rebuild_runner()
+    }
+
+    // ── Accessors ──────────────────────────────────────────────
 
     /// Get a reference to the provider manager.
     pub fn provider_mgr(&self) -> &ProviderManager {
@@ -72,6 +173,7 @@ impl Harness {
     }
 
     /// Get a mutable reference to the provider manager.
+    /// Note: after mutating, call `rebuild_runner()` to update the agent.
     pub fn provider_mgr_mut(&mut self) -> &mut ProviderManager {
         &mut self.provider_mgr
     }
