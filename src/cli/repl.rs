@@ -244,6 +244,9 @@ async fn run_turn_streaming(
     shutting_down: &Arc<AtomicBool>,
     turn_active: &Arc<AtomicBool>,
 ) {
+    // Reset turn accumulators for cost tracking
+    harness.cost_tracker().reset_turn();
+
     turn_active.store(true, Ordering::Relaxed);
     match harness.run_turn(input).await {
         Ok(stream) => {
@@ -253,6 +256,15 @@ async fn run_turn_streaming(
             println!("{} {}", "\u{2717}".red(), format!("{e}").red());
         }
     }
+
+    // Finalize cost tracking for this turn
+    harness.cost_tracker().finalize_turn();
+
+    // Check budget alerts
+    if let Some(alert) = harness.cost_tracker().budget_alert() {
+        println!("\n{}", alert.yellow());
+    }
+
     turn_active.store(false, Ordering::Relaxed);
 }
 
@@ -281,6 +293,11 @@ async fn consume_stream(
                 match result {
                     Some(Ok(event)) => {
                         has_output = true;
+
+                        // Capture usage metadata for cost tracking
+                        if let Some(ref usage) = event.llm_response.usage_metadata {
+                            harness.cost_tracker().record_event(usage);
+                        }
 
                         // Handle tool confirmation request
                         if let Some(confirm_req) = &event.actions.tool_confirmation {

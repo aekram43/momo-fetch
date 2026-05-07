@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod context;
+mod cost;
 mod harness;
 mod mcp;
 mod memory;

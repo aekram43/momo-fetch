@@ -8,7 +8,11 @@ pub enum Command {
     Models,
     Sessions,
     Resume { id: String },
-    Cost,
+    CostToday,
+    CostWeek,
+    CostSession,
+    CostProject { name: String },
+    CostProjects,
     Mem,
     KmsList,
     SkillList,
@@ -52,7 +56,24 @@ impl Command {
             &"resume" => Some(Self::Resume {
                 id: parts.get(1).unwrap_or(&"").to_string(),
             }),
-            &"cost" => Some(Self::Cost),
+            &"cost" => {
+                let sub = parts.get(1).unwrap_or(&"");
+                match *sub {
+                    "today" => Some(Self::CostToday),
+                    "week" => Some(Self::CostWeek),
+                    "project" => {
+                        let name = parts.get(2).unwrap_or(&"").to_string();
+                        if name.is_empty() {
+                            // /cost project with no arg — list all projects
+                            Some(Self::CostProjects)
+                        } else {
+                            Some(Self::CostProject { name })
+                        }
+                    }
+                    "session" | "" => Some(Self::CostSession),
+                    _ => Some(Self::Unknown(input.to_string())),
+                }
+            }
             &"mem" => Some(Self::Mem),
             &"kms" => {
                 let sub = parts.get(1).unwrap_or(&"");
@@ -216,8 +237,56 @@ impl Command {
                 }
                 Ok(true)
             }
-            Self::Cost => {
-                println!("Cost tracking: not yet implemented");
+            Self::CostSession => {
+                let summary = harness.cost_tracker().session_summary();
+                println!("Session: {}", summary);
+                let today = harness.cost_tracker().today_summary();
+                println!("Today:   {}", today);
+                let project = harness.cost_tracker().current_project();
+                if !project.is_empty() {
+                    let proj = harness.cost_tracker().project_summary(&project);
+                    println!("Project ({}): {}", project, proj);
+                }
+                Ok(true)
+            }
+            Self::CostToday => {
+                let summary = harness.cost_tracker().today_summary();
+                let session = harness.cost_tracker().session_summary();
+                println!("Today:   {}", summary);
+                println!("Session: {}", session);
+                Ok(true)
+            }
+            Self::CostWeek => {
+                let summary = harness.cost_tracker().week_summary();
+                let session = harness.cost_tracker().session_summary();
+                println!("Week:    {}", summary);
+                println!("Session: {}", session);
+                Ok(true)
+            }
+            Self::CostProject { name } => {
+                let summary = harness.cost_tracker().project_summary(name);
+                let session = harness.cost_tracker().session_summary();
+                println!("Project ({}): {}", name, summary);
+                println!("Session:      {}", session);
+                Ok(true)
+            }
+            Self::CostProjects => {
+                let projects = harness.cost_tracker().list_projects();
+                if projects.is_empty() {
+                    println!("No projects with cost data yet.");
+                    let current = harness.cost_tracker().current_project();
+                    if !current.is_empty() {
+                        println!("Current project: {}", current);
+                    }
+                } else {
+                    println!("Projects:");
+                    let current = harness.cost_tracker().current_project();
+                    for project in &projects {
+                        let summary = harness.cost_tracker().project_summary(project);
+                        let marker = if project == &current { " \u{2190} current" } else { "" };
+                        println!("  {}: {}{marker}", project, summary);
+                    }
+                }
                 Ok(true)
             }
             Self::Mem => {
@@ -541,7 +610,11 @@ impl Command {
   /models              List available providers/models
   /sessions            List past sessions
   /resume <id>         Resume a session
-  /cost                Show session cost
+  /cost                Show session + today + project cost
+  /cost today          Show today's cost
+  /cost week           Show this week's cost
+  /cost project <name> Show cost for a specific project
+  /cost project        List all projects with cost data
   /mem                 Memory status
   /kms                 Knowledge base status
   /skill list          List installed skills

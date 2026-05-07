@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use adk_rust::agent::LlmAgentBuilder;
@@ -6,6 +7,7 @@ use adk_rust::{Content, EventStream, ToolConfirmationPolicy};
 
 use crate::config::HarnessConfig;
 use crate::context::ContextBuilder;
+use crate::cost::CostTracker;
 use crate::mcp::McpService;
 use crate::memory::vault::ObsidianVault;
 use crate::providers::ProviderManager;
@@ -24,6 +26,7 @@ pub struct Harness {
     session_mgr: SessionManager,
     mcp_service: McpService,
     skill_service: SkillService,
+    cost_tracker: CostTracker,
     runner: Runner,
     current_session_id: String,
     config: HarnessConfig,
@@ -33,6 +36,12 @@ impl Harness {
     /// Build a new Harness from configuration.
     /// This is the main entry point after CLI argument parsing.
     pub async fn build(config: HarnessConfig) -> anyhow::Result<Self> {
+        // Ensure config directory exists
+        let config_dir = dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("agent-harness");
+        let _ = std::fs::create_dir_all(&config_dir);
+
         // Initialize memory vault
         let vault = Arc::new(Mutex::new(ObsidianVault::open(&config.vault_path)?));
 
@@ -51,7 +60,7 @@ impl Harness {
         drop(vault_guard);
 
         // Initialize session service (SQLite)
-        let session_mgr = SessionManager::new(&config.session_db_path).await?;
+        let session_mgr = SessionManager::new(&config_dir.join("sessions.db")).await?;
 
         // Create a new session (or resume if session_id is provided)
         let current_session_id = config.resume_session_id.clone().unwrap_or_default();
@@ -95,6 +104,9 @@ impl Harness {
             tracing::info!("Skills: {} loaded", skill_service.skill_count());
         }
 
+        // Initialize cost tracker
+        let cost_tracker = CostTracker::new(config_dir.join("cost.json"));
+
         // Build Runner with Agent
         let runner = Self::build_runner(
             &provider_mgr,
@@ -106,6 +118,19 @@ impl Harness {
             &skill_service,
         )?;
 
+        // Initialize cost tracker session context
+        let project_name = config
+            .project_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        cost_tracker.set_session_context_with_project(
+            &current_session_id,
+            &provider_mgr.current_provider().to_string(),
+            provider_mgr.current_model_name(),
+            &project_name,
+        );
+
         Ok(Self {
             provider_mgr,
             sandbox,
@@ -114,6 +139,7 @@ impl Harness {
             session_mgr,
             mcp_service,
             skill_service,
+            cost_tracker,
             runner,
             current_session_id,
             config,
@@ -223,19 +249,40 @@ impl Harness {
     /// Switch model and rebuild runner.
     pub fn switch_model(&mut self, model: &str) -> anyhow::Result<()> {
         self.provider_mgr.switch_model(model)?;
-        self.rebuild_runner()
+        self.rebuild_runner()?;
+        self.cost_tracker
+            .set_session_context(
+                &self.current_session_id,
+                &self.provider_mgr.current_provider().to_string(),
+                self.provider_mgr.current_model_name(),
+            );
+        Ok(())
     }
 
     /// Switch provider and rebuild runner.
     pub fn switch_provider(&mut self, provider: &str) -> anyhow::Result<()> {
         self.provider_mgr.switch_provider(provider)?;
-        self.rebuild_runner()
+        self.rebuild_runner()?;
+        self.cost_tracker
+            .set_session_context(
+                &self.current_session_id,
+                &self.provider_mgr.current_provider().to_string(),
+                self.provider_mgr.current_model_name(),
+            );
+        Ok(())
     }
 
     /// Switch both provider and model, then rebuild runner.
     pub fn switch(&mut self, provider: &str, model: &str) -> anyhow::Result<()> {
         self.provider_mgr.switch(provider, model)?;
-        self.rebuild_runner()
+        self.rebuild_runner()?;
+        self.cost_tracker
+            .set_session_context(
+                &self.current_session_id,
+                &self.provider_mgr.current_provider().to_string(),
+                self.provider_mgr.current_model_name(),
+            );
+        Ok(())
     }
 
     // ── Accessors ──────────────────────────────────────────────
@@ -291,6 +338,11 @@ impl Harness {
         &mut self.skill_service
     }
 
+    /// Get a reference to the cost tracker.
+    pub fn cost_tracker(&self) -> &CostTracker {
+        &self.cost_tracker
+    }
+
     /// Get the current session ID.
     pub fn current_session_id(&self) -> &str {
         &self.current_session_id
@@ -305,6 +357,12 @@ impl Harness {
     pub async fn new_session(&mut self) -> anyhow::Result<String> {
         let session = self.session_mgr.create_session(None).await?;
         self.current_session_id = session.id().to_string();
+        self.cost_tracker
+            .set_session_context(
+                &self.current_session_id,
+                &self.provider_mgr.current_provider().to_string(),
+                self.provider_mgr.current_model_name(),
+            );
         Ok(self.current_session_id.clone())
     }
 
@@ -313,6 +371,12 @@ impl Harness {
         // Verify session exists
         self.session_mgr.get_session(session_id).await?;
         self.current_session_id = session_id.to_string();
+        self.cost_tracker
+            .set_session_context(
+                &self.current_session_id,
+                &self.provider_mgr.current_provider().to_string(),
+                self.provider_mgr.current_model_name(),
+            );
         Ok(())
     }
 }

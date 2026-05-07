@@ -33,6 +33,8 @@ Started: Wed May  6 23:34:32 +07 2026
 - **Secret management**: `SecretStore::get(provider)` checks env var first, then OS keychain — used by all provider creation in ProviderManager. Never store secrets in config files or logs
 - **keyring-core 1.0.0**: cross-platform keychain API — same Entry/Service pattern for macOS Keychain, Linux Secret Service, Windows Credential Manager
 - **Key tests in CI**: wrap `SecretStore::set()` in an `if is_err() { return; }` guard — keychain may not be available in headless/CI environments
+- **CRITICAL Mutex deadlock pattern**: Never use `*mutex.lock().unwrap()` twice for the same mutex in a single struct initializer — the MutexGuard temporary lives until end of statement, causing self-deadlock. Always extract values into local `let` bindings first.
+- **std::sync::Mutex is NOT reentrant**: If method A acquires a lock and calls method B that also locks the same mutex, it deadlocks. Clone the value in a block scope to release before calling.
 
 ### adk-rust 0.7.0 API Reference (verified from source)
 
@@ -480,4 +482,34 @@ Started: Wed May  6 23:34:32 +07 2026
   - `CancellationToken` from `tokio_util` — same crate adk-runner uses internally. Our graceful shutdown uses `Arc<AtomicBool>` which is sufficient for REPL-loop coordination.
   - The `turn_active` flag is set/unset around `run_turn_streaming()` in the REPL loop — the `consume_stream` function doesn't need it because it only reads `shutting_down`.
   - Session persistence during cancellation is automatic — adk-runner yields events to the stream, and the session service appends them. When we `interrupt()`, already-yielded events are in the session; future events simply aren't produced.
+---
+
+## Wed May 7 16:30 +07 2026 - US-020
+- Implemented Cost tracking with token counting, cost estimation, and persistence
+- CostTracker with pricing per provider/model: Anthropic (Opus/Sonnet/Haiku), OpenAI (GPT-4o/o1/o3), DeepSeek (chat/reasoner), Groq, Ollama (free), custom/unknown
+- Token counting from `Event.llm_response.usage_metadata` during streaming — accumulated per turn, finalized on turn end
+- Cost data persisted to `~/.config/agent-harness/cost.json` (JSON file, atomic write)
+- CostRecord includes: session_id, timestamp, provider, model, project, prompt/completion/total tokens, estimated_cost
+- Daily/session/week/project cost aggregation via record filtering
+- `/cost` command shows session + today + project summary
+- `/cost today` shows today's cost
+- `/cost week` shows last 7 days
+- `/cost project <name>` shows cost for a specific project
+- `/cost project` (no arg) lists all projects with cost data
+- Project name derived from project_path directory basename
+- Budget alert system: configurable daily/session limits, warning at 80%, alert at 100%
+- `UsageMetadata` from adk-rust provides `prompt_token_count` and `candidates_token_count`
+- Backward-compatible JSON loading: `#[serde(default)]` on `project` field handles old cost files
+- Fixed critical deadlock in `session_summary()`: Mutex temporaries in struct initializer kept locks alive, causing self-deadlock when same mutex appeared twice in expression
+- Fixed lock ordering: `set_session_context` preserves project by cloning value before releasing lock
+- 203 tests pass (22 cost tests: 12 pricing + 4 persistence + 4 aggregation + 2 project)
+- Files changed: src/cost.rs (new, full implementation), src/harness.rs (integrate CostTracker with project), src/cli/commands.rs (CostProject/CostProjects commands + help text), src/main.rs (add mod cost), src/cli/repl.rs (token counting in stream + budget alert after turn)
+- **Learnings for future iterations:**
+  - **CRITICAL: Rust Mutex self-deadlock pattern**: When using `*mutex.lock().unwrap()` in a struct initializer, the MutexGuard temporary lives until the END of the statement. If the same mutex appears twice in the same expression (e.g., `CostSummary { total_prompt_tokens: *m.lock().unwrap(), total_tokens: *m.lock().unwrap() + ... }`), the second lock attempt DEADLOCKS because the first guard is still alive. Always extract values into local variables first.
+  - **CRITICAL: Non-reentrant Mutex**: `std::sync::Mutex` is NOT reentrant. If method A acquires a lock and calls method B which also acquires the same lock, it deadlocks. Use `let val = { let guard = mutex.lock().unwrap(); guard.clone() };` to release before calling.
+  - `UsageMetadata` has `prompt_token_count` and `candidates_token_count` fields — streaming may send multiple partial events; use non-zero check to filter noise
+  - Cost data uses JSON file (not SQLite session DB) for simplicity — easier to inspect/debug, no migration needed
+  - `serde(default)` on struct fields handles backward compatibility when loading old JSON files
+  - Project name from `Path::file_name()` gives directory basename — good enough for cost tracking
+---
 ---
