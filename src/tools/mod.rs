@@ -1,4 +1,5 @@
 pub mod file;
+pub mod kms;
 pub mod memory;
 pub mod search;
 pub mod shell;
@@ -23,7 +24,8 @@ pub fn build_tool_registry(
     // Set sandbox for all tool modules
     file::set_sandbox(sandbox.clone());
     shell::set_sandbox(sandbox.clone());
-    search::set_sandbox(sandbox);
+    search::set_sandbox(sandbox.clone());
+    kms::set_sandbox(sandbox.clone());
 
     // Set vault for memory tools
     memory::set_vault(vault);
@@ -41,6 +43,10 @@ pub fn build_tool_registry(
         // Web tools
         Arc::new(web::WebSearch),
         Arc::new(web::WebFetch),
+        // KMS tools
+        Arc::new(kms::KmsRead),
+        Arc::new(kms::KmsSearch),
+        Arc::new(kms::KmsWrite),
         // Memory tools
         Arc::new(memory::MemWrite),
         Arc::new(memory::MemExtract),
@@ -68,7 +74,8 @@ pub fn build_sub_agent_tool_registry(
     // Set sandbox for sub-agent tools (may already be set — safe to re-set)
     file::set_sandbox(sandbox.clone());
     shell::set_sandbox(sandbox.clone());
-    search::set_sandbox(sandbox);
+    search::set_sandbox(sandbox.clone());
+    kms::set_sandbox(sandbox.clone());
 
     // Set vault for memory tools
     memory::set_vault(vault);
@@ -86,6 +93,10 @@ pub fn build_sub_agent_tool_registry(
         // Web tools
         Arc::new(web::WebSearch),
         Arc::new(web::WebFetch),
+        // KMS tools
+        Arc::new(kms::KmsRead),
+        Arc::new(kms::KmsSearch),
+        Arc::new(kms::KmsWrite),
         // Memory tools
         Arc::new(memory::MemWrite),
         Arc::new(memory::MemExtract),

@@ -10,7 +10,7 @@ pub enum Command {
     Resume { id: String },
     Cost,
     Mem,
-    Kms,
+    KmsList,
     SkillList,
     SkillInstall { git_url: String },
     McpList,
@@ -51,7 +51,13 @@ impl Command {
             }),
             &"cost" => Some(Self::Cost),
             &"mem" => Some(Self::Mem),
-            &"kms" => Some(Self::Kms),
+            &"kms" => {
+                let sub = parts.get(1).unwrap_or(&"");
+                match *sub {
+                    "list" | "" => Some(Self::KmsList),
+                    _ => Some(Self::Unknown(input.to_string())),
+                }
+            }
             &"skill" => {
                 let sub = parts.get(1).unwrap_or(&"");
                 match *sub {
@@ -207,8 +213,22 @@ impl Command {
                 println!("Use mem_write and mem_extract tools to interact with the vault.");
                 Ok(true)
             }
-            Self::Kms => {
-                println!("KMS: not yet implemented");
+            Self::KmsList => {
+                use crate::tools::kms::list_knowledge_bases;
+                let kbs = list_knowledge_bases(harness.sandbox().root());
+                if kbs.is_empty() {
+                    println!("No knowledge bases found.");
+                    println!("Create one with: mkdir -p .kms/<name>/pages");
+                } else {
+                    println!("Knowledge bases:");
+                    for kb in &kbs {
+                        let index_marker = if kb.has_index { "" } else { " (no index)" };
+                        println!(
+                            "  {} ({} pages){index_marker}",
+                            kb.name, kb.page_count
+                        );
+                    }
+                }
                 Ok(true)
             }
             Self::SkillList => {
