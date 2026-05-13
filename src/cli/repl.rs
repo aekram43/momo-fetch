@@ -9,6 +9,13 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
 use crate::harness::Harness;
+use crate::memory::sidecar::TurnSummary;
+
+// ─── Thread-local for collecting turn data during stream consumption ──
+
+thread_local! {
+    static TURN_SUMMARY: std::cell::RefCell<Option<TurnSummary>> = std::cell::RefCell::new(None);
+}
 
 /// Run the interactive REPL loop.
 pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
@@ -18,7 +25,7 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
     // Print startup info
     println!(
         "{} {} \u{2014} {} ({})",
-        "Agent Harness".green().bold(),
+        "MOMO Fetch".green().bold(),
         env!("CARGO_PKG_VERSION"),
         harness.provider_mgr().current_provider(),
         harness.provider_mgr().current_model_name(),
@@ -64,7 +71,7 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
 
     let mut rl = DefaultEditor::new()?;
     let history_path =
-        dirs::home_dir().map(|h| h.join(".config/agent-harness/history.txt"));
+        dirs::home_dir().map(|h| h.join(".config/momo-fetch/history.txt"));
 
     if let Some(ref path) = history_path {
         if let Some(parent) = path.parent() {
@@ -80,10 +87,18 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
             break;
         }
 
-        let prompt = format!(
-            "{}> ",
-            harness.provider_mgr().current_model_name().dimmed()
-        );
+        let prompt = {
+            let mode_tag = match harness.sandbox().permission_mode() {
+                crate::sandbox::PermissionMode::Strict => String::new(),
+                crate::sandbox::PermissionMode::Auto => " [auto]".to_string(),
+                crate::sandbox::PermissionMode::Yolo => " [yolo]".to_string(),
+            };
+            format!(
+                "{}{}> ",
+                harness.provider_mgr().current_model_name().dimmed(),
+                mode_tag.yellow(),
+            )
+        };
         let readline = rl.readline(&prompt);
         match readline {
             Ok(line) => {
@@ -238,6 +253,9 @@ fn read_multiline_continuation(rl: &mut DefaultEditor, first_line: &str) -> Stri
 }
 
 /// Run a single conversational turn with streaming output.
+///
+/// If auto_search is enabled, enriches the input with relevant memories.
+/// If auto_write is enabled, writes a MemCell after the turn completes.
 async fn run_turn_streaming(
     harness: &Harness,
     input: &str,
@@ -248,8 +266,11 @@ async fn run_turn_streaming(
     harness.cost_tracker().reset_turn();
 
     turn_active.store(true, Ordering::Relaxed);
-    match harness.run_turn(input).await {
-        Ok(stream) => {
+
+    // Use enriched turn (auto-search prepends relevant memories)
+    let enriched_result = harness.run_turn_enriched(input).await;
+    match enriched_result {
+        Ok((_enriched_input, stream)) => {
             consume_stream(harness, stream, shutting_down).await;
         }
         Err(e) => {
@@ -265,20 +286,45 @@ async fn run_turn_streaming(
         println!("\n{}", alert.yellow());
     }
 
+    // Post-turn: auto-write memory (Option A or B)
+    if harness.memory_sidecar().auto_write_enabled() {
+        let project_name = harness
+            .config()
+            .project_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        // Collect turn summary from stream data and merge user_message
+        let turn_summary = TURN_SUMMARY.with(|t| {
+            let mut guard = t.borrow_mut();
+            let mut summary = guard.take().unwrap_or_else(|| TurnSummary {
+                user_message: String::new(),
+                tool_calls: Vec::new(),
+                response_preview: String::new(),
+                project: project_name,
+            });
+            summary.user_message = input.to_string();
+            summary
+        });
+
+        match harness.memory_sidecar().write_turn_memory_option_a(&turn_summary) {
+            Ok(memcell_ref) => {
+                tracing::debug!("Auto-wrote MemCell: {memcell_ref}");
+            }
+            Err(e) => {
+                tracing::warn!("Auto-write MemCell failed: {e}");
+            }
+        }
+    }
+
     turn_active.store(false, Ordering::Relaxed);
 }
 
 /// Consume an EventStream with colored output, Ctrl+C cancellation, and
 /// graceful shutdown support.
 ///
-/// Graceful shutdown behavior:
-/// - When `shutting_down` is true and we're waiting for a tool response,
-///   we continue consuming until the tool finishes (FunctionResponse received)
-///   rather than breaking immediately.
-/// - When `shutting_down` is true and we're just streaming text,
-///   we break immediately.
-/// - Ctrl+C during normal operation cancels the generation (existing behavior).
-/// - Ctrl+C during graceful shutdown forces an immediate exit.
+/// Also collects tool calls and response text for post-turn memory write.
 async fn consume_stream(
     harness: &Harness,
     mut stream: EventStream,
@@ -286,6 +332,8 @@ async fn consume_stream(
 ) {
     let mut in_tool_call = false;
     let mut has_output = false;
+    let mut tool_calls: Vec<String> = Vec::new();
+    let mut response_parts: Vec<String> = Vec::new();
 
     loop {
         tokio::select! {
@@ -317,6 +365,7 @@ async fn consume_stream(
                                         print!("{}", text);
                                         let _ = std::io::stdout().flush();
                                         in_tool_call = false;
+                                        response_parts.push(text.clone());
                                     }
                                     Part::FunctionCall { name, args, .. } => {
                                         if in_tool_call {
@@ -329,6 +378,7 @@ async fn consume_stream(
                                             summarize_args(args),
                                         );
                                         in_tool_call = true;
+                                        tool_calls.push(format!("{}({})", name, summarize_args(args)));
                                     }
                                     Part::FunctionResponse { function_response, .. } => {
                                         if in_tool_call {
@@ -397,6 +447,32 @@ async fn consume_stream(
     if has_output {
         println!(); // Trailing newline after response
     }
+
+    // Store turn summary for post-turn memory write
+    let response_preview: String = response_parts.join("");
+    let preview = if response_preview.len() > 300 {
+        let mut end = 300;
+        while end > 0 && !response_preview.is_char_boundary(end) {
+            end -= 1;
+        }
+        response_preview[..end].to_string()
+    } else {
+        response_preview
+    };
+    let project_name = harness
+        .config()
+        .project_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    TURN_SUMMARY.with(|t| {
+        *t.borrow_mut() = Some(TurnSummary {
+            user_message: String::new(), // Filled in by run_turn_streaming
+            tool_calls,
+            response_preview: preview,
+            project: project_name,
+        });
+    });
 }
 
 /// Summarize tool arguments for display.

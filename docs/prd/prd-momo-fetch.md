@@ -43,6 +43,7 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 | **Shell execution** with destructive detection | Not provided |
 | **Filesystem sandbox** with `.agentignore` | adk-sandbox exists but needs customization for our workflow |
 | **AGENTS.md / CLAUDE.md** context injection | Not provided |
+| **SOUL.md** agent personality/identity injection | Not provided |
 | **Custom CLI** with slash commands (`/model`, `/mcp`, etc.) | adk-cli is basic REPL, we need domain-specific commands |
 | **Memory vault tools** (mem_write, mem_search, etc.) | Completely custom — our main differentiator |
 | **Web search/fetch** tools | Not provided (use MCP or build custom) |
@@ -70,12 +71,12 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 **Description:** As a developer, I want to scaffold the project using `cargo adk new` and customize it for our harness.
 
 **Acceptance Criteria:**
-- [ ] `cargo adk new agent-harness` สร้าง project ที่ถูกต้อง
+- [ ] `cargo adk new momo-fetch` สร้าง project ที่ถูกต้อง
 - [ ] `Cargo.toml` ใช้ `adk-rust = "0.6.0"` พร้อม features: `["openai", "anthropic", "deepseek", "ollama", "groq"]`
 - [ ] `cargo build` ผ่านไม่มี error
 - [ ] Custom source structure:
   ```
-  agent-harness/
+  momo-fetch/
   ├── Cargo.toml
   ├── src/
   │   ├── main.rs            ← entry point (custom CLI)
@@ -93,7 +94,7 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
   │   │   ├── retrieval.rs   ← grep_llm, graph_walk, tag_filter, agentic
   │   │   ├── lifecycle.rs   ← extract, consolidate, reflect
   │   │   └── types.rs       ← MemCell, Event, Foresight, Episode, etc.
-  │   ├── context/           ← AGENTS.md / CLAUDE.md loader
+  │   ├── context/           ← SOUL.md / AGENTS.md / CLAUDE.md loader
   │   ├── sandbox/           ← filesystem sandbox + .agentignore
   │   ├── config/            ← settings management
   │   └── providers.rs       ← provider_from_env + mid-session switch
@@ -192,7 +193,7 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 
 **Acceptance Criteria:**
 - [ ] Use `adk-session` SQLite backend: `SqliteSessionService`
-- [ ] Configure path: `~/.config/agent-harness/sessions.db`
+- [ ] Configure path: `~/.config/momo-fetch/sessions.db`
 - [ ] `/sessions` command: list past sessions
 - [ ] `/resume <id>` command: resume previous session
 - [ ] Auto-save every turn (built-in via adk-runner)
@@ -232,26 +233,28 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 **Description:** As a user, I want to run a single prompt and exit for scripts/CI.
 
 **Acceptance Criteria:**
-- [ ] `agent-harness -p "prompt"` runs 1 turn then exits
+- [ ] `momo-fetch -p "prompt"` runs 1 turn then exits
 - [ ] `--model <name>` flag: override model
 - [ ] `--provider <name>` flag: override provider
 - [ ] `--project <path>` flag: set working directory
 - [ ] `--permission <mode>` flag: set permission mode
 - [ ] Exit code: 0 = success, 1 = error
 - [ ] stdout: agent response, stderr: debug/logging
-- [ ] `cat file.md | agent-harness -p "summarize"` stdin support
+- [ ] `cat file.md | momo-fetch -p "summarize"` stdin support
 
 ---
 
-### US-010: AGENTS.md / CLAUDE.md context injection
+### US-010: SOUL.md / AGENTS.md / CLAUDE.md context injection
 
-**Description:** As a user, I want the agent to auto-discover project instruction files and inject them into the system prompt.
+**Description:** As a user, I want the agent to auto-discover project instruction files and agent personality files, and inject them into the system prompt.
 
 **Acceptance Criteria:**
-- [ ] Walk up from `cwd` finding: `AGENTS.md`, `CLAUDE.md`, `.harness/AGENTS.md`
+- [ ] Walk up from `cwd` finding: `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `.harness/SOUL.md`, `.harness/AGENTS.md`
 - [ ] Read all discovered files, inject into system prompt via `LlmAgentBuilder::instruction()`
+- [ ] SOUL.md gets its own section header (`"--- Soul from {path} ---"`) for behavioral priority
+- [ ] AGENTS.md / CLAUDE.md get context section headers (`"--- Context from {path} ---"`)
 - [ ] Files closer to cwd have higher priority (closer overrides further)
-- [ ] Log: "Loaded context from: ./AGENTS.md, ../CLAUDE.md"
+- [ ] Log: "Loaded context from: ./SOUL.md, ./AGENTS.md, ../CLAUDE.md"
 - [ ] No files found → continue without error
 
 ---
@@ -474,8 +477,8 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 
 ### Context
 
-- **FR-21**: System MUST walk up from cwd to find AGENTS.md / CLAUDE.md files
-- **FR-22**: System MUST inject discovered context files into system prompt
+- **FR-21**: System MUST walk up from cwd to find SOUL.md / AGENTS.md / CLAUDE.md files
+- **FR-22**: System MUST inject discovered context files into system prompt (SOUL.md with its own section header for personality, AGENTS.md/CLAUDE.md with context headers)
 - **FR-23**: System MUST support per-project configuration in `.harness/settings.json`
 
 ### MCP (from adk-tool)
@@ -530,7 +533,8 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 │                                                    │
 │  ┌──────────────┐  ┌───────────────────────────┐  │
 │  │ ProviderMgr  │  │ ContextBuilder            │  │
-│  │ (model swap) │  │  ├─ AGENTS.md walker     │  │
+│  │ (model swap) │  │  ├─ SOUL.md walker       │  │
+│  │              │  │  ├─ AGENTS.md walker     │  │
 │  └──────────────┘  │  ├─ Skill loader (adk)   │  │
 │                     │  └─ Memory context inject │  │
 │  ┌──────────────┐  └───────────────────────────┘  │
@@ -616,8 +620,8 @@ tracing-subscriber = "0.3"
 
 | File | Purpose |
 |------|---------|
-| `~/.config/agent-harness/settings.json` | User-level config |
-| `~/.config/agent-harness/sessions.db` | Session persistence (adk-session) |
+| `~/.config/momo-fetch/settings.json` | User-level config |
+| `~/.config/momo-fetch/sessions.db` | Session persistence (adk-session) |
 | `.harness/settings.json` | Project-level config |
 | `.harness/mcp.json` | MCP server config |
 | `.harness/skills/` | Installed skills (adk-skill scans this) |
@@ -696,7 +700,7 @@ tracing-subscriber = "0.3"
 - [x] ~~ต้องเขียน session เองไหม?~~ → **NO: `adk-session` has SQLite backend**
 - [x] ~~ต้องเขียน MCP client เองไหม?~~ → **NO: `adk-tool` has MCP built-in**
 - [x] ~~ต้องเขียน skill system เองไหม?~~ → **NO: `adk-skill` parses SKILL.md**
-- [ ] Memory vault path: relative to project หรือ global (`~/.config/agent-harness/memory-vault/`)?
+- [ ] Memory vault path: relative to project หรือ global (`~/.config/momo-fetch/memory-vault/`)?
 - [ ] ต้องรองรับ ThaiLLM endpoint แยกต่างหากหรือใช้ OpenAI-compatible preset?
 - [ ] Context compression: use adk-gemini's context compaction หรือ custom?
 - [ ] adk-cli REPL: extend หรือ replace entirely? ต้อว่าดู source ก่อนว่า extensible แค่ไหน

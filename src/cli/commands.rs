@@ -27,6 +27,7 @@ pub enum Command {
     TeamStatus,
     TeamStop,
     TeamMerge,
+    Permission { mode: String },
     Quit,
     ShellEscape { command: String },
     Unknown(String),
@@ -171,6 +172,9 @@ impl Command {
                     _ => Some(Self::Unknown(input.to_string())),
                 }
             }
+            &"permission" | &"perm" => Some(Self::Permission {
+                mode: parts.get(1).unwrap_or(&"").to_string(),
+            }),
             _ => Some(Self::Unknown(input.to_string())),
         }
     }
@@ -790,6 +794,41 @@ impl Command {
                 }
                 Ok(true)
             }
+            Self::Permission { mode } => {
+                use crate::sandbox::PermissionMode;
+                use std::str::FromStr;
+
+                if mode.is_empty() {
+                    println!(
+                        "Current: {}",
+                        harness.sandbox().permission_mode()
+                    );
+                    return Ok(true);
+                }
+                match PermissionMode::from_str(mode) {
+                    Ok(new_mode) => {
+                        match harness.switch_permission(new_mode) {
+                            Ok(()) => {
+                                println!(
+                                    "{} Switched to {}",
+                                    "\u{2713}".green(),
+                                    harness.sandbox().permission_mode()
+                                );
+                            }
+                            Err(e) => {
+                                println!("{} Failed to switch permission mode: {e}", "\u{2717}".red());
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        println!(
+                            "{} Unknown mode '{mode}'. Use: strict, auto, or yolo",
+                            "\u{2717}".red()
+                        );
+                    }
+                }
+                Ok(true)
+            }
             Self::Unknown(cmd) => {
                 println!("Unknown command: {cmd}");
                 println!("Type /help for available commands.");
@@ -825,6 +864,7 @@ impl Command {
   /team status         Show team status and worker progress
   /team merge          Merge completed workers' branches
   /team stop           Stop team and clean up worktrees
+  /permission [mode]   Switch permission mode (strict/auto/yolo)
   /quit                Exit
   !<command>           Run shell command directly"#
     }

@@ -167,7 +167,7 @@ pub async fn task(args: TaskArgs) -> Result<Value, AdkError> {
     let session_service = Arc::new(adk_session::InMemorySessionService::new());
 
     let runner = Runner::builder()
-        .app_name("agent-harness-task")
+        .app_name("momo-fetch-task")
         .agent(workflow_agent)
         .session_service(session_service)
         .build()

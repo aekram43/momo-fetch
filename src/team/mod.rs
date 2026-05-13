@@ -92,6 +92,32 @@ pub struct MailboxMessage {
     pub timestamp: u64,
 }
 
+// ─── Memory Sidecar Mailbox Protocol (Option C) ─────────────────────
+
+/// Well-known mailbox identities for the memory sidecar protocol.
+pub mod sidecar_protocol {
+    /// The sidecar process identifies itself as "memory-sidecar".
+    pub const SIDECAR_ID: &str = "memory-sidecar";
+    /// The main process identifies itself as "main".
+    pub const MAIN_ID: &str = "main";
+
+    /// Message types for memory sidecar communication.
+    pub mod msg_type {
+        /// Search request: body contains the search query.
+        pub const SEARCH_REQUEST: &str = "search_request";
+        /// Search response: body contains JSON search results.
+        pub const SEARCH_RESPONSE: &str = "search_response";
+        /// Write request: body contains JSON TurnSummary.
+        pub const WRITE_REQUEST: &str = "write_request";
+        /// Write response: body contains the MemCell reference.
+        pub const WRITE_RESPONSE: &str = "write_response";
+        /// Health check / ready signal.
+        pub const READY: &str = "ready";
+        /// Shutdown request.
+        pub const SHUTDOWN: &str = "shutdown";
+    }
+}
+
 /// State for a single worker.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerState {
@@ -634,7 +660,7 @@ impl TeamService {
             if let Some(ref pid) = pane_id {
                 let binary_path = std::env::current_exe()
                     .map(|p| p.display().to_string())
-                    .unwrap_or_else(|_| "agent-harness".into());
+                    .unwrap_or_else(|_| "momo-fetch".into());
 
                 let work_dir_str = work_dir.display().to_string();
                 let cmd = format!(

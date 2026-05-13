@@ -7,7 +7,7 @@ use adk_session::{
     SqliteSessionService,
 };
 
-const APP_NAME: &str = "agent-harness";
+const APP_NAME: &str = "momo-fetch";
 const DEFAULT_USER: &str = "default-user";
 
 /// Manages session persistence using adk-session SQLite backend.

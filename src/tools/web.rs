@@ -134,7 +134,7 @@ async fn search_duckduckgo(query: &str, limit: usize) -> Result<Value, AdkError>
         .get(&url)
         .header(
             "User-Agent",
-            "Mozilla/5.0 (compatible; Agent-Harness/0.1)",
+            "Mozilla/5.0 (compatible; MOMO-Fetch/0.1)",
         )
         .send()
         .await
@@ -246,7 +246,7 @@ pub async fn web_fetch(args: WebFetchArgs) -> Result<Value, AdkError> {
 
     let resp = client
         .get(&args.url)
-        .header("User-Agent", "Agent-Harness/0.1 (web fetch tool)")
+        .header("User-Agent", "MOMO-Fetch/0.1 (web fetch tool)")
         .send()
         .await
         .map_err(|e| AdkError::tool(format!("Request failed: {e}")))?

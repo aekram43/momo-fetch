@@ -9,6 +9,7 @@ use crate::config::HarnessConfig;
 use crate::context::ContextBuilder;
 use crate::cost::CostTracker;
 use crate::mcp::McpService;
+use crate::memory::sidecar::MemorySidecar;
 use crate::memory::vault::ObsidianVault;
 use crate::providers::ProviderManager;
 use crate::sandbox::FilesystemSandbox;
@@ -24,6 +25,7 @@ pub struct Harness {
     sandbox: Arc<FilesystemSandbox>,
     context_builder: ContextBuilder,
     vault: Arc<Mutex<ObsidianVault>>,
+    memory_sidecar: MemorySidecar,
     session_mgr: SessionManager,
     mcp_service: McpService,
     skill_service: SkillService,
@@ -41,7 +43,7 @@ impl Harness {
         // Ensure config directory exists
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("agent-harness");
+            .join("momo-fetch");
         let _ = std::fs::create_dir_all(&config_dir);
 
         // Initialize memory vault
@@ -60,6 +62,15 @@ impl Harness {
         let vault_guard = vault.lock().map_err(|e| anyhow::anyhow!("vault lock: {e}"))?;
         let context_builder = ContextBuilder::new(&config.project_path, &vault_guard)?;
         drop(vault_guard);
+
+        // Initialize memory sidecar (auto-search + auto-write)
+        let memory_sidecar = MemorySidecar::new(vault.clone(), config.memory.clone());
+        tracing::info!(
+            "Memory sidecar: auto_search={}, auto_write={}, sidecar_model={}",
+            memory_sidecar.auto_search_enabled(),
+            memory_sidecar.auto_write_enabled(),
+            memory_sidecar.sidecar_model().unwrap_or("none"),
+        );
 
         // Initialize session service (SQLite)
         let session_mgr = SessionManager::new(&config_dir.join("sessions.db")).await?;
@@ -118,6 +129,7 @@ impl Harness {
             &context_builder,
             &sandbox,
             &vault,
+            &memory_sidecar,
             session_mgr.service(),
             &mcp_service,
             &skill_service,
@@ -141,6 +153,7 @@ impl Harness {
             sandbox,
             context_builder,
             vault,
+            memory_sidecar,
             session_mgr,
             mcp_service,
             skill_service,
@@ -158,6 +171,7 @@ impl Harness {
         context_builder: &ContextBuilder,
         sandbox: &Arc<FilesystemSandbox>,
         vault: &Arc<Mutex<ObsidianVault>>,
+        memory_sidecar: &MemorySidecar,
         session_service: Arc<dyn adk_session::SessionService>,
         mcp_service: &McpService,
         skill_service: &SkillService,
@@ -166,11 +180,16 @@ impl Harness {
 
         let policy = sandbox.to_tool_confirmation_policy();
 
-        // Build system prompt with skill context
+        // Build system prompt with skill context + memory context
         let mut system_prompt = context_builder.system_prompt().to_string();
         if let Some(skill_ctx) = skill_service.build_skill_context() {
             system_prompt.push_str("\n\n");
             system_prompt.push_str(&skill_ctx);
+        }
+
+        // Add memory system prompt if auto features are enabled
+        if let Some(memory_ctx) = memory_sidecar.build_system_prompt_addition() {
+            system_prompt.push_str(&memory_ctx);
         }
 
         // Set task context so the Task tool can spawn sub-agents
@@ -186,7 +205,7 @@ impl Harness {
             depth: 0,
         });
 
-        let mut agent_builder = LlmAgentBuilder::new("agent-harness")
+        let mut agent_builder = LlmAgentBuilder::new("momo-fetch")
             .model(provider_mgr.current())
             .instruction(&system_prompt);
 
@@ -214,7 +233,7 @@ impl Harness {
         let agent = agent_builder.build()?;
 
         let runner = Runner::builder()
-            .app_name("agent-harness")
+            .app_name("momo-fetch")
             .agent(Arc::new(agent))
             .session_service(session_service)
             .build()?;
@@ -229,6 +248,7 @@ impl Harness {
             &self.context_builder,
             &self.sandbox,
             &self.vault,
+            &self.memory_sidecar,
             self.session_mgr.service(),
             &self.mcp_service,
             &self.skill_service,
@@ -245,6 +265,20 @@ impl Harness {
             .run_str("default-user", &self.current_session_id, content)
             .await?;
         Ok(stream)
+    }
+
+    /// Run a single conversational turn with memory enrichment.
+    ///
+    /// If auto_search is enabled, relevant memories are prepended to the input.
+    /// Returns the enriched input string (for tracking) and the EventStream.
+    pub async fn run_turn_enriched(&self, input: &str) -> anyhow::Result<(String, EventStream)> {
+        let enriched = self.memory_sidecar.enrich_input(input);
+        let content = Content::new("user").with_text(&enriched);
+        let stream = self
+            .runner
+            .run_str("default-user", &self.current_session_id, content)
+            .await?;
+        Ok((enriched, stream))
     }
 
     /// Interrupt current generation.
@@ -291,6 +325,16 @@ impl Harness {
         Ok(())
     }
 
+    /// Switch permission mode and rebuild runner.
+    pub fn switch_permission(&mut self, mode: crate::sandbox::PermissionMode) -> anyhow::Result<()> {
+        self.sandbox = Arc::new(FilesystemSandbox::new(
+            &self.config.project_path,
+            mode,
+        )?);
+        self.rebuild_runner()?;
+        Ok(())
+    }
+
     // ── Accessors ──────────────────────────────────────────────
 
     /// Get a reference to the provider manager.
@@ -317,6 +361,11 @@ impl Harness {
     /// Get a reference to the memory vault (Arc<Mutex<>>).
     pub fn vault(&self) -> &Arc<Mutex<ObsidianVault>> {
         &self.vault
+    }
+
+    /// Get a reference to the memory sidecar.
+    pub fn memory_sidecar(&self) -> &MemorySidecar {
+        &self.memory_sidecar
     }
 
     /// Get a reference to the session manager.

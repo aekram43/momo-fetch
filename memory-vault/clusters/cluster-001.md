@@ -12,7 +12,7 @@ tags: [cluster, memory, architecture]
 
 ## Topic
 Designing and implementing the EverMemOS-compatible memory vault
-using Obsidian wiki format for the agent-harness project.
+using Obsidian wiki format for the momo-fetch project.
 
 ## Member MemCells
 - [[2026-05-06#MemCell 001]] — Design EverMemOS-compatible memory vault

@@ -6,7 +6,7 @@
 | **Version** | 1.0.0 |
 | **Date** | 2026-05-06 |
 | **Status** | Draft |
-| **Source PRD** | `docs/prd/prd-agent-harness.md` |
+| **Source PRD** | `docs/prd/prd-momo-fetch.md` |
 | **Source SRS** | `docs/prd/srs.md` |
 | **Framework** | adk-rust v0.7.0 (zavora-ai/adk-rust) |
 | **Rust Edition** | 2024 (rust-version 1.85.0) |
@@ -135,7 +135,7 @@ adk-rust = { version = "0.7.0", features = [
 
 ```toml
 [package]
-name = "agent-harness"
+name = "momo-fetch"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85.0"
@@ -227,7 +227,8 @@ opt-level = 1  # Faster incremental builds
 │                                                                     │
 │  ┌──────────────┐  ┌────────────────────┐  ┌────────────────────┐  │
 │  │              │  │  ContextBuilder    │  │                    │  │
-│  │  Provider    │  │  ├─ AGENTS.md      │  │   CostTracker      │  │
+│  │  Provider    │  │  ├─ SOUL.md        │  │   CostTracker      │  │
+│  │  Manager     │  │  ├─ AGENTS.md      │  │   ├─ Token counts  │  │
 │  │  Manager     │  │  ├─ Skill loader   │  │   ├─ Token counts  │  │
 │  │  ├─ model()  │  │  ├─ KMS injector   │  │   ├─ Cost calc     │  │
 │  │  ├─ switch() │  │  └─ Memory inject  │  │   └─ Budget alert  │  │
@@ -307,16 +308,18 @@ opt-level = 1  # Faster incremental builds
 
 ### 2.2 Execution Flow
 
-#### 2.2.1 REPL Turn — Sequence Diagram
+#### 2.2.1 REPL Turn — Sequence Diagram (with Memory Sidecar)
 
 ```
 User          REPL          Harness         Runner        LlmAgent        LLM        Tools
  │              │              │               │              │             │           │
  │── "prompt" ─▶│              │               │              │             │           │
+ │              │              │── mem_search ──▶│              │             │           │
+ │              │              │  (enrich input │              │             │           │
+ │              │              │   with context)│              │             │           │
+ │              │── enriched ──▶│              │              │             │           │
  │              │── run_str() ─▶│              │              │             │           │
  │              │              │── build ctx ──▶│              │             │           │
- │              │              │  (content +   │              │             │           │
- │              │              │   callbacks)  │              │             │           │
  │              │              │              │── run() ─────▶│             │           │
  │              │              │              │              │── generate ─▶│           │
  │              │              │              │              │◀── stream ───│           │
@@ -326,27 +329,71 @@ User          REPL          Harness         Runner        LlmAgent        LLM   
  │              │              │              │              │── execute ───────────────▶│
  │              │              │              │◀─ before_tool │             │◀── result ─│
  │◀── confirm ──│◀─ HITL check│              │── after_tool ─▶│             │           │
- │── approve ──▶│── decision ─▶│              │              │             │           │
+ │── approve ──▶│── decision ──▶│              │              │             │           │
  │              │              │              │              │── generate ─▶│           │
  │◀── response ─│◀─ events ───│◀─ EventStream │◀── stream ───│             │           │
  │              │              │              │              │             │           │
- │              │              │              │── after_agent ─▶│             │           │
+ │              │              │── mem_write ──▶│  (auto-write via MemorySidecar)       │
  │              │              │              │              │             │           │
  │              │              │── save session─▶│             │             │           │
- │              │              │── mem_write ──▶│             │             │           │
- │              │              │── mem_extract ▶│             │             │           │
 ```
 
-#### 2.2.2 Memory Lifecycle Flow
+#### 2.2.2 Memory Lifecycle Flow (with Auto-Flow)
 
 ```
-Conversation End
+User sends message
        │
        ▼
-┌─────────────────────────┐
-│ AfterToolCallback       │  ← adk-runner callback
-│ triggers mem_write       │
-└───────────┬─────────────┘
+┌─────────────────────────────────────────────────┐
+│ MemorySidecar::search_for_context()             │
+│ (grep-based, $0 cost, ~50ms)                    │
+│ IF auto_search == true:                         │
+│   → vault.search(input, limit: 5)              │
+│   → Prepend "--- Relevant memories ---" to input│
+└───────────┬─────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────┐
+│ LLM generates response (with memory context)    │
+│ Tool calls tracked during stream consumption    │
+└───────────┬─────────────────────────────────────┘
+            │
+            ▼  (is_final_response == true)
+┌─────────────────────────────────────────────────┐
+│ MemorySidecar::write_turn_memory()              │
+│ IF auto_write == true:                          │
+│   Option A (default): TF-IDF keyword extract    │
+│   Option B (if sidecar_model set): sub-agent    │
+│   → vault.write_memcell()                       │
+└───────────┬─────────────────────────────────────┘
+            │
+            ▼  (every N memcells, default: 10)
+┌─────────────────────────────────────────────────┐
+│ mem_extract (create events/foresights/episodes) │
+└───────────┬─────────────────────────────────────┘
+            │
+            ▼  (when threshold reached: 5+ MemCells)
+┌─────────────────────────────────────────────────┐
+│ mem_consolidate (cluster detection + profile)   │
+└─────────────────────────────────────────────────┘
+```
+
+#### 2.2.3 Option C: Separate Process Sidecar
+
+```
+Main Process                              Sidecar Process
+(momo-fetch)                           (momo-fetch --mode memory-sidecar)
+     │                                          │
+     │  ── search_request ──────────────────────▶│
+     │  ◀─ search_response ──────────────────────│
+     │                                          │
+     │  ── write_request ───────────────────────▶│
+     │  ◀─ write_response ───────────────────────│
+     │                                          │
+     │  ── shutdown ────────────────────────────▶│
+     │                                          │
+     │  (via .harness/mailbox/ file-based queue) │
+```
             │
             ▼
 ┌─────────────────────────┐
@@ -475,7 +522,7 @@ impl Harness {
             config.permission_mode,
         )?;
 
-        // 5. Build context (AGENTS.md + KMS + memory)
+        // 5. Build context (SOUL.md + AGENTS.md + KMS + memory)
         let context_builder = ContextBuilder::new(&config.project_path, &vault)?;
 
         // 6. Build tool registry
@@ -486,7 +533,7 @@ impl Harness {
         )?;
 
         // 7. Build agent
-        let agent = LlmAgentBuilder::new("agent-harness")
+        let agent = LlmAgentBuilder::new("momo-fetch")
             .model(provider_mgr.current_model())
             .system_instruction(context_builder.system_prompt())
             .require_tool_confirmation(ToolConfirmationPolicy::Always)
@@ -496,7 +543,7 @@ impl Harness {
 
         // 8. Build runner
         let runner = Runner::builder()
-            .app_name("agent-harness")
+            .app_name("momo-fetch")
             .agent(agent.clone())
             .session_service(session_service.clone())
             .build()?;
@@ -1245,18 +1292,28 @@ impl FilesystemSandbox {
 
 pub struct ContextBuilder {
     project_path: PathBuf,
-    agents_md_content: Vec<(PathBuf, String)>,  // (path, content)
+    soul_md_content: Vec<(PathBuf, String)>,    // SOUL.md files (personality)
+    agents_md_content: Vec<(PathBuf, String)>,  // AGENTS.md/CLAUDE.md files (instructions)
     kms_toc: Option<String>,
     memory_context: Option<String>,
 }
 
 impl ContextBuilder {
     pub fn new(project_path: &Path, vault: &ObsidianVault) -> Result<Self> {
+        let mut soul_md_content = Vec::new();
         let mut agents_md_content = Vec::new();
         let mut current = project_path.to_path_buf();
 
         // Walk up from cwd looking for context files
         loop {
+            // SOUL.md (agent personality/identity)
+            let soul_candidate = current.join("SOUL.md");
+            if soul_candidate.exists() { /* ... */ }
+
+            // .harness/SOUL.md
+            let harness_soul = current.join(".harness").join("SOUL.md");
+            if harness_soul.exists() { /* ... */ }
+
             for filename in &["AGENTS.md", "CLAUDE.md"] {
                 let candidate = current.join(filename);
                 if candidate.exists() {
@@ -1298,17 +1355,25 @@ impl ContextBuilder {
     pub fn system_prompt(&self) -> String {
         let mut parts = Vec::new();
 
-        parts.push("You are Agent Harness, an AI coding assistant. \
+        parts.push("You are MOMO Fetch, an AI coding assistant. \
                      You have access to tools for file operations, \
                      shell execution, web search, and memory management. \
                      Always prefer using dedicated tools over Bash commands. \
                      Be concise. Do not add unnecessary comments or documentation \
                      to code you didn't change.".into());
 
+        // SOUL.md (agent personality/identity — highest behavioral priority)
+        for (path, content) in &self.soul_md_content {
+            parts.push(format!(
+                "\n--- Soul from {} ---\n{}",
+                path.display(), content
+            ));
+        }
+
         // AGENTS.md / CLAUDE.md (closest = highest priority)
         for (path, content) in &self.agents_md_content {
             parts.push(format!(
-                "\n--- Context from {} ---\n{}", 
+                "\n--- Context from {} ---\n{}",
                 path.display(), content
             ));
         }
@@ -1354,7 +1419,7 @@ impl ContextBuilder {
 ### 4.1 File Layout
 
 ```
-~/.config/agent-harness/
+~/.config/momo-fetch/
 ├── settings.json          ← User-level config (provider, model, permissions)
 ├── sessions.db            ← SQLite (adk-session)
 ├── memory-vault/          ← Global vault (if configured)
@@ -1393,7 +1458,7 @@ impl ContextBuilder {
 ### 4.2 Configuration Schema
 
 ```jsonc
-// ~/.config/agent-harness/settings.json
+// ~/.config/momo-fetch/settings.json
 {
   // Default provider and model
   "default_provider": "anthropic",
@@ -1592,7 +1657,7 @@ The banner is called once at REPL startup, before the first prompt. Not shown in
 ### 5.2 CLI Argument Specification
 
 ```
-agent-harness [OPTIONS] [COMMAND]
+momo-fetch [OPTIONS] [COMMAND]
 
 Commands:
   (default)     Start interactive REPL
@@ -1677,7 +1742,7 @@ User prompt
   → 42 lines read
 
 ⏺ Running shell_exec(command="cargo build")...  [yellow]
-  → Compiling agent-harness v0.1.0
+  → Compiling momo-fetch v0.1.0
   → Finished `dev` profile target
 
 Here is the analysis of the code:
@@ -1759,7 +1824,7 @@ impl Harness {
 
 use keyring_core::{Entry, Error as KeyringError};
 
-const SERVICE_NAME: &str = "agent-harness";
+const SERVICE_NAME: &str = "momo-fetch";
 
 pub struct SecretStore;
 
@@ -1836,7 +1901,7 @@ pub fn init_logging(level: &str, log_file: bool) {
         let file_appender = tracing_appender::rolling::daily(
             dirs::state_dir()
                 .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join("agent-harness/logs"),
+                .join("momo-fetch/logs"),
             "harness.log",
         );
         builder
@@ -2139,7 +2204,7 @@ use assert_cmd::Command;
 
 #[test]
 fn test_version_flag() {
-    Command::cargo_bin("agent-harness")
+    Command::cargo_bin("momo-fetch")
         .unwrap()
         .arg("--version")
         .assert()
@@ -2151,7 +2216,7 @@ fn test_version_flag() {
 async fn test_one_shot_mode() {
     let tmp = tempfile::tempdir().unwrap();
 
-    Command::cargo_bin("agent-harness")
+    Command::cargo_bin("momo-fetch")
         .unwrap()
         .arg("-p")
         .arg("say hello")
@@ -2248,11 +2313,11 @@ The binary is self-contained (no runtime dependencies beyond the OS):
 ```bash
 # From source
 git clone <repo>
-cd agent-harness
+cd momo-fetch
 cargo install --path .
 
 # Or via cargo-install (future)
-cargo install agent-harness
+cargo install momo-fetch
 ```
 
 ### 9.5 CI Pipeline (recommended)

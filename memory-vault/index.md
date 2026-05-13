@@ -1,9 +1,9 @@
 ---
 auto-generated: true
-last_updated: 2026-05-06
+last_updated: 2026-05-09
 ---
 
-# Memory Vault Index
+# Memory Vault
 
 > EverMemOS-compatible memory hierarchy, stored as Obsidian wiki.
 > Levels 1-6 map to raw experiences through abstract reflections.
@@ -13,16 +13,17 @@ last_updated: 2026-05-06
 > [!info] Daily logs of raw agent interactions
 > Path: `1-memcells/YYYY/MM/YYYY-MM-DD.md`
 
-- [[2026-05-06]] — Design EverMemOS-compatible memory vault (2 MemCells)
+- [[2026-05-06]] — 2 MemCell(s)
+- [[2026-05-09]] — 8 MemCell(s)
 
 ## Level 2: Events (Atomic Facts)
 
 > [!info] One fact per note, linked back to source MemCell
 > Path: `2-events/fact-NNNN.md`
 
-- [[fact-0001]] — Obsidian wiki can replace PostgreSQL for personal agent memory
-- [[fact-0002]] — LLM can serve as the semantic engine instead of vector embeddings
-- [[fact-0003]] — Vault structure bootstrapped successfully
+- [[fact-0001]] — Obsidian wiki can replace PostgreSQL for personal agent memory *(active)*
+- [[fact-0002]] — LLM can serve as the semantic engine instead of vector embeddings *(active)*
+- [[fact-0003]] — Vault structure bootstrapped successfully *(active)*
 
 ## Level 3: Foresights (Predictions)
 
@@ -36,15 +37,15 @@ last_updated: 2026-05-06
 > [!info] Clustered summaries of related MemCells
 > Path: `4-episodes/ep-NNNN.md`
 
-- [[ep-0001]] — Design and bootstrap memory vault
+- [[ep-0001]] — ep-0001
 
 ## Level 5: Profiles (Evolving Traits)
 
 > [!info] Living profiles for agent and user
 > Path: `5-profile/`
 
-- [[agent-profile]] — Agent's own behavioral traits and preferences
-- [[user-profile]] — What the agent knows about the user
+- [[user-profile]] — Agent's own profile
+- [[agent-profile]] — Agent's own profile
 
 ## Level 6: Reflections (Pattern Analysis)
 
@@ -58,4 +59,4 @@ _(no entries yet)_
 > [!info] Virtual groupings of related MemCells for profile evolution
 > Path: `clusters/`
 
-- [[cluster-001]] — Memory Architecture Design (2 MemCells)
+- [[cluster-001]] — Cluster: Memory Architecture Design

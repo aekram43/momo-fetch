@@ -1951,7 +1951,7 @@ mod tests {
         // Write a MemCell
         let memcell_ref = vault
             .write_memcell(
-                "agent-harness",
+                "momo-fetch",
                 "Memory vault architecture",
                 "Designing the Obsidian-based memory system",
                 &[
@@ -1973,7 +1973,7 @@ mod tests {
         let result = vault
             .extract_from_memcell(
                 &memcell_ref,
-                "agent-harness",
+                "momo-fetch",
                 "Memory vault architecture",
                 "Designing the Obsidian-based memory system",
                 &[

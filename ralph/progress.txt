@@ -83,7 +83,7 @@ Started: Wed May  6 23:34:32 +07 2026
 - Scaffolded Rust project with adk-rust 0.7.0 + adk-model 0.7.0
 - Created complete source structure: main.rs, harness.rs, cli/{mod,commands,oneshot,repl}, tools/{file,shell,search,web,memory}, memory/{vault,parser,retrieval,lifecycle,types}, context/mod, sandbox/mod, config/mod, providers.rs
 - Cargo.toml with all dependencies from SDS spec (adk-rust, tokio, clap, rustyline, colored, serde, pulldown-cmark, regex, chrono, uuid, ignore, walkdir, path-clean, reqwest, dotenvy, tracing, etc.)
-- Initialized git repo, created branch `ralph/agent-harness`
+- Initialized git repo, created branch `ralph/momo-fetch`
 - cargo build: passes (only "never used" warnings for placeholder code)
 - cargo test: 5 tests pass (parser unit tests, file range parsing tests)
 - Files changed: Cargo.toml, .gitignore, src/main.rs, src/harness.rs, src/providers.rs, src/cli/mod.rs, src/cli/commands.rs, src/cli/repl.rs, src/cli/oneshot.rs, src/config/mod.rs, src/sandbox/mod.rs, src/context/mod.rs, src/tools/mod.rs, src/tools/file.rs, src/tools/shell.rs, src/tools/search.rs, src/tools/web.rs, src/tools/memory.rs, src/memory/mod.rs, src/memory/types.rs, src/memory/parser.rs, src/memory/vault.rs, src/memory/retrieval.rs, src/memory/lifecycle.rs
@@ -184,7 +184,7 @@ Started: Wed May  6 23:34:32 +07 2026
 - 3 permission modes (Strict/Auto/Yolo) with `PermissionMode` Display/FromStr implementations
 - `ToolConfirmationPolicy` integration: `to_tool_confirmation_policy()` maps modes to adk-rust HITL policy (Strict=Always, Auto=PerTool, Yolo=Never)
 - `requires_confirmation()` for runtime per-tool checks (destructive command detection in Auto mode)
-- Config loading from 3 levels: CLI flag > `.harness/settings.json` > `~/.config/agent-harness/settings.json`
+- Config loading from 3 levels: CLI flag > `.harness/settings.json` > `~/.config/momo-fetch/settings.json`
 - `SettingsFile` struct for both global and project-level settings
 - 64 tests pass (17 new sandbox tests: 6 path scoping + 3 destructive detection + 5 agentignore + 3 permission mode)
 - Files changed: src/sandbox/mod.rs (full rewrite), src/config/mod.rs (rewrite with SettingsFile + 3-level config)
@@ -228,7 +228,7 @@ Started: Wed May  6 23:34:32 +07 2026
 - `!` shell escape runs command directly in sandbox root directory
 - Prompt shows current model name in dimmed text
 - Startup info: version, provider/model, session ID, loaded context files
-- History persisted to `~/.config/agent-harness/history.txt`
+- History persisted to `~/.config/momo-fetch/history.txt`
 - 71 tests pass (no new tests — REPL is interactive, hard to unit test)
 - Files changed: src/cli/banner.rs (new), src/cli/repl.rs (full rewrite with streaming), src/cli/commands.rs (all slash commands), src/cli/mod.rs (CLI arg parsing), src/harness.rs (run_turn, interrupt, switch methods), Cargo.toml, Cargo.lock
 - **Learnings for future iterations:**
@@ -240,13 +240,13 @@ Started: Wed May  6 23:34:32 +07 2026
   - `event.llm_response.error_message` is an `Option<String>` — check with `if let Some(ref err)` pattern
   - rustyline `DefaultEditor::new()` is sufficient — no need for custom editor config for basic REPL
   - NO_COLOR env var handling: check `std::env::var("NO_COLOR").is_err()` to determine if color should be used
-  - `dirs::home_dir()` provides `~/.config/agent-harness/` path for history and config files
+  - `dirs::home_dir()` provides `~/.config/momo-fetch/` path for history and config files
 ---
 
 ## Thu May 7 23:45 +07 2026 - US-009
 - Implemented one-shot mode (-p flag) with full streaming support
-- `agent-harness -p 'prompt'` runs a single turn then exits
-- stdin pipe support: `cat file.md | agent-harness -p 'summarize'` concatenates stdin to prompt with separator
+- `momo-fetch -p 'prompt'` runs a single turn then exits
+- stdin pipe support: `cat file.md | momo-fetch -p 'summarize'` concatenates stdin to prompt with separator
 - Exit codes: 0 on success, 1 on error (via anyhow error propagation in main.rs)
 - stdout/stderr split: agent text output to stdout (for piping), tool calls/errors to stderr
 - Streaming output: consumes EventStream with `StreamExt::next()`, prints tokens as they arrive
@@ -255,7 +255,7 @@ Started: Wed May  6 23:34:32 +07 2026
 - Files changed: src/cli/oneshot.rs (full rewrite)
 - **Learnings for future iterations:**
   - One-shot mode should NOT use Ctrl+C handling (no `tokio::select!` with `ctrl_c()`) — the process just runs to completion
-  - Tool calls go to stderr in one-shot mode so that stdout only contains the agent's text response (useful for piping: `agent-harness -p 'explain' > output.txt`)
+  - Tool calls go to stderr in one-shot mode so that stdout only contains the agent's text response (useful for piping: `momo-fetch -p 'explain' > output.txt`)
   - The `atty_check()` with `libc::isatty()` is already established for stdin detection — no need for `atty` crate
   - `consume_stream_oneshot()` returns `bool` for success/failure — the error propagation goes through `anyhow::Result` in `main.rs` which maps to exit code 1
 ---
@@ -488,7 +488,7 @@ Started: Wed May  6 23:34:32 +07 2026
 - Implemented Cost tracking with token counting, cost estimation, and persistence
 - CostTracker with pricing per provider/model: Anthropic (Opus/Sonnet/Haiku), OpenAI (GPT-4o/o1/o3), DeepSeek (chat/reasoner), Groq, Ollama (free), custom/unknown
 - Token counting from `Event.llm_response.usage_metadata` during streaming — accumulated per turn, finalized on turn end
-- Cost data persisted to `~/.config/agent-harness/cost.json` (JSON file, atomic write)
+- Cost data persisted to `~/.config/momo-fetch/cost.json` (JSON file, atomic write)
 - CostRecord includes: session_id, timestamp, provider, model, project, prompt/completion/total tokens, estimated_cost
 - Daily/session/week/project cost aggregation via record filtering
 - `/cost` command shows session + today + project summary
@@ -519,7 +519,7 @@ Started: Wed May  6 23:34:32 +07 2026
 - File-based mailbox (Mailbox): inter-agent communication via `.harness/mailbox/` JSON files with atomic writes, send/receive/peek/clear operations
 - TmuxManager: creates tmux sessions and per-worker panes, sends commands to panes, kills sessions on stop
 - WorktreeManager: creates/removes git worktrees for worker isolation, merges branches, deletes branches after merge
-- Worker spawning: each worker runs as a separate `agent-harness -p '<task>'` process in its own tmux pane
+- Worker spawning: each worker runs as a separate `momo-fetch -p '<task>'` process in its own tmux pane
 - Worker definitions: name, task description, optional branch name, optional git worktree flag
 - /team start: interactive worker definition via stdin, validates tmux and git availability
 - /team status: polls mailbox for worker updates (ready/progress/completed/failed), shows per-worker status
@@ -534,7 +534,7 @@ Started: Wed May  6 23:34:32 +07 2026
   - **Borrow checker pattern for nested state mutation**: When `status()` needs to read mailbox path from state AND mutate state, extract the path into a local variable before any mutable borrow: `let mailbox_path = self.state.as_ref().unwrap().mailbox_path.clone();`
   - **Two-phase borrow pattern**: Collect all external data (mailbox messages) into a local variable first, THEN apply mutations. Never mix immutable and mutable borrows of the same field in a loop.
   - **adk-server A2A is NOT used**: The PRD mentioned A2A but the implementation uses a simpler file-based mailbox pattern. This avoids a dependency on adk-server and works without network infrastructure. Workers communicate by writing JSON files.
-  - **Worker isolation**: Workers run as separate `agent-harness -p` processes in tmux panes, not as in-process sub-agents. This provides true process isolation but means workers can't share the same LLM connection or memory vault.
+  - **Worker isolation**: Workers run as separate `momo-fetch -p` processes in tmux panes, not as in-process sub-agents. This provides true process isolation but means workers can't share the same LLM connection or memory vault.
   - **tmux is optional**: Team works without tmux (workers just don't get pane isolation). `TmuxManager::is_available()` checks for tmux presence.
   - **Git worktrees are optional**: Workers can share the project root or get isolated worktrees. `WorktreeManager::is_git_repo()` checks before creating worktrees.
 ---

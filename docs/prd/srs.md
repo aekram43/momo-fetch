@@ -6,7 +6,7 @@
 | **Version** | 1.0.0 |
 | **Date** | 2026-05-06 |
 | **Status** | Draft |
-| **Source PRD** | `docs/prd/prd-agent-harness.md` |
+| **Source PRD** | `docs/prd/prd-momo-fetch.md` |
 | **Framework** | adk-rust v0.6.0 (zavora-ai/adk-rust) |
 | **Language** | Rust |
 
@@ -50,13 +50,14 @@ Agent Harness is a personal CLI agent workspace (similar to Claude Code) built o
 | `#[tool]` | adk-rust macro for zero-boilerplate tool definitions |
 | SKILL.md | Markdown file defining a reusable agent skill |
 | AGENTS.md / CLAUDE.md | Project instruction files auto-discovered by the agent |
+| SOUL.md | Agent personality/identity file — defines communication style, values, behavioral traits |
 | KMS | Knowledge Management System — project wiki for the agent |
 
 ### 1.4 References
 
 | Reference | Location |
 |-----------|----------|
-| Source PRD | `docs/prd/prd-agent-harness.md` |
+| Source PRD | `docs/prd/prd-momo-fetch.md` |
 | Memory Vault Schema Plan | `.claude/plans/async-dazzling-boole.md` |
 | Memory Vault Templates | `memory-vault/templates/*.md` |
 | adk-rust Framework | https://github.com/zavora-ai/adk-rust |
@@ -85,7 +86,8 @@ Agent Harness is a **single-user, local-only CLI application**. It wraps the adk
 │              Harness (our wrapper)                  │
 │  ┌──────────────┐  ┌───────────────────────────┐  │
 │  │ ProviderMgr  │  │ ContextBuilder            │  │
-│  │ (model swap) │  │  ├─ AGENTS.md walker     │  │
+│  │ (model swap) │  │  ├─ SOUL.md walker       │  │
+│  │              │  │  ├─ AGENTS.md walker     │  │
 │  └──────────────┘  │  ├─ Skill loader (adk)   │  │
 │                     │  └─ Memory context inject │  │
 │  ┌──────────────┐  └───────────────────────────┘  │
@@ -159,7 +161,7 @@ Agent Harness is a **single-user, local-only CLI application**. It wraps the adk
 The system SHALL provide a standard project layout after `cargo adk new` with custom source structure:
 
 ```
-agent-harness/
+momo-fetch/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs
@@ -397,8 +399,9 @@ The system SHALL support three permission modes:
 
 Mode SHALL be configurable via:
 1. CLI flag: `--permission <mode>`
-2. Project config: `.harness/settings.json`
-3. User config: `~/.config/agent-harness/settings.json`
+2. REPL slash command: `/permission <mode>` (mid-session switching)
+3. Project config: `.harness/settings.json`
+4. User config: `~/.config/momo-fetch/settings.json`
 
 Priority: CLI flag > project config > user config > default (`strict`)
 
@@ -442,6 +445,7 @@ The system SHALL provide an interactive REPL using `rustyline` with:
 | `/sessions` | List past sessions |
 | `/resume <id>` | Resume a previous session |
 | `/cost` | Show current session token usage and cost |
+| `/permission [mode]` | Show or switch permission mode (strict/auto/yolo) |
 | `/mem <query>` | Search memory vault |
 | `/kms` | List attached knowledge bases |
 | `/skill list` | List installed skills |
@@ -462,7 +466,7 @@ The system SHALL provide an interactive REPL using `rustyline` with:
 The system SHALL support one-shot mode via `-p` flag:
 
 ```
-agent-harness -p "explain this code" --project ./my-project
+momo-fetch -p "explain this code" --project ./my-project
 ```
 
 | Flag | Description | Required |
@@ -477,7 +481,7 @@ Behavior:
 - Execute 1 turn, output response, exit
 - Exit code 0 = success, 1 = error
 - stdout = agent response, stderr = debug/logging
-- Support stdin pipe: `cat file.md | agent-harness -p "summarize"`
+- Support stdin pipe: `cat file.md | momo-fetch -p "summarize"`
 
 ---
 
@@ -642,6 +646,77 @@ When `5-profile/agent-profile.md` item count exceeds 37:
 4. Target: ~17 items (70% of threshold)
 5. LLM preserves the most impactful and recent items
 
+### 3.6.6 Memory Auto-Flow (FR-MA)
+
+The system SHALL provide an active memory system that automatically searches and writes memories without requiring the LLM to explicitly invoke memory tools.
+
+#### FR-MA-01: Auto-search (Pre-Turn)
+
+The system SHALL automatically search the memory vault before each conversational turn:
+
+- Extract keywords from the user's input using TF-IDF-like scoring
+- Execute `vault.search()` with `MemoryQuery` using the configured `search_mode`
+- Inject relevant memories into the user's message, prefixed with `"--- Relevant memories ---"`
+- If no results found, pass the original input unchanged
+- Configurable via `memory.auto_search` in settings (default: `true`)
+- Maximum results per turn configurable via `memory.max_results_per_turn` (default: 5)
+
+#### FR-MA-02: Auto-write (Post-Turn)
+
+The system SHALL automatically write a MemCell after each completed conversational turn:
+
+- Collect a `TurnSummary` containing: user message (truncated 200 chars), tool calls made, response preview (truncated 300 chars), project name
+- Extract keywords using TF-IDF with stop-word filtering (Option A) or a sidecar model (Option B)
+- Write MemCell to vault with extracted topic, context, actions, outcome, and keywords
+- Configurable via `memory.auto_write` in settings (default: `true`)
+- Auto-extract trigger: log when `memcells_since_extract >= extract_threshold` (default: 10)
+
+#### FR-MA-03: Sidecar Model (Option B)
+
+The system SHALL support a small sidecar model for memory extraction when configured:
+
+- When `memory.sidecar_model` is set, generate an extraction prompt for the sidecar sub-agent
+- The sidecar sub-agent uses the specified model (e.g., `deepseek-chat`, `llama3.2`) via the specified `sidecar_provider`
+- The sub-agent returns structured JSON: `{ topic, context, actions, outcome, keywords }`
+- When `sidecar_model` is null (default), use TF-IDF keyword extraction (Option A, zero extra LLM cost)
+
+#### FR-MA-04: Separate Process Mode (Option C)
+
+The system SHALL support running the memory sidecar as a completely separate process:
+
+- CLI flag: `--mode memory-sidecar` starts the sidecar process
+- Communication via file-based Mailbox protocol in `.harness/mailbox/`
+- Well-known message types: `search_request`, `search_response`, `write_request`, `write_response`, `ready`, `shutdown`
+- Main process sends search/write requests; sidecar responds
+- Sidecar signals `ready` on startup and responds to `shutdown` for graceful termination
+- Polling interval: 100ms
+
+#### FR-MA-05: Memory System Prompt
+
+When `auto_search` or `auto_write` is enabled, the system SHALL append a memory context block to the system prompt informing the agent:
+
+- Total number of memories and sessions in the vault
+- That relevant memories are automatically injected (marked with `"--- Relevant memories ---"`)
+- That `mem_search` is available for deeper manual recall
+- That memory entries are automatically created and `mem_write` is only needed for specific saves
+
+### 3.6.7 Memory Settings Configuration
+
+```jsonc
+// .harness/settings.json — memory section
+{
+  "memory": {
+    "auto_search": true,           // Pre-turn vault search
+    "auto_write": true,            // Post-turn MemCell write
+    "search_mode": "grep_llm",     // Retrieval mode: grep_llm | tag_filter
+    "max_results_per_turn": 5,     // Max injected memories
+    "extract_threshold": 10,       // MemCells before auto-extract hint
+    "sidecar_model": null,         // null = Option A; "deepseek-chat" = Option B
+    "sidecar_provider": null       // Provider for sidecar model
+  }
+}
+```
+
 ---
 
 ### 3.7 MCP Integration (FR-MCP)
@@ -666,18 +741,27 @@ The system SHALL support MCP Elicitation protocol — MCP servers can request us
 
 ### 3.8 Context System (FR-Context)
 
-#### FR-CX-01: AGENTS.md / CLAUDE.md discovery
+#### FR-CX-01: SOUL.md / AGENTS.md / CLAUDE.md discovery
 
 The system SHALL walk up from `cwd` to filesystem root, looking for:
+- `SOUL.md`
 - `AGENTS.md`
 - `CLAUDE.md`
+- `.harness/SOUL.md`
 - `.harness/AGENTS.md`
 
 Priority: files closer to `cwd` override files further up.
 
 #### FR-CX-02: Context injection
 
-Discovered context files SHALL be injected into the system prompt via `LlmAgentBuilder::instruction()`. Log message: `"Loaded context from: ./AGENTS.md, ../CLAUDE.md"`
+Discovered context files SHALL be injected into the system prompt via `LlmAgentBuilder::instruction()` in this order:
+1. Base instruction
+2. SOUL.md content (with `"--- Soul from {path} ---"` header)
+3. AGENTS.md / CLAUDE.md content (with `"--- Context from {path} ---"` header)
+4. KMS TOC
+5. Skill context
+
+Log message: `"Loaded context from: ./SOUL.md, ./AGENTS.md, ../CLAUDE.md"`
 
 #### FR-CX-03: Graceful fallback
 
@@ -689,7 +773,7 @@ If no context files are found, the system SHALL continue without error.
 
 #### FR-SS-01: SQLite persistence
 
-The system SHALL use adk-session's `SqliteSessionService` with path `~/.config/agent-harness/sessions.db`.
+The system SHALL use adk-session's `SqliteSessionService` with path `~/.config/momo-fetch/sessions.db`.
 
 #### FR-SS-02: Session metadata
 
@@ -966,12 +1050,13 @@ pub struct FilesystemSandbox {
 
 | File | Scope | Purpose |
 |------|-------|---------|
-| `~/.config/agent-harness/settings.json` | User-level | Default provider, model, permission mode, vault path |
+| `~/.config/momo-fetch/settings.json` | User-level | Default provider, model, permission mode, vault path |
 | `.harness/settings.json` | Project-level | Project-specific overrides |
 | `.harness/mcp.json` | Project-level | MCP server definitions |
 | `.harness/skills/` | Project-level | Installed skills |
 | `.agentignore` | Project-level | Sandbox exclusion rules |
 | `AGENTS.md` / `CLAUDE.md` | Project-level | Agent context injection |
+| `SOUL.md` | Project-level | Agent personality/identity injection |
 | `.env` | Project-level | API keys (fallback for keychain) |
 
 ---
@@ -1093,17 +1178,17 @@ One file per cluster (`clusters/cluster-NNN.md`).
 
 ### 6.2 Session Data
 
-Stored in SQLite via adk-session `SqliteSessionService`. Schema managed by adk-session. Location: `~/.config/agent-harness/sessions.db`.
+Stored in SQLite via adk-session `SqliteSessionService`. Schema managed by adk-session. Location: `~/.config/momo-fetch/sessions.db`.
 
 ### 6.3 Configuration Data
 
 ```jsonc
-// ~/.config/agent-harness/settings.json
+// ~/.config/momo-fetch/settings.json
 {
   "default_provider": "anthropic",
   "default_model": "claude-sonnet-4-20250514",
   "permission_mode": "strict",
-  "vault_path": "~/.config/agent-harness/memory-vault",
+  "vault_path": "~/.config/momo-fetch/memory-vault",
   "max_cost_daily": 10.00,
   "retrieval_mode": "grep_llm"
 }
@@ -1184,6 +1269,7 @@ None. The system runs on standard consumer hardware.
 | FR-MW-01, FR-MW-02 | US-012: Memory write & extract | 2 |
 | FR-MR-01, FR-MR-02, FR-MR-03, FR-MR-04 | US-013: Memory retrieval | 2 |
 | FR-ML-01, FR-ML-02, FR-ML-03, FR-ML-04 | US-014: Memory consolidation | 2 |
+| FR-MA-01, FR-MA-02, FR-MA-03, FR-MA-04, FR-MA-05 | US-022: Memory auto-flow | 2 |
 | FR-SK-01, FR-SK-02, FR-SK-03 | US-015: Skill system | 2 |
 | FR-SA-01, FR-SA-02, FR-SA-03, FR-SA-04 | US-016: Sub-agent orchestration | 3 |
 | FR-KB-01, FR-KB-02, FR-KB-03 | US-017: Knowledge base | 3 |
@@ -1217,7 +1303,8 @@ None. The system runs on standard consumer hardware.
 | 2.2 | US-012: Memory write/extract | Phase 1 |
 | 2.3 | US-013: Memory retrieval | 2.2 |
 | 2.4 | US-014: Memory consolidation | 2.3 |
-| 2.5 | US-015: Skills | Phase 1 |
+| 2.5 | US-022: Memory auto-flow | 2.2 |
+| 2.6 | US-015: Skills | Phase 1 |
 
 #### Phase 3: Advanced (Priority 3)
 
@@ -1236,7 +1323,7 @@ None. The system runs on standard consumer hardware.
 
 | ID | Question | Status |
 |----|----------|--------|
-| OI-01 | Memory vault path: relative to project or global (`~/.config/agent-harness/memory-vault/`)? | Open |
+| OI-01 | Memory vault path: relative to project or global (`~/.config/momo-fetch/memory-vault/`)? | Open |
 | OI-02 | Should ThaiLLM endpoint have separate support or use OpenAI-compatible preset? | Open |
 | OI-03 | Context compression: use adk-gemini's context compaction or custom? | Open |
 | OI-04 | adk-cli REPL: extend or replace entirely? Need to review adk-cli source for extensibility. | Open |

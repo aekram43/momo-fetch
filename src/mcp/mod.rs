@@ -46,11 +46,11 @@ impl McpManager {
                 .map_err(|e| anyhow!("failed to parse MCP config: {e}"))?;
             McpServerManager::new(json_file.mcp_servers)
                 .with_elicitation_handler(Arc::new(AutoDeclineElicitationHandler))
-                .with_name("agent-harness-mcp")
+                .with_name("momo-fetch-mcp")
         } else {
             McpServerManager::new(HashMap::new())
                 .with_elicitation_handler(Arc::new(AutoDeclineElicitationHandler))
-                .with_name("agent-harness-mcp")
+                .with_name("momo-fetch-mcp")
         };
 
         Ok(Self {
@@ -62,7 +62,7 @@ impl McpManager {
     /// Create a McpManager with no servers (for testing).
     pub fn new_empty() -> Result<Self> {
         let manager = McpServerManager::new(HashMap::new())
-            .with_name("agent-harness-mcp");
+            .with_name("momo-fetch-mcp");
         Ok(Self {
             manager: Arc::new(manager),
             config_path: PathBuf::new(),
@@ -216,7 +216,7 @@ impl McpService {
 
         let manager = McpServerManager::new(configs.clone())
             .with_elicitation_handler(Arc::new(AutoDeclineElicitationHandler))
-            .with_name("agent-harness-mcp");
+            .with_name("momo-fetch-mcp");
 
         Ok(Self {
             manager: Arc::new(manager),
@@ -228,7 +228,7 @@ impl McpService {
     /// Create with no servers (for testing).
     pub fn new_empty() -> Result<Self> {
         let manager = McpServerManager::new(HashMap::new())
-            .with_name("agent-harness-mcp");
+            .with_name("momo-fetch-mcp");
         Ok(Self {
             manager: Arc::new(manager),
             configs: HashMap::new(),

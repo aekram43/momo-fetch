@@ -432,44 +432,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-harness"
-version = "0.1.0"
-dependencies = [
- "adk-model",
- "adk-rust",
- "adk-session",
- "adk-tool",
- "anyhow",
- "assert_cmd",
- "chrono",
- "clap",
- "colored",
- "dirs",
- "dotenvy",
- "glob",
- "ignore",
- "keyring-core",
- "libc",
- "path-clean",
- "pulldown-cmark",
- "regex",
- "reqwest 0.13.3",
- "rpassword",
- "rustyline",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokio",
- "tokio-test",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "walkdir",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3226,6 +3188,44 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "momo-fetch"
+version = "0.1.0"
+dependencies = [
+ "adk-model",
+ "adk-rust",
+ "adk-session",
+ "adk-tool",
+ "anyhow",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "colored",
+ "dirs",
+ "dotenvy",
+ "glob",
+ "ignore",
+ "keyring-core",
+ "libc",
+ "path-clean",
+ "pulldown-cmark",
+ "regex",
+ "reqwest 0.13.3",
+ "rpassword",
+ "rustyline",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "tokio-test",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]

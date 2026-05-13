@@ -17,11 +17,12 @@ pub struct HarnessConfig {
     pub permission_mode: PermissionMode,
     pub provider: ProviderSettings,
     pub resume_session_id: Option<String>,
+    pub memory: MemorySettings,
 }
 
 /// Settings file schema (both global and project-level).
 ///
-/// Global: `~/.config/agent-harness/settings.json`
+/// Global: `~/.config/momo-fetch/settings.json`
 /// Project: `<project>/.harness/settings.json`
 ///
 /// CLI flags override both; project overrides global.
@@ -33,6 +34,70 @@ pub struct SettingsFile {
     pub default_model: Option<String>,
     /// Permission mode: "strict" (default), "auto", "yolo"
     pub permission_mode: Option<String>,
+    /// Memory auto-flow settings
+    pub memory: Option<MemorySettings>,
+}
+
+/// Memory auto-flow configuration.
+///
+/// Controls whether the agent automatically searches memories before each turn
+/// and writes memories after each turn.
+///
+/// ```json
+/// {
+///   "memory": {
+///     "auto_search": true,
+///     "auto_write": true,
+///     "search_mode": "grep_llm",
+///     "max_results_per_turn": 5,
+///     "extract_threshold": 10,
+///     "sidecar_model": null,
+///     "sidecar_provider": null
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySettings {
+    /// Auto-search vault before each turn (grep-based, $0 cost).
+    #[serde(default = "default_true")]
+    pub auto_search: bool,
+    /// Auto-write MemCell after each turn.
+    #[serde(default = "default_true")]
+    pub auto_write: bool,
+    /// Retrieval mode for auto-search: "grep_llm" (default) or "tag_filter".
+    #[serde(default = "default_search_mode")]
+    pub search_mode: String,
+    /// Max memory results injected per turn.
+    #[serde(default = "default_max_results")]
+    pub max_results_per_turn: usize,
+    /// MemCell threshold to trigger auto-extract (events/foresights).
+    #[serde(default = "default_extract_threshold")]
+    pub extract_threshold: usize,
+    /// Sidecar model for memory extraction (Option B).
+    /// null = use TF-IDF keywords, no extra LLM call (Option A).
+    /// "deepseek-chat" = spawn sub-agent with this model.
+    pub sidecar_model: Option<String>,
+    /// Sidecar provider (used when sidecar_model is set).
+    pub sidecar_provider: Option<String>,
+}
+
+fn default_true() -> bool { true }
+fn default_search_mode() -> String { "grep_llm".into() }
+fn default_max_results() -> usize { 5 }
+fn default_extract_threshold() -> usize { 10 }
+
+impl Default for MemorySettings {
+    fn default() -> Self {
+        Self {
+            auto_search: true,
+            auto_write: true,
+            search_mode: default_search_mode(),
+            max_results_per_turn: default_max_results(),
+            extract_threshold: default_extract_threshold(),
+            sidecar_model: None,
+            sidecar_provider: None,
+        }
+    }
 }
 
 /// Provider-related settings.
@@ -57,7 +122,7 @@ impl HarnessConfig {
     /// Settings are loaded in priority order:
     /// 1. CLI flags (highest)
     /// 2. Project-level `.harness/settings.json`
-    /// 3. Global `~/.config/agent-harness/settings.json`
+    /// 3. Global `~/.config/momo-fetch/settings.json`
     /// 4. Defaults (lowest)
     pub fn from_cli_args(args: &CliArgs) -> anyhow::Result<Self> {
         let project_path = match &args.project {
@@ -67,7 +132,7 @@ impl HarnessConfig {
 
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("agent-harness");
+            .join("momo-fetch");
 
         // Load global settings
         let global_settings = Self::load_settings_file(&config_dir.join("settings.json"));
@@ -107,6 +172,10 @@ impl HarnessConfig {
             permission_mode,
             provider,
             resume_session_id: args.resume.clone(),
+            memory: project_settings
+                .memory
+                .or(global_settings.memory)
+                .unwrap_or_default(),
         })
     }
 

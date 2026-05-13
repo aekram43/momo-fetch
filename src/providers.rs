@@ -65,6 +65,27 @@ impl ProviderManager {
                 let model = "anthropic/claude-sonnet-4".to_string();
                 let client = OpenRouterClient::new(OpenRouterConfig::new(&key, &model))?;
                 ("openrouter".into(), model, Arc::new(client))
+            } else if let Ok(key) = SecretStore::get("zai") {
+                let model = "GLM-5".to_string();
+                let base_url = std::env::var("ZAI_LLM_URL")
+                    .unwrap_or_else(|_| "https://api.z.ai/api/coding/paas/v4".to_string());
+                let config = OpenAICompatibleConfig::new(&key, &model)
+                    .with_base_url(&base_url)
+                    .with_provider_name("zai");
+                let client = OpenAICompatible::new(config)?;
+                ("zai".into(), model, Arc::new(client))
+            } else if let (Ok(url), Ok(key)) = (
+                std::env::var("LLM_URL"),
+                std::env::var("LLM_APIKEY"),
+            ) {
+                // Generic OpenAI-compatible endpoint via LLM_URL + LLM_APIKEY
+                let model = std::env::var("LLM_MODEL")
+                    .unwrap_or_else(|_| "default".to_string());
+                let config = OpenAICompatibleConfig::new(&key, &model)
+                    .with_base_url(&url)
+                    .with_provider_name("custom");
+                let client = OpenAICompatible::new(config)?;
+                ("custom".into(), model, Arc::new(client))
             } else {
                 // Default to ollama (no key needed)
                 let model = "llama3.2".to_string();
@@ -177,6 +198,13 @@ impl ProviderManager {
                 available: true,
             });
         }
+        if SecretStore::get("zai").is_ok() {
+            list.push(ProviderInfo {
+                provider: "zai".into(),
+                default_model: "GLM-5".into(),
+                available: true,
+            });
+        }
         // Ollama always available (local)
         list.push(ProviderInfo {
             provider: "ollama".into(),
@@ -240,6 +268,28 @@ impl ProviderManager {
                 let client = OpenRouterClient::new(OpenRouterConfig::new(&key, model))?;
                 Ok(Arc::new(client))
             }
+            "zai" => {
+                let key = SecretStore::get("zai")
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                let base_url = std::env::var("ZAI_LLM_URL")
+                    .unwrap_or_else(|_| "https://api.z.ai/api/coding/paas/v4".to_string());
+                let config = OpenAICompatibleConfig::new(&key, model)
+                    .with_base_url(&base_url)
+                    .with_provider_name("zai");
+                let client = OpenAICompatible::new(config)?;
+                Ok(Arc::new(client))
+            }
+            "custom" => {
+                let url = std::env::var("LLM_URL")
+                    .map_err(|_| anyhow::anyhow!("LLM_URL not set"))?;
+                let key = std::env::var("LLM_APIKEY")
+                    .map_err(|_| anyhow::anyhow!("LLM_APIKEY not set"))?;
+                let config = OpenAICompatibleConfig::new(&key, model)
+                    .with_base_url(&url)
+                    .with_provider_name("custom");
+                let client = OpenAICompatible::new(config)?;
+                Ok(Arc::new(client))
+            }
             _ => {
                 // Check custom endpoints
                 if let Some(config) = self.custom_endpoints.get(provider) {
@@ -253,7 +303,7 @@ impl ProviderManager {
                     Ok(Arc::new(client))
                 } else {
                     Err(anyhow::anyhow!(
-                        "Unknown provider '{}'. Available: anthropic, openai, deepseek, groq, ollama, openrouter",
+                        "Unknown provider '{}'. Available: anthropic, openai, deepseek, groq, ollama, openrouter, zai, custom (LLM_URL+LLM_APIKEY)",
                         provider
                     ))
                 }
@@ -279,6 +329,8 @@ fn default_model_for_provider(provider: &str) -> String {
         "groq" => "llama-3.3-70b-versatile".into(),
         "ollama" => "llama3.2".into(),
         "openrouter" => "anthropic/claude-sonnet-4".into(),
+        "zai" => "GLM-5".into(),
+        "custom" => std::env::var("LLM_MODEL").unwrap_or_else(|_| "default".into()),
         _ => "unknown".into(),
     }
 }
@@ -304,6 +356,9 @@ mod tests {
             default_model_for_provider("openrouter"),
             "anthropic/claude-sonnet-4"
         );
+        assert_eq!(default_model_for_provider("zai"), "GLM-5");
+        // custom provider reads from LLM_MODEL env var, defaults to "default"
+        assert_eq!(default_model_for_provider("custom"), "default");
         assert_eq!(default_model_for_provider("unknown"), "unknown");
     }
 }

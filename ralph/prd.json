@@ -1,6 +1,6 @@
 {
   "project": "Agent Harness",
-  "branchName": "ralph/agent-harness",
+  "branchName": "ralph/momo-fetch",
   "description": "Rust-native AI agent workspace built on adk-rust v0.6.0 with EverMemOS-compatible memory vault (Obsidian wiki 6-level hierarchy). Personal tool for daily software engineering with multi-provider LLM support, tool system, MCP, filesystem sandbox, and memory lifecycle.",
   "userStories": [
     {
@@ -8,7 +8,7 @@
       "title": "Scaffold project with adk-rust",
       "description": "As a developer, I want to scaffold the project using cargo adk new and customize it for our harness with the correct source structure.",
       "acceptanceCriteria": [
-        "cargo adk new agent-harness creates correct project",
+        "cargo adk new momo-fetch creates correct project",
         "Cargo.toml uses adk-rust = '0.7.0' with features: ['openai', 'anthropic', 'deepseek', 'ollama', 'groq']",
         "cargo build passes with no errors",
         "Custom source structure created: src/{main.rs, harness.rs, cli/, tools/{file.rs, shell.rs, search.rs, web.rs, memory.rs}, memory/{vault.rs, parser.rs, retrieval.rs, lifecycle.rs, types.rs}, context/, sandbox/, config/, providers.rs}",
@@ -107,7 +107,7 @@
       "description": "As a user, I want conversation history saved using adk-rust's built-in SQLite session backend.",
       "acceptanceCriteria": [
         "Use adk-session SQLite backend: SqliteSessionService",
-        "Configure path: ~/.config/agent-harness/sessions.db",
+        "Configure path: ~/.config/momo-fetch/sessions.db",
         "/sessions command lists past sessions",
         "/resume <id> command resumes previous session",
         "Auto-save every turn via adk-runner",
@@ -141,14 +141,14 @@
       "title": "One-shot mode",
       "description": "As a user, I want to run a single prompt and exit for scripts/CI.",
       "acceptanceCriteria": [
-        "agent-harness -p 'prompt' runs 1 turn then exits",
+        "momo-fetch -p 'prompt' runs 1 turn then exits",
         "--model <name> flag overrides model",
         "--provider <name> flag overrides provider",
         "--project <path> flag sets working directory",
         "--permission <mode> flag sets permission mode",
         "Exit code: 0 = success, 1 = error",
         "stdout: agent response, stderr: debug/logging",
-        "cat file.md | agent-harness -p 'summarize' stdin support",
+        "cat file.md | momo-fetch -p 'summarize' stdin support",
         "Typecheck passes"
       ],
       "priority": 1,
@@ -365,7 +365,7 @@
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Phase 3.6 — depends on US-016. Uses file-based mailbox instead of A2A (simpler, no adk-server dependency). Workers spawned as separate agent-harness processes in tmux panes with optional git worktrees."
+      "notes": "Phase 3.6 — depends on US-016. Uses file-based mailbox instead of A2A (simpler, no adk-server dependency). Workers spawned as separate momo-fetch processes in tmux panes with optional git worktrees."
     }
   ]
 }

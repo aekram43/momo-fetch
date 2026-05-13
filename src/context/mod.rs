@@ -2,22 +2,32 @@ use std::path::{Path, PathBuf};
 
 use crate::memory::vault::ObsidianVault;
 
-/// Builds the system prompt from AGENTS.md, CLAUDE.md, KMS, and memory context.
+/// Builds the system prompt from SOUL.md, AGENTS.md, CLAUDE.md, KMS, and memory context.
 pub struct ContextBuilder {
     project_path: PathBuf,
+    soul_md_content: Vec<(PathBuf, String)>,
     agents_md_content: Vec<(PathBuf, String)>,
     kms_toc: Option<String>,
 }
 
 impl ContextBuilder {
     /// Create a new context builder by walking up from project_path
-    /// looking for AGENTS.md, CLAUDE.md, and .harness/AGENTS.md files.
+    /// looking for SOUL.md, AGENTS.md, CLAUDE.md, and .harness/AGENTS.md files.
     pub fn new(project_path: &Path, _vault: &ObsidianVault) -> anyhow::Result<Self> {
+        let mut soul_md_content = Vec::new();
         let mut agents_md_content = Vec::new();
         let mut current = project_path.to_path_buf();
 
         // Walk up from cwd looking for context files
         loop {
+            // SOUL.md (agent personality/identity)
+            let soul_candidate = current.join("SOUL.md");
+            if soul_candidate.exists() {
+                let content = std::fs::read_to_string(&soul_candidate)?;
+                soul_md_content.push((soul_candidate, content));
+            }
+
+            // AGENTS.md / CLAUDE.md (project instructions)
             for filename in &["AGENTS.md", "CLAUDE.md"] {
                 let candidate = current.join(filename);
                 if candidate.exists() {
@@ -34,6 +44,12 @@ impl ContextBuilder {
                     let content = std::fs::read_to_string(&candidate)?;
                     agents_md_content.push((candidate, content));
                 }
+                // Also check .harness/SOUL.md
+                let soul_candidate = harness_dir.join("SOUL.md");
+                if soul_candidate.exists() {
+                    let content = std::fs::read_to_string(&soul_candidate)?;
+                    soul_md_content.push((soul_candidate, content));
+                }
             }
 
             if !current.pop() {
@@ -42,6 +58,7 @@ impl ContextBuilder {
         }
 
         // Reverse so closer-to-cwd files come last (higher priority)
+        soul_md_content.reverse();
         agents_md_content.reverse();
 
         // Load KMS TOC
@@ -49,6 +66,7 @@ impl ContextBuilder {
 
         Ok(Self {
             project_path: project_path.to_path_buf(),
+            soul_md_content,
             agents_md_content,
             kms_toc,
         })
@@ -59,7 +77,7 @@ impl ContextBuilder {
         let mut parts = Vec::new();
 
         parts.push(
-            "You are Agent Harness, an AI coding assistant. \
+            "You are MOMO Fetch, an AI coding assistant. \
              You have access to tools for file operations, \
              shell execution, web search, and memory management. \
              Always prefer using dedicated tools over Bash commands. \
@@ -67,6 +85,15 @@ impl ContextBuilder {
              to code you didn't change."
                 .into(),
         );
+
+        // SOUL.md (agent personality/identity — highest behavioral priority)
+        for (path, content) in &self.soul_md_content {
+            parts.push(format!(
+                "\n--- Soul from {} ---\n{}",
+                path.display(),
+                content
+            ));
+        }
 
         // AGENTS.md / CLAUDE.md (closest = highest priority)
         for (path, content) in &self.agents_md_content {
@@ -93,14 +120,17 @@ impl ContextBuilder {
     /// Get relative paths of loaded context files for display.
     pub fn loaded_file_relative_paths(&self) -> Vec<String> {
         let cwd = std::env::current_dir().unwrap_or_default();
-        self.agents_md_content
-            .iter()
-            .map(|(p, _)| {
-                p.strip_prefix(&cwd)
-                    .map(|rel| format!("./{}", rel.display()))
-                    .unwrap_or_else(|_| format!("{}", p.display()))
-            })
-            .collect()
+        let mut paths = Vec::new();
+
+        for (p, _) in self.soul_md_content.iter().chain(self.agents_md_content.iter()) {
+            let rel = p
+                .strip_prefix(&cwd)
+                .map(|rel| format!("./{}", rel.display()))
+                .unwrap_or_else(|_| format!("{}", p.display()));
+            paths.push(rel);
+        }
+
+        paths
     }
 
     fn load_kms_toc(project_path: &Path) -> anyhow::Result<Option<String>> {
@@ -239,10 +269,11 @@ mod tests {
 
         let ctx = ContextBuilder::new(&project, &vault).unwrap();
         assert!(ctx.agents_md_content.is_empty());
+        assert!(ctx.soul_md_content.is_empty());
 
         // System prompt should still work
         let prompt = ctx.system_prompt();
-        assert!(prompt.contains("You are Agent Harness"));
+        assert!(prompt.contains("You are MOMO Fetch"));
     }
 
     #[test]
@@ -256,7 +287,7 @@ mod tests {
 
         let ctx = ContextBuilder::new(&project, &vault).unwrap();
         let prompt = ctx.system_prompt();
-        assert!(prompt.contains("You are Agent Harness"));
+        assert!(prompt.contains("You are MOMO Fetch"));
         assert!(prompt.contains("AI coding assistant"));
     }
 
@@ -291,5 +322,63 @@ mod tests {
         let prompt = ctx.system_prompt();
         assert!(prompt.contains("Project Knowledge Base"));
         assert!(prompt.contains("Use Rust 2024"));
+    }
+
+    #[test]
+    fn test_discovers_soul_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("SOUL.md"), "# My Soul\nBe friendly and concise").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        assert_eq!(ctx.soul_md_content.len(), 1);
+        assert!(ctx.soul_md_content[0].1.contains("Be friendly and concise"));
+    }
+
+    #[test]
+    fn test_soul_md_in_system_prompt_with_own_section() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("SOUL.md"), "Speak in Thai by default").unwrap();
+        fs::write(project.join("AGENTS.md"), "Use tabs for indentation").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        let prompt = ctx.system_prompt();
+
+        // SOUL.md gets its own section header
+        assert!(prompt.contains("--- Soul from"));
+        assert!(prompt.contains("Speak in Thai by default"));
+
+        // AGENTS.md gets context section header
+        assert!(prompt.contains("--- Context from"));
+        assert!(prompt.contains("Use tabs for indentation"));
+
+        // SOUL.md should appear before AGENTS.md in the prompt
+        let soul_pos = prompt.find("Speak in Thai").unwrap();
+        let agents_pos = prompt.find("Use tabs").unwrap();
+        assert!(soul_pos < agents_pos, "SOUL.md should come before AGENTS.md");
+    }
+
+    #[test]
+    fn test_soul_md_in_loaded_file_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("SOUL.md"), "Be kind").unwrap();
+
+        let vault_dir = tmp.path().join("vault");
+        let vault = ObsidianVault::open(&vault_dir).unwrap();
+
+        let ctx = ContextBuilder::new(&project, &vault).unwrap();
+        let paths = ctx.loaded_file_relative_paths();
+        assert!(paths.iter().any(|p| p.contains("SOUL.md")));
     }
 }

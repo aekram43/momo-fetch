@@ -23,11 +23,29 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
         }
     }
 
-    // Run a single turn
-    match harness.run_turn(&full_prompt).await {
-        Ok(stream) => {
+    // Run a single turn (with memory enrichment if auto_search is enabled)
+    match harness.run_turn_enriched(&full_prompt).await {
+        Ok((_enriched, stream)) => {
             let success = consume_stream_oneshot(stream).await;
             if success {
+                // Post-turn auto-write memory
+                if harness.memory_sidecar().auto_write_enabled() {
+                    let project_name = harness
+                        .config()
+                        .project_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    let turn_summary = crate::memory::sidecar::TurnSummary {
+                        user_message: full_prompt.clone(),
+                        tool_calls: Vec::new(),
+                        response_preview: String::new(),
+                        project: project_name,
+                    };
+
+                    let _ = harness.memory_sidecar().write_turn_memory_option_a(&turn_summary);
+                }
                 Ok(())
             } else {
                 // Stream completed but with errors

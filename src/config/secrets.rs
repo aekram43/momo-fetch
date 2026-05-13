@@ -13,12 +13,13 @@ const KNOWN_PROVIDERS: &[(&str, &str)] = &[
     ("deepseek", "DEEPSEEK_API_KEY"),
     ("groq", "GROQ_API_KEY"),
     ("openrouter", "OPENROUTER_API_KEY"),
+    ("zai", "ZAI_API_KEY"),
     ("gemini", "GOOGLE_API_KEY"),
     ("serper", "SERPER_API_KEY"),
     ("ollama", ""), // Ollama has no API key
 ];
 
-const SERVICE_NAME: &str = "agent-harness";
+const SERVICE_NAME: &str = "momo-fetch";
 
 /// Error type for secret operations.
 #[derive(Debug)]
@@ -190,6 +191,7 @@ pub fn default_model_for_provider(provider: &str) -> &'static str {
         "groq" => "llama-3.3-70b-versatile",
         "ollama" => "llama3.2",
         "openrouter" => "anthropic/claude-sonnet-4",
+        "zai" => "GLM-5",
         "gemini" => "gemini-2.0-flash",
         "serper" => "(search API, no model)",
         _ => "(unknown)",
@@ -207,6 +209,7 @@ mod tests {
         assert_eq!(env_var_for_provider("deepseek"), "DEEPSEEK_API_KEY");
         assert_eq!(env_var_for_provider("groq"), "GROQ_API_KEY");
         assert_eq!(env_var_for_provider("openrouter"), "OPENROUTER_API_KEY");
+        assert_eq!(env_var_for_provider("zai"), "ZAI_API_KEY");
         assert_eq!(env_var_for_provider("gemini"), "GOOGLE_API_KEY");
         assert_eq!(env_var_for_provider("serper"), "SERPER_API_KEY");
     }

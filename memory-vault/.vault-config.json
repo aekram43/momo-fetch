@@ -3,11 +3,14 @@
   "vault_path": "./memory-vault",
   "created": "2026-05-06",
   "stats": {
-    "total_memcells": 2,
+    "total_memcells": 10,
     "total_events": 3,
     "total_foresights": 1,
     "total_episodes": 1,
-    "pending_foresights": 1
+    "pending_foresights": 1,
+    "total_clusters": 0,
+    "total_reflections": 0,
+    "profile_items": 0
   },
   "config": {
     "consolidation_threshold": 5,
