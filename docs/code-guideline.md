@@ -19,6 +19,7 @@ cli/mod.rs (clap arg parsing)
         harness.rs     (central orchestrator)
           |
           +---> providers.rs    (LLM provider management)
+          +---> agent/          (agent personalities + orchestrator tools)
           +---> sandbox/        (filesystem isolation)
           +---> context/        (system prompt builder)
           +---> session.rs      (SQLite session persistence)
@@ -66,22 +67,27 @@ This is the central construction sequence. Order matters:
 8. **MCP service** — `McpService::new()` loads `.harness/mcp.json`, starts configured servers
 9. **Skill service** — `SkillService::new()` discovers skills from `.skills/`, `.claude/skills/`, `.harness/skills/`
 10. **Team service** — `TeamService::new()` initializes team coordination
-11. **Cost tracker** — `CostTracker::new()` loads cost data from JSON file
-12. **Runner** — `build_runner()` creates the adk-rust `Runner` with:
+11. **Agent registry** — `AgentRegistry::new(project_path)` scans `.harness/agents/` for `.md` and `.yml` personality files
+12. **Cost tracker** — `CostTracker::new()` loads cost data from JSON file
+13. **Runner** — `build_runner()` creates the adk-rust `Runner` with:
     - LlmAgent with model, system prompt, tools, tool confirmation policy
+    - Agent-specific system prompt if `--agent <name>` was provided
+    - Orchestrator tools (`spawn_agent`, `send_message`, `receive_messages`) if agent has `orchestration` capability
     - MCP toolset registration
     - Skill context injection into system prompt
     - Task tool context for sub-agent spawning
+    - Orchestrator context for dynamic agent spawning
 
 ### Step 4: Runner Construction (`Harness::build_runner()`)
 
-1. Builds tool registry via `tools::build_tool_registry(sandbox, vault)` — sets thread-local context and returns `Vec<Arc<dyn Tool>>`
+1. Builds tool registry via `tools::build_tool_registry_with_orchestrator(sandbox, vault, is_orchestrator)` — sets thread-local context and returns `Vec<Arc<dyn Tool>>` (includes orchestrator tools if agent has `orchestration` capability)
 2. Converts sandbox permission mode to `ToolConfirmationPolicy` (Strict→Always, Auto→PerTool, Yolo→Never)
-3. Builds system prompt = base instruction + SOUL.md content + AGENTS.md content + KMS TOC + skill context
+3. Builds system prompt — if `--agent <name>` provided, uses `context_builder.system_prompt_for_agent(agent_def)` which includes agent personality; otherwise uses `context_builder.system_prompt()` (base instruction + SOUL.md + AGENTS.md + KMS TOC + skill context)
 4. Sets task context for sub-agent spawning (ProviderManager clone, sandbox, vault, depth=0)
-5. Creates `LlmAgentBuilder` → sets model, instruction, confirmation policy → registers tools
-6. Registers MCP toolset (if any servers configured)
-7. Creates `Runner::builder()` with agent + session service
+5. Sets orchestrator context if agent has `orchestration` capability (ProviderManager, sandbox, vault, agent registry, mailbox path, identity)
+6. Creates `LlmAgentBuilder` → sets model, instruction, confirmation policy → registers tools
+7. Registers MCP toolset (if any servers configured)
+8. Creates `Runner::builder()` with agent + session service
 
 ---
 
@@ -132,7 +138,7 @@ When the LLM calls a tool, adk-rust handles the dispatch:
 
 ### Tool Registry (`src/tools/mod.rs`)
 
-`build_tool_registry()` creates all built-in tools:
+`build_tool_registry_with_orchestrator()` creates all built-in tools. When `is_orchestrator=true`, also includes orchestrator tools:
 
 | Module | Tools | Purpose |
 |--------|-------|---------|
@@ -143,6 +149,7 @@ When the LLM calls a tool, adk-rust handles the dispatch:
 | `memory.rs` | MemWrite, MemExtract, MemSearch, MemRead, MemGraph, MemProfile, MemConsolidate, MemValidateForesights, MemReflect, MemStats | Memory vault operations |
 | `kms.rs` | KmsRead, KmsSearch, KmsWrite | Knowledge base operations |
 | `task.rs` | Task | Sub-agent orchestration |
+| `agent/orchestrator.rs` | SpawnAgent, SendMessage, ReceiveMessages | Dynamic agent spawning + mailbox messaging (orchestrator only) |
 
 ### Thread-Local Context Pattern
 
@@ -226,6 +233,27 @@ tags: [memcell, rust, testing]
 4. **Reflect** — `mem_reflect` generates weekly/monthly reflections
 5. **Validate** — `mem_validate_foresights` checks pending predictions
 
+### Memory Sidecar (`src/memory/sidecar.rs`)
+
+Auto-search before turns and auto-write after turns. Two options:
+
+- **Option A** (default, `$0 extra cost`): TF-IDF keyword extraction for writes, grep-based search
+- **Option B** (opt-in): When `sidecar_model` is set in `.harness/settings.json`, spawns a sub-agent with a small model for memory extraction
+
+Key struct: `MemorySidecar` — holds `vault: Arc<Mutex<ObsidianVault>>` + `config: MemorySettings`
+
+Key methods:
+- `enrich_input(user_input)` — pre-turn search, prepends relevant memories to user input
+- `build_system_prompt_addition()` — adds memory vault instructions to system prompt when auto features enabled
+- `write_turn_memory_option_a(summary)` — post-turn TF-IDF MemCell write (no extra LLM call)
+- `write_turn_memory_option_b(summary)` — post-turn sub-agent MemCell write (uses sidecar model)
+
+Config via `.harness/settings.json` → `memory` object:
+- `auto_search: bool` — enable pre-turn vault search
+- `auto_write: bool` — enable post-turn MemCell write
+- `sidecar_model: Option<String>` — null = Option A (TF-IDF), model name = Option B
+- `search_mode`, `max_results_per_turn`, `extract_threshold` — fine-tuning knobs
+
 ### Retrieval Modes (`src/memory/retrieval.rs`)
 
 Four search strategies:
@@ -305,13 +333,27 @@ Regex-based pattern matching for: `rm -rf /`, `git push --force`, `git reset --h
 
 Files closer to the project root have higher priority (appear last in the system prompt).
 
-The system prompt assembly order is:
+Two system prompt methods:
+
+- `system_prompt()` — default prompt for normal mode
+- `system_prompt_for_agent(agent_def)` — agent-specific prompt when `--agent <name>` is used
+
+### Default mode system prompt assembly order:
 1. Base instruction ("You are MOMO Fetch...")
 2. **SOUL.md** — `"--- Soul from {path} ---\n{content}"`
 3. AGENTS.md / CLAUDE.md — `"--- Context from {path} ---\n{content}"`
 4. KMS TOC
 5. Skill context (injected by Harness)
 6. Memory system context (injected by Memory Sidecar)
+
+### Agent-specific system prompt assembly order:
+1. Agent identity ("You are MOMO Fetch operating as **{name}** — {description}...")
+2. **SOUL.md** — `"--- Soul from {path} ---\n{content}"`
+3. **Agent personality** — `"--- Agent Personality: {name} ---\n{content}"`
+4. AGENTS.md / CLAUDE.md — `"--- Context from {path} ---\n{content}"`
+5. KMS TOC
+6. Skill context (injected by Harness)
+7. Memory system context (injected by Memory Sidecar)
 
 ---
 
@@ -373,14 +415,70 @@ The system prompt assembly order is:
 - File-based mailbox for inter-agent messaging (`.harness/mailbox/`)
 - Workers spawned as separate `momo-fetch` processes in tmux panes
 - Optional git worktrees for isolation
-- `/team start` — define workers interactively
+- `WorkerDef` has optional `agent` field — when set, worker spawn command includes `-a <agent_name>` so each worker loads its own personality from `.harness/agents/`
+- **Team config files** — `.harness/teams/<name>.yml` defines workers with `TeamConfig` struct (`name`, `workers[]`). Each `TeamWorkerConfig` has `name`, `task`, `agent`, `branch`, `worktree`
+- `TeamService::load_team_config(name)` parses YAML from `.harness/teams/`, `TeamService::list_team_configs()` discovers all available configs, `TeamService::config_to_workers()` converts `TeamConfig` → `Vec<WorkerDef>`
+- `/team start <name>` — load workers from config file (no interactive input)
+- `/team start` (no arg) — interactive mode, also shows available team configs
 - `/team status` — check worker progress and mailbox
 - `/team merge` — merge completed workers' branches
 - `/team stop` — terminate workers, clean up worktrees
 
 ---
 
-## 15. Configuration (`src/config/mod.rs`)
+## 15. Agent Personalities (`src/agent/`)
+
+### Agent Module Structure
+
+```
+src/agent/
+├── mod.rs            — AgentDef, AgentRegistry (personality loading)
+└── orchestrator.rs   — spawn_agent, send_message, receive_messages tools
+```
+
+### AgentDef
+
+Each agent personality has:
+- `name` — derived from filename (e.g., `researcher.md` → `researcher`)
+- `description` — from `.yml` config (optional)
+- `personality` — the markdown prompt content
+- `model` / `provider` — optional overrides
+- `tools` — optional restricted tool set
+- `capabilities` — tags for orchestrator reference (e.g., `["orchestration"]`)
+
+### AgentRegistry
+
+Scans `.harness/agents/` for `.md` and `.yml` files:
+- `.md` files: personality only (default model/tools)
+- `.yml` files: personality + configuration (takes priority over `.md` for same name)
+
+### Mid-Session Switching
+
+`Harness::switch_agent(name)` and `Harness::clear_agent()` allow switching personalities without restarting:
+1. Resolves agent from registry
+2. Updates `config.agent_name`
+3. Rebuilds runner with new system prompt via `rebuild_runner_with_agent()`
+4. Updates task context with new system prompt
+5. Sets or clears orchestrator context based on agent capabilities
+
+### Orchestrator Tools (`src/agent/orchestrator.rs`)
+
+Three tools registered only when agent has `orchestration` capability:
+
+| Tool | Purpose | Modes |
+|------|---------|-------|
+| `spawn_agent` | Dynamically spawn a specialist | `inline` (in-process, synchronous) or `process` (separate OS process, async) |
+| `send_message` | Send mailbox message to spawned agent | Any |
+| `receive_messages` | Receive mailbox messages from spawned agents | Any |
+
+Thread-local `OrchestratorContext` (same pattern as `TaskContext`) provides access to ProviderManager, sandbox, vault, agent registry, and mailbox path.
+
+- File-based mailbox for inter-agent messaging (`.harness/mailbox/`)
+- Workers spawned as separate `momo-fetch` processes in tmux panes
+- Optional git worktrees for isolation
+---
+
+## 16. Configuration (`src/config/mod.rs`)
 
 ### Settings Hierarchy
 
@@ -400,12 +498,13 @@ pub struct HarnessConfig {
     pub permission_mode: PermissionMode,
     pub provider: ProviderSettings,
     pub resume_session_id: Option<String>,
+    pub agent_name: Option<String>,  // Agent personality name (from --agent flag)
 }
 ```
 
 ---
 
-## 16. Key Conventions
+## 17. Key Conventions
 
 ### Error Handling
 
@@ -438,4 +537,4 @@ tokio::fs::rename(&tmp, &path).await?;
   clear_sandbox();
   ```
 - Session tests use `InMemorySessionService`
-- Total: 239 tests across all modules
+- Total: 191 tests across all modules

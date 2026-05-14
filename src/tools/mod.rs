@@ -17,9 +17,21 @@ use crate::sandbox::FilesystemSandbox;
 ///
 /// Returns a vector of `Arc<dyn Tool>` ready for registration
 /// with `LlmAgentBuilder::tool()`.
+///
+/// If `is_orchestrator` is true, also includes orchestrator tools
+/// (spawn_agent, send_message, receive_messages).
 pub fn build_tool_registry(
     sandbox: Arc<FilesystemSandbox>,
     vault: Arc<Mutex<ObsidianVault>>,
+) -> Vec<Arc<dyn Tool>> {
+    build_tool_registry_with_orchestrator(sandbox, vault, false)
+}
+
+/// Build the tool registry with optional orchestrator tools.
+pub fn build_tool_registry_with_orchestrator(
+    sandbox: Arc<FilesystemSandbox>,
+    vault: Arc<Mutex<ObsidianVault>>,
+    is_orchestrator: bool,
 ) -> Vec<Arc<dyn Tool>> {
     // Set sandbox for all tool modules
     file::set_sandbox(sandbox.clone());
@@ -30,9 +42,9 @@ pub fn build_tool_registry(
     // Set vault for memory tools
     memory::set_vault(vault);
 
-    vec![
+    let mut tools = vec![
         // File tools
-        Arc::new(file::FileRead),
+        Arc::new(file::FileRead) as Arc<dyn Tool>,
         Arc::new(file::FileWrite),
         Arc::new(file::FileEdit),
         // Shell tool
@@ -60,7 +72,16 @@ pub fn build_tool_registry(
         Arc::new(memory::MemReflect),
         // Sub-agent orchestration
         Arc::new(task::Task),
-    ]
+    ];
+
+    // Orchestrator tools (spawn_agent, send_message, receive_messages)
+    if is_orchestrator {
+        tools.push(Arc::new(crate::agent::orchestrator::SpawnAgent));
+        tools.push(Arc::new(crate::agent::orchestrator::SendMessage));
+        tools.push(Arc::new(crate::agent::orchestrator::ReceiveMessages));
+    }
+
+    tools
 }
 
 /// Build a restricted tool set for sub-agents (no Task tool).

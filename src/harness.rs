@@ -5,6 +5,7 @@ use adk_rust::agent::LlmAgentBuilder;
 use adk_rust::runner::Runner;
 use adk_rust::{Content, EventStream, ToolConfirmationPolicy};
 
+use crate::agent::AgentRegistry;
 use crate::config::HarnessConfig;
 use crate::context::ContextBuilder;
 use crate::cost::CostTracker;
@@ -30,6 +31,7 @@ pub struct Harness {
     mcp_service: McpService,
     skill_service: SkillService,
     team_service: TeamService,
+    agent_registry: AgentRegistry,
     cost_tracker: CostTracker,
     runner: Runner,
     current_session_id: String,
@@ -120,10 +122,40 @@ impl Harness {
         // Initialize team service
         let team_service = TeamService::new(&config.project_path)?;
 
+        // Load agent registry from .harness/agents/
+        let agent_registry = AgentRegistry::new(&config.project_path)?;
+        if !agent_registry.is_empty() {
+            tracing::info!("Agent personalities: {} registered", agent_registry.len());
+        }
+
+        // Resolve agent personality if --agent flag was provided
+        let agent_def = if let Some(ref name) = config.agent_name {
+            Some(
+                agent_registry
+                    .get(name)
+                    .ok_or_else(|| {
+                        let available: Vec<_> =
+                            agent_registry.list().iter().map(|a| a.name.clone()).collect();
+                        anyhow::anyhow!(
+                            "Agent '{}' not found. Available: {}",
+                            name,
+                            if available.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                available.join(", ")
+                            }
+                        )
+                    })?
+                    .clone(),
+            )
+        } else {
+            None
+        };
+
         // Initialize cost tracker
         let cost_tracker = CostTracker::new(config_dir.join("cost.json"));
 
-        // Build Runner with Agent
+        // Build Runner with Agent (use agent-specific prompt if agent selected)
         let runner = Self::build_runner(
             &provider_mgr,
             &context_builder,
@@ -133,6 +165,7 @@ impl Harness {
             session_mgr.service(),
             &mcp_service,
             &skill_service,
+            agent_def.as_ref(),
         )?;
 
         // Initialize cost tracker session context
@@ -158,6 +191,7 @@ impl Harness {
             mcp_service,
             skill_service,
             team_service,
+            agent_registry,
             cost_tracker,
             runner,
             current_session_id,
@@ -175,13 +209,21 @@ impl Harness {
         session_service: Arc<dyn adk_session::SessionService>,
         mcp_service: &McpService,
         skill_service: &SkillService,
+        agent_def: Option<&crate::agent::AgentDef>,
     ) -> anyhow::Result<Runner> {
-        let tools = crate::tools::build_tool_registry(sandbox.clone(), vault.clone());
+        let tools = crate::tools::build_tool_registry_with_orchestrator(
+            sandbox.clone(),
+            vault.clone(),
+            agent_def.map(|d| d.capabilities.contains(&"orchestration".to_string())).unwrap_or(false),
+        );
 
         let policy = sandbox.to_tool_confirmation_policy();
 
-        // Build system prompt with skill context + memory context
-        let mut system_prompt = context_builder.system_prompt().to_string();
+        // Build system prompt — agent-specific if agent is selected, otherwise default
+        let mut system_prompt = match agent_def {
+            Some(def) => context_builder.system_prompt_for_agent(def),
+            None => context_builder.system_prompt().to_string(),
+        };
         if let Some(skill_ctx) = skill_service.build_skill_context() {
             system_prompt.push_str("\n\n");
             system_prompt.push_str(&skill_ctx);
@@ -204,6 +246,31 @@ impl Harness {
             system_prompt: system_prompt.clone(),
             depth: 0,
         });
+
+        // Set orchestrator context if agent has orchestration capability
+        if let Some(def) = agent_def {
+            if def.capabilities.contains(&"orchestration".to_string()) {
+                let project_path = context_builder.project_path().to_path_buf();
+                crate::agent::orchestrator::set_orchestrator_context(
+                    crate::agent::orchestrator::OrchestratorContext {
+                        provider_mgr: ProviderManager::from_current(
+                            provider_mgr.current(),
+                            provider_mgr.current_provider().to_string(),
+                            provider_mgr.current_model_name().to_string(),
+                        ),
+                        sandbox: sandbox.clone(),
+                        vault: vault.clone(),
+                        agent_registry: AgentRegistry::new(&project_path)
+                            .unwrap_or_else(|_| AgentRegistry::empty(
+                                project_path.join(".harness").join("agents")
+                            )),
+                        project_path: project_path.clone(),
+                        mailbox_path: project_path.join(".harness").join("mailbox"),
+                        identity: def.name.clone(),
+                    },
+                );
+            }
+        }
 
         let mut agent_builder = LlmAgentBuilder::new("momo-fetch")
             .model(provider_mgr.current())
@@ -243,6 +310,11 @@ impl Harness {
 
     /// Rebuild the Runner (e.g., after model/provider switch or MCP changes).
     pub fn rebuild_runner(&mut self) -> anyhow::Result<()> {
+        let agent_def = self
+            .config
+            .agent_name
+            .as_ref()
+            .and_then(|name| self.agent_registry.get(name));
         self.runner = Self::build_runner(
             &self.provider_mgr,
             &self.context_builder,
@@ -252,6 +324,7 @@ impl Harness {
             self.session_mgr.service(),
             &self.mcp_service,
             &self.skill_service,
+            agent_def,
         )?;
         Ok(())
     }
@@ -335,6 +408,104 @@ impl Harness {
         Ok(())
     }
 
+    /// Switch to a specific agent personality mid-session.
+    /// Rebuilds the runner with the agent's system prompt.
+    pub fn switch_agent(&mut self, name: &str) -> anyhow::Result<()> {
+        let agent_def = self
+            .agent_registry
+            .get(name)
+            .ok_or_else(|| {
+                let available: Vec<_> =
+                    self.agent_registry.list().iter().map(|a| a.name.clone()).collect();
+                anyhow::anyhow!(
+                    "Agent '{}' not found. Available: {}",
+                    name,
+                    if available.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        available.join(", ")
+                    }
+                )
+            })?
+            .clone();
+
+        self.config.agent_name = Some(name.to_string());
+        self.rebuild_runner_with_agent(Some(&agent_def))?;
+
+        // Set orchestrator context if the new agent has orchestration capability
+        if agent_def.capabilities.contains(&"orchestration".to_string()) {
+            let project_path = self.config.project_path.clone();
+            crate::agent::orchestrator::set_orchestrator_context(
+                crate::agent::orchestrator::OrchestratorContext {
+                    provider_mgr: ProviderManager::from_current(
+                        self.provider_mgr.current(),
+                        self.provider_mgr.current_provider().to_string(),
+                        self.provider_mgr.current_model_name().to_string(),
+                    ),
+                    sandbox: self.sandbox.clone(),
+                    vault: self.vault.clone(),
+                    agent_registry: AgentRegistry::new(&project_path)
+                        .unwrap_or_else(|_| AgentRegistry::empty(
+                            project_path.join(".harness").join("agents")
+                        )),
+                    project_path: project_path.clone(),
+                    mailbox_path: project_path.join(".harness").join("mailbox"),
+                    identity: agent_def.name.clone(),
+                },
+            );
+        } else {
+            crate::agent::orchestrator::clear_orchestrator_context();
+        }
+
+        Ok(())
+    }
+
+    /// Clear the agent personality and switch back to default mode.
+    /// Rebuilds the runner with the default system prompt.
+    pub fn clear_agent(&mut self) -> anyhow::Result<()> {
+        self.config.agent_name = None;
+        self.rebuild_runner_with_agent(None)?;
+        crate::agent::orchestrator::clear_orchestrator_context();
+        Ok(())
+    }
+
+    /// Rebuild runner with an explicit agent definition.
+    fn rebuild_runner_with_agent(
+        &mut self,
+        agent_def: Option<&crate::agent::AgentDef>,
+    ) -> anyhow::Result<()> {
+        self.runner = Self::build_runner(
+            &self.provider_mgr,
+            &self.context_builder,
+            &self.sandbox,
+            &self.vault,
+            &self.memory_sidecar,
+            self.session_mgr.service(),
+            &self.mcp_service,
+            &self.skill_service,
+            agent_def,
+        )?;
+
+        // Update task context with the new system prompt
+        let new_prompt = match agent_def {
+            Some(def) => self.context_builder.system_prompt_for_agent(def),
+            None => self.context_builder.system_prompt().to_string(),
+        };
+        crate::tools::task::set_task_context(crate::tools::task::TaskContext {
+            provider_mgr: ProviderManager::from_current(
+                self.provider_mgr.current(),
+                self.provider_mgr.current_provider().to_string(),
+                self.provider_mgr.current_model_name().to_string(),
+            ),
+            sandbox: self.sandbox.clone(),
+            vault: self.vault.clone(),
+            system_prompt: new_prompt,
+            depth: 0,
+        });
+
+        Ok(())
+    }
+
     // ── Accessors ──────────────────────────────────────────────
 
     /// Get a reference to the provider manager.
@@ -401,6 +572,11 @@ impl Harness {
     /// Get a mutable reference to the team service.
     pub fn team_service_mut(&mut self) -> &mut TeamService {
         &mut self.team_service
+    }
+
+    /// Get a reference to the agent registry.
+    pub fn agent_registry(&self) -> &AgentRegistry {
+        &self.agent_registry
     }
 
     /// Get a reference to the cost tracker.

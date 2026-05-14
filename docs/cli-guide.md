@@ -30,6 +30,7 @@ momo-fetch [OPTIONS]
 
 Options:
   -p, --prompt <TEXT>         Run one prompt and exit
+  -a, --agent <NAME>          Start as a specific agent specialist (from .harness/agents/)
       --model <NAME>          Override model (e.g., gpt-4o, claude-sonnet-4-20250514)
       --provider <NAME>       Override provider (anthropic, openai, deepseek, groq, ollama, openrouter, zai, custom)
       --project <PATH>        Working directory (default: current directory)
@@ -290,10 +291,34 @@ API key: ****
 
 | Command | Description |
 |---------|-------------|
-| `/team start` | Start a team of worker agents (interactive) |
+| `/team start <name>` | Start a team from `.harness/teams/<name>.yml` |
+| `/team start` | Start a team interactively |
 | `/team status` | Show team status and worker progress |
 | `/team merge` | Merge completed workers' branches |
 | `/team stop` | Stop team and clean up worktrees |
+
+### Agent Personalities
+
+| Command | Description |
+|---------|-------------|
+| `/agent list` | List all agent personalities |
+| `/agent show <name>` | Show agent personality details |
+| `/agent switch <name>` | Switch to an agent personality mid-session |
+| `/agent default` | Switch back to default mode (no personality) |
+
+```
+claude-sonnet-4-20250514> /agent list
+Agent personalities (3):
+  coder: Coding specialist [deepseek-chat]
+  researcher: Research expert
+  reviewer: Code review specialist
+
+claude-sonnet-4-20250514> /agent switch researcher
+✓ Switched to agent 'researcher'
+
+claude-sonnet-4-20250514> /agent default
+✓ Switched to default mode (no agent personality)
+```
 
 ---
 
@@ -433,4 +458,6 @@ Project instructions and agent personality files auto-discovered and injected in
 | Memory vault | `<project>/memory-vault/` |
 | MCP config | `<project>/.harness/mcp.json` |
 | Skills | `<project>/.harness/skills/`, `<project>/.skills/`, `<project>/.claude/skills/` |
+| Agent personalities | `<project>/.harness/agents/` |
+| Team configs | `<project>/.harness/teams/` |
 | Knowledge bases | `<project>/.kms/` |

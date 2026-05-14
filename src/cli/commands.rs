@@ -23,7 +23,11 @@ pub enum Command {
     KeySet { provider: String },
     KeyList,
     KeyDelete { provider: String },
-    TeamStart,
+    AgentList,
+    AgentShow { name: String },
+    AgentSwitch { name: String },
+    AgentDefault,
+    TeamStart { config: Option<String> },
     TeamStatus,
     TeamStop,
     TeamMerge,
@@ -162,10 +166,37 @@ impl Command {
                     _ => Some(Self::Unknown(input.to_string())),
                 }
             }
+            &"agent" => {
+                let sub = parts.get(1).unwrap_or(&"");
+                match *sub {
+                    "list" | "" => Some(Self::AgentList),
+                    "show" => {
+                        let name = parts.get(2).unwrap_or(&"").to_string();
+                        if name.is_empty() {
+                            Some(Self::Unknown("/agent show <name>".to_string()))
+                        } else {
+                            Some(Self::AgentShow { name })
+                        }
+                    }
+                    "switch" | "use" => {
+                        let name = parts.get(2).unwrap_or(&"").to_string();
+                        if name.is_empty() {
+                            Some(Self::Unknown("/agent switch <name>".to_string()))
+                        } else {
+                            Some(Self::AgentSwitch { name })
+                        }
+                    }
+                    "default" | "off" | "reset" => Some(Self::AgentDefault),
+                    _ => Some(Self::Unknown(input.to_string())),
+                }
+            }
             &"team" => {
                 let sub = parts.get(1).unwrap_or(&"");
                 match *sub {
-                    "start" => Some(Self::TeamStart),
+                    "start" => {
+                        let config = parts.get(2).map(|s| s.to_string());
+                        Some(Self::TeamStart { config })
+                    }
                     "status" | "" => Some(Self::TeamStatus),
                     "stop" => Some(Self::TeamStop),
                     "merge" => Some(Self::TeamMerge),
@@ -612,60 +643,196 @@ impl Command {
                 }
                 Ok(true)
             }
-            Self::TeamStart => {
-                use crate::team::WorkerDef;
-
-                // Read worker definitions from stdin
-                println!("Define worker agents (one per line, empty line to finish):");
-                println!("  Format: <name> <task> [--branch <name>] [--worktree]");
-                println!();
-
-                let mut workers = Vec::new();
-                loop {
-                    print!("  worker[{}]: ", workers.len());
-                    use std::io::Write;
-                    let _ = std::io::stdout().flush();
-
-                    let mut line = String::new();
-                    if std::io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
-                        break;
+            Self::AgentList => {
+                let registry = harness.agent_registry();
+                if registry.is_empty() {
+                    println!("No agent personalities found.");
+                    println!("Create one with: mkdir -p .harness/agents && echo 'Your prompt' > .harness/agents/researcher.md");
+                } else {
+                    println!("Agent personalities ({}):", registry.len());
+                    for def in registry.list() {
+                        let desc = def.description.as_deref().unwrap_or("(no description)");
+                        let model_info = match (&def.model, &def.provider) {
+                            (Some(m), Some(p)) => format!(" [{p}/{m}]"),
+                            (Some(m), None) => format!(" [{m}]"),
+                            _ => String::new(),
+                        };
+                        let caps = if def.capabilities.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [{}]", def.capabilities.join(", "))
+                        };
+                        println!("  {}{}{}: {}", def.name, model_info, caps, desc);
                     }
-
-                    let line = line.trim();
-                    let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                    if parts.len() < 2 {
-                        println!("    {} Invalid format. Use: <name> <task>", "\u{2717}".red());
-                        continue;
+                }
+                Ok(true)
+            }
+            Self::AgentShow { name } => {
+                let registry = harness.agent_registry();
+                match registry.get(name) {
+                    Some(def) => {
+                        println!("Agent: {}", def.name);
+                        if let Some(desc) = &def.description {
+                            println!("Description: {}", desc);
+                        }
+                        if let Some(model) = &def.model {
+                            println!("Model: {}", model);
+                        }
+                        if let Some(provider) = &def.provider {
+                            println!("Provider: {}", provider);
+                        }
+                        if let Some(tools) = &def.tools {
+                            println!("Tools: {}", tools.join(", "));
+                        }
+                        if !def.capabilities.is_empty() {
+                            println!("Capabilities: {}", def.capabilities.join(", "));
+                        }
+                        println!();
+                        println!("--- Personality ---");
+                        println!("{}", def.personality);
                     }
-
-                    let name = parts[0].to_string();
-                    let rest = parts[1];
-
-                    // Parse optional flags
-                    let mut branch = None;
-                    let mut use_worktree = false;
-
-                    let rest_parts: Vec<&str> = rest.split("--").collect();
-                    let task = rest_parts[0].trim().to_string();
-
-                    for flag_part in rest_parts.iter().skip(1) {
-                        let flag = flag_part.trim();
-                        if flag.starts_with("branch ") {
-                            branch = Some(flag[7..].trim().to_string());
-                        } else if flag.starts_with("branch=") {
-                            branch = Some(flag[7..].trim().to_string());
-                        } else if flag == "worktree" {
-                            use_worktree = true;
+                    None => {
+                        println!("{} Agent '{}' not found.", "\u{2717}".red(), name);
+                        let available: Vec<_> = registry.list().iter().map(|a| a.name.clone()).collect();
+                        if !available.is_empty() {
+                            println!("Available: {}", available.join(", "));
                         }
                     }
-
-                    workers.push(WorkerDef {
-                        name,
-                        task,
-                        branch,
-                        use_worktree: if use_worktree { Some(true) } else { None },
-                    });
                 }
+                Ok(true)
+            }
+            Self::AgentSwitch { name } => {
+                match harness.switch_agent(name) {
+                    Ok(()) => {
+                        let agent_name = harness.config().agent_name.as_deref().unwrap_or("default");
+                        println!(
+                            "{} Switched to agent '{}'",
+                            "\u{2713}".green(),
+                            agent_name
+                        );
+                    }
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
+            Self::AgentDefault => {
+                match harness.clear_agent() {
+                    Ok(()) => {
+                        println!(
+                            "{} Switched to default mode (no agent personality)",
+                            "\u{2713}".green()
+                        );
+                    }
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
+            Self::TeamStart { config: config_name } => {
+                use crate::team::WorkerDef;
+
+                // If a config name was provided, load from file
+                let workers: Vec<WorkerDef> = if let Some(name) = config_name {
+                    match harness.team_service().load_team_config(&name) {
+                        Ok(team_config) => {
+                            println!(
+                                "{} Loaded team config '{}' ({} workers)",
+                                "\u{2713}".green(),
+                                name,
+                                team_config.workers.len()
+                            );
+                            for w in &team_config.workers {
+                                let agent_tag = match &w.agent {
+                                    Some(a) => format!(" [agent: {a}]"),
+                                    None => String::new(),
+                                };
+                                let branch_tag = match &w.branch {
+                                    Some(b) => format!(" [branch: {b}]"),
+                                    None => String::new(),
+                                };
+                                let wt_tag = if w.worktree.unwrap_or(false) { " [worktree]" } else { "" };
+                                println!("  - {}{}{}{}: {}", w.name, agent_tag, branch_tag, wt_tag, w.task);
+                            }
+                            crate::team::TeamService::config_to_workers(&team_config)
+                        }
+                        Err(e) => {
+                            println!("{} {e}", "\u{2717}".red());
+                            return Ok(true);
+                        }
+                    }
+                } else {
+                    // No config name — check if .harness/teams/ has configs to offer
+                    let available = harness.team_service().list_team_configs().unwrap_or_default();
+                    if !available.is_empty() {
+                        println!("Available team configs:");
+                        for name in &available {
+                            println!("  /team start {name}");
+                        }
+                        println!();
+                    }
+
+                    // Interactive mode
+                    println!("Define worker agents (one per line, empty line to finish):");
+                    println!("  Format: <name> <task> [--agent <personality>] [--branch <name>] [--worktree]");
+                    println!();
+
+                    let mut workers = Vec::new();
+                    loop {
+                        print!("  worker[{}]: ", workers.len());
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+
+                        let mut line = String::new();
+                        if std::io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
+                            break;
+                        }
+
+                        let line = line.trim();
+                        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                        if parts.len() < 2 {
+                            println!("    {} Invalid format. Use: <name> <task>", "\u{2717}".red());
+                            continue;
+                        }
+
+                        let name = parts[0].to_string();
+                        let rest = parts[1];
+
+                        // Parse optional flags
+                        let mut branch = None;
+                        let mut use_worktree = false;
+                        let mut agent = None;
+
+                        let rest_parts: Vec<&str> = rest.split("--").collect();
+                        let task = rest_parts[0].trim().to_string();
+
+                        for flag_part in rest_parts.iter().skip(1) {
+                            let flag = flag_part.trim();
+                            if flag.starts_with("branch ") {
+                                branch = Some(flag[7..].trim().to_string());
+                            } else if flag.starts_with("branch=") {
+                                branch = Some(flag[7..].trim().to_string());
+                            } else if flag.starts_with("agent ") {
+                                agent = Some(flag[6..].trim().to_string());
+                            } else if flag.starts_with("agent=") {
+                                agent = Some(flag[6..].trim().to_string());
+                            } else if flag == "worktree" {
+                                use_worktree = true;
+                            }
+                        }
+
+                        workers.push(WorkerDef {
+                            name,
+                            task,
+                            branch,
+                            use_worktree: if use_worktree { Some(true) } else { None },
+                            agent,
+                        });
+                    }
+                    workers
+                };
 
                 if workers.is_empty() {
                     println!("{} No workers defined. Team not started.", "\u{2717}".red());
@@ -681,6 +848,7 @@ impl Command {
                 }
 
                 // Check git availability for worktrees
+                let mut workers = workers;
                 let has_worktree = workers.iter().any(|w| w.use_worktree.unwrap_or(false));
                 if has_worktree && !crate::team::WorktreeManager::is_git_repo(harness.sandbox().root()) {
                     println!(
@@ -855,12 +1023,16 @@ impl Command {
   /skill list          List installed skills
   /skill install <url> Install skill from git URL
   /mcp list            List MCP servers
-  /mcp add <n> <cmd>   Add MCP server (e.g., /mcp add fs npx -y @mcp/filesystem /tmp)
+  /mcp add <n> <cmd>   Add MCP server
   /mcp remove <name>   Remove MCP server
   /key set <provider>  Store API key in OS keychain
   /key list            List stored providers (keys masked)
   /key delete <name>   Delete API key from keychain
-  /team start          Start an agent team with worker agents
+  /agent list          List agent personalities
+  /agent show <name>   Show agent personality details
+  /agent switch <name> Switch to an agent personality mid-session
+  /agent default       Switch back to default mode (no personality)
+  /team start [name]   Start a team (from config or interactive)
   /team status         Show team status and worker progress
   /team merge          Merge completed workers' branches
   /team stop           Stop team and clean up worktrees

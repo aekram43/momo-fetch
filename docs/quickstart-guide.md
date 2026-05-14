@@ -133,6 +133,47 @@ Use Rust 2024 edition.
 All tests must pass before committing.
 ```
 
+### Using Agent Personalities
+
+Create specialist agents in `.harness/agents/`:
+
+```bash
+mkdir -p .harness/agents
+```
+
+```markdown
+<!-- .harness/agents/researcher.md -->
+You are a research specialist. Always cite your sources.
+Deeply investigate before answering.
+```
+
+```markdown
+<!-- .harness/agents/coder.md -->
+You are an expert coder. Write clean, efficient code.
+Always add tests for new functionality.
+```
+
+Then start with a specific personality:
+
+```bash
+./target/debug/momo-fetch --project . --agent researcher
+```
+
+Or switch mid-session in the REPL:
+
+```
+claude-sonnet-4-20250514> /agent list
+Agent personalities (2):
+  coder: (no description)
+  researcher: (no description)
+
+claude-sonnet-4-20250514> /agent switch coder
+✓ Switched to agent 'coder'
+
+claude-sonnet-4-20250514> /agent default
+✓ Switched to default mode (no agent personality)
+```
+
 ### One-Shot Mode
 
 ```bash
@@ -158,7 +199,37 @@ Inside the REPL:
 | `/permission auto` | Switch permission mode (strict/auto/yolo) |
 | `/cost` | Show current session cost |
 | `/mem` | Show memory vault status |
+| `/agent list` | List agent personalities |
+| `/agent switch <name>` | Switch to a specialist personality |
+| `/agent default` | Switch back to default mode |
+| `/team start <name>` | Start a team from config file |
+| `/team status` | Check team progress |
 | `/quit` | Exit (or Ctrl+D) |
+
+### Team Config Files
+
+Define a team of workers in `.harness/teams/<name>.yml` and start them with one command:
+
+```yaml
+# .harness/teams/auth-squad.yml
+name: "Auth Refactor Squad"
+workers:
+  - name: researcher
+    task: "Research auth best practices"
+    agent: researcher
+    worktree: true
+  - name: coder
+    task: "Implement JWT + refresh tokens"
+    agent: coder
+    branch: feature/auth
+    worktree: true
+```
+
+```bash
+mkdir -p .harness/teams
+# Then in the REPL:
+# /team start auth-squad
+```
 
 ## 5. Next Steps
 

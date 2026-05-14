@@ -35,6 +35,10 @@ pub struct CliArgs {
     /// Run mode: "repl" (default) or "memory-sidecar" (Option C: separate process sidecar)
     #[arg(long = "mode", default_value = "repl")]
     pub mode: String,
+
+    /// Start as a specific agent specialist (from .harness/agents/<name>.md)
+    #[arg(short = 'a', long = "agent")]
+    pub agent: Option<String>,
 }
 
 /// Main CLI entry point.

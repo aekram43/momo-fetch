@@ -10,16 +10,17 @@ Everything you need to know to use MOMO Fetch effectively.
 2. [Setup & Onboarding](#2-setup--onboarding)
 3. [Providers & Models](#3-providers--models)
 4. [Using the Agent](#4-using-the-agent)
-5. [Memory Vault](#5-memory-vault)
-6. [Knowledge Base (KMS)](#6-knowledge-base-kms)
-7. [MCP Servers](#7-mcp-servers)
-8. [Skills](#8-skills)
-9. [Secrets & Security](#9-secrets--security)
-10. [Cost Tracking](#10-cost-tracking)
-11. [Agent Teams](#11-agent-teams)
-12. [Configuration Reference](#12-configuration-reference)
-13. [Tips & Best Practices](#13-tips--best-practices)
-14. [FAQ](#14-faq)
+5. [Agent Personalities (Multi-Agent)](#5-agent-personalities-multi-agent)
+6. [Memory Vault](#6-memory-vault)
+7. [Knowledge Base (KMS)](#7-knowledge-base-kms)
+8. [MCP Servers](#8-mcp-servers)
+9. [Skills](#9-skills)
+10. [Secrets & Security](#10-secrets--security)
+11. [Cost Tracking](#11-cost-tracking)
+12. [Agent Teams](#12-agent-teams)
+13. [Configuration Reference](#13-configuration-reference)
+14. [Tips & Best Practices](#14-tips--best-practices)
+15. [FAQ](#15-faq)
 
 ---
 
@@ -257,7 +258,174 @@ target/
 
 ---
 
-## 5. Memory Vault
+## 5. Agent Personalities (Multi-Agent)
+
+Agent personalities let you define specialist agents with their own system prompts, each focused on a different task. You can switch between them mid-session, or use an orchestrator to coordinate multiple specialists.
+
+### Default Mode (No Agent Flag)
+
+When you start without `--agent`, MOMO Fetch works exactly as before — a single agent loading `AGENTS.md`, `CLAUDE.md`, and `SOUL.md` from the project:
+
+```bash
+momo-fetch --project .
+```
+
+### Creating Agent Personalities
+
+Place agent config files in `.harness/agents/` within your project:
+
+```
+.harness/agents/
+├── researcher.md        # Simple personality (markdown only)
+├── coder.md             # Simple personality
+├── reviewer.md          # Simple personality
+├── orchestrator.yml     # Full config (personality + capabilities)
+└── orchestrator.md      # Personality prompt for orchestrator
+```
+
+**Simple** (`.md` only) — just a personality prompt:
+
+```markdown
+# .harness/agents/researcher.md
+You are a research specialist. Always cite your sources.
+Deeply investigate before answering. Prefer web search and code archaeology.
+```
+
+**Full** (`.yml` + `.md`) — personality plus configuration:
+
+```yaml
+# .harness/agents/researcher.yml
+description: "Research specialist that deeply investigates topics"
+personality_file: researcher.md    # optional, defaults to <name>.md
+model: deepseek-chat               # optional model override
+provider: deepseek                 # optional provider override
+tools: [file_read, grep, glob, web_search, web_fetch, mem_search]  # optional tool restrictions
+capabilities: [research, analysis] # tags for orchestrator reference
+```
+
+If both `<name>.yml` and `<name>.md` exist, the YAML config takes priority.
+
+### Starting with a Specific Agent
+
+```bash
+# Start as a specific specialist
+momo-fetch --project . --agent researcher
+momo-fetch --project . --agent coder
+momo-fetch --project . --agent reviewer
+```
+
+The agent's system prompt changes to include the personality, but all other features (tools, memory, MCP, skills) work normally.
+
+### Switching Agents Mid-Session
+
+Inside the REPL, switch personalities without restarting:
+
+```
+claude-sonnet-4-20250514> /agent list
+Agent personalities (3):
+  coder: Coding specialist
+  researcher: Research expert
+  reviewer: Code review specialist
+
+claude-sonnet-4-20250514> /agent switch researcher
+✓ Switched to agent 'researcher'
+
+claude-sonnet-4-20250514> /agent default
+✓ Switched to default mode (no agent personality)
+```
+
+| Command | What it does |
+|---------|-------------|
+| `/agent list` | List all agent personalities |
+| `/agent show <name>` | Show agent personality details |
+| `/agent switch <name>` | Switch to an agent personality |
+| `/agent default` | Switch back to default mode (AGENTS.md + SOUL.md) |
+
+### Three Specialist Modes
+
+#### Mode 1: Single Specialist
+
+Run as one specialist agent. No team, no orchestration.
+
+```bash
+momo-fetch --project . --agent researcher
+```
+
+#### Mode 2: Squad Lead (Team with Personalities)
+
+Start as an orchestrator and spawn workers with different personalities:
+
+```bash
+momo-fetch --project . --agent orchestrator
+```
+
+Then use `/team start` with the `--agent` flag per worker:
+
+```
+orchestrator> /team start
+Define worker agents (one per line, empty line to finish):
+  Format: <name> <task> [--agent <personality>] [--branch <name>] [--worktree]
+
+  worker[0]: researcher "Research the auth architecture" --agent researcher --worktree
+  worker[1]: coder "Implement the new auth flow" --agent coder --worktree
+
+✓ Team 'team-20260514-143000' started
+  Workers: 2
+    researcher (branch: team/researcher) [worktree] [tmux]
+    coder (branch: team/coder) [worktree] [tmux]
+```
+
+Each worker spawns with its own personality from `.harness/agents/<name>.md`.
+
+#### Mode 3: Smart Orchestrator (AI-Driven)
+
+An agent with `capabilities: [orchestration]` gets three extra tools:
+
+| Tool | What it does |
+|------|-------------|
+| `spawn_agent` | Dynamically spawn a specialist (inline or process mode) |
+| `send_message` | Send a message to a spawned agent via mailbox |
+| `receive_messages` | Receive messages from spawned agents |
+
+The orchestrator AI decides at runtime which specialist to invoke:
+
+```yaml
+# .harness/agents/orchestrator.yml
+description: "Smart orchestrator that coordinates specialist agents"
+personality_file: orchestrator.md
+capabilities: [orchestration, coordination]
+```
+
+```markdown
+<!-- .harness/agents/orchestrator.md -->
+You are a project lead. Analyze each task and decide which specialist to use.
+Use spawn_agent to delegate work. Available specialists: researcher, coder, reviewer.
+For quick tasks use inline mode. For long tasks use process mode.
+```
+
+**Inline mode** — fast, synchronous (agent waits for result):
+
+```
+orchestrator> Please research the best approach for caching in this codebase
+
+  ⏺ spawn_agent(agent="researcher", task="Research caching approaches...", mode="inline")
+  → Agent 'researcher' completed
+
+Based on the researcher's findings...
+```
+
+**Process mode** — async, separate OS process:
+
+```
+orchestrator> Refactor the entire auth module
+
+  ⏺ spawn_agent(agent="coder", task="Refactor auth module...", mode="process")
+  → Agent 'coder' started as separate process (worker: spawn-coder)
+```
+
+---
+
+## 6. Memory Vault
 
 The memory vault is the agent's persistent memory. It stores experiences, extracts knowledge, and recalls relevant context across sessions.
 
@@ -314,7 +482,7 @@ The vault is just markdown files — you can browse it with Obsidian or any text
 
 ---
 
-## 6. Knowledge Base (KMS)
+## 7. Knowledge Base (KMS)
 
 Knowledge bases are project wikis the agent can search on demand.
 
@@ -358,7 +526,7 @@ Knowledge bases:
 
 ---
 
-## 7. MCP Servers
+## 8. MCP Servers
 
 MCP (Model Context Protocol) servers extend the agent with additional tools.
 
@@ -400,7 +568,7 @@ MCP tools are automatically available to the agent with the `mcp_` namespace pre
 
 ---
 
-## 8. Skills
+## 9. Skills
 
 Skills are reusable prompt templates the agent can invoke.
 
@@ -432,7 +600,7 @@ Installed skills (2):
 
 ---
 
-## 9. Secrets & Security
+## 10. Secrets & Security
 
 ### API Key Storage
 
@@ -464,7 +632,7 @@ Fallback: environment variables or `.env` files for CI environments.
 
 ---
 
-## 10. Cost Tracking
+## 11. Cost Tracking
 
 MOMO Fetch tracks token usage and estimated costs for every request.
 
@@ -497,7 +665,7 @@ When you approach a configured budget limit, the agent warns you:
 
 ---
 
-## 11. Agent Teams
+## 12. Agent Teams
 
 Run multiple agents in parallel on separate tasks.
 
@@ -506,7 +674,7 @@ Run multiple agents in parallel on separate tasks.
 ```
 gpt-4o> /team start
 Define worker agents (one per line, empty line to finish):
-  Format: <name> <task> [--branch <name>] [--worktree]
+  Format: <name> <task> [--agent <personality>] [--branch <name>] [--worktree]
 
   worker[0]: frontend Fix all TypeScript errors --branch fix-ts --worktree
   worker[1]: tests Add integration tests for auth --branch auth-tests
@@ -516,6 +684,64 @@ Define worker agents (one per line, empty line to finish):
     frontend (branch: fix-ts) [worktree] [tmux]
     tests (branch: auth-tests)
 ```
+
+### Starting a Team from Config File
+
+Create a team config in `.harness/teams/<name>.yml`:
+
+```yaml
+# .harness/teams/auth-squad.yml
+name: "Auth Refactor Squad"
+workers:
+  - name: researcher
+    task: "Research the auth architecture and find best practices"
+    agent: researcher
+    worktree: true
+  - name: coder
+    task: "Implement the new auth flow with JWT + refresh tokens"
+    agent: coder
+    branch: feature/auth
+    worktree: true
+  - name: reviewer
+    task: "Review the implementation for security issues"
+    agent: reviewer
+```
+
+Start the team with one command:
+
+```
+orchestrator> /team start auth-squad
+✓ Loaded team config 'auth-squad' (3 workers)
+  - researcher [agent: researcher] [worktree]: Research the auth architecture and find best practices
+  - coder [agent: coder] [branch: feature/auth] [worktree]: Implement the new auth flow with JWT + refresh tokens
+  - reviewer [agent: reviewer]: Review the implementation for security issues
+
+✓ Team 'team-20260514-150000' started
+  Workers: 3
+    researcher (branch: team/researcher) [worktree] [tmux]
+    coder (branch: feature/auth) [worktree] [tmux]
+    reviewer (branch: team/reviewer)
+```
+
+### Starting a Team Interactively
+
+Use `--agent <name>` to give each worker a specialist personality:
+
+```
+orchestrator> /team start
+Define worker agents (one per line, empty line to finish):
+  Format: <name> <task> [--agent <personality>] [--branch <name>] [--worktree]
+
+  worker[0]: research "Investigate auth architecture" --agent researcher --worktree
+  worker[1]: implement "Build the new auth flow" --agent coder --branch feature/auth --worktree
+
+✓ Team 'team-20260514-143000' started
+  Workers: 2
+    research (branch: team/research) [worktree] [tmux]
+    implement (branch: feature/auth) [worktree] [tmux]
+```
+
+Each worker loads its personality from `.harness/agents/<name>.md`.
 
 ### Monitoring Progress
 
@@ -552,7 +778,7 @@ gpt-4o> /team stop
 
 ---
 
-## 12. Configuration Reference
+## 13. Configuration Reference
 
 ### Global Config
 
@@ -573,6 +799,8 @@ Location: `<project>/.harness/`
 | `settings.json` | Project-level config overrides |
 | `mcp.json` | MCP server definitions |
 | `skills/` | Installed skills |
+| `agents/` | Agent personality files (`.md` and `.yml`) |
+| `teams/` | Team config files (`.yml`) |
 
 ### Context Files (auto-discovered)
 
@@ -592,7 +820,7 @@ Files closer to the project root have higher priority (override parent directori
 
 ---
 
-## 13. Tips & Best Practices
+## 14. Tips & Best Practices
 
 ### For Best Results
 
@@ -856,7 +1084,7 @@ momo-fetch --mode memory-sidecar --project /path/to/project
 
 ---
 
-## 14. FAQ
+## 15. FAQ
 
 ### How do I start testing MOMO Fetch?
 

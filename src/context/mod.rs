@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use crate::agent::AgentDef;
 use crate::memory::vault::ObsidianVault;
 
 /// Builds the system prompt from SOUL.md, AGENTS.md, CLAUDE.md, KMS, and memory context.
@@ -115,6 +116,68 @@ impl ContextBuilder {
     /// Get the loaded context files (for logging).
     pub fn loaded_files(&self) -> &[(PathBuf, String)] {
         &self.agents_md_content
+    }
+
+    /// Get the project path.
+    pub fn project_path(&self) -> &Path {
+        &self.project_path
+    }
+
+    /// Build the system prompt for a specific agent personality.
+    ///
+    /// Same as `system_prompt()` but:
+    /// - Changes the base identity to reference the agent name
+    /// - Appends the agent personality after SOUL.md
+    pub fn system_prompt_for_agent(&self, agent_def: &AgentDef) -> String {
+        let mut parts = Vec::new();
+
+        // Agent-specific base identity
+        let desc = agent_def
+            .description
+            .as_deref()
+            .unwrap_or("specialist agent");
+        parts.push(format!(
+            "You are MOMO Fetch operating as **{}** — {}. \
+             You have access to tools for file operations, \
+             shell execution, web search, and memory management. \
+             Always prefer using dedicated tools over Bash commands. \
+             Be concise. Do not add unnecessary comments or documentation \
+             to code you didn't change.",
+            agent_def.name, desc
+        ));
+
+        // SOUL.md (agent personality/identity)
+        for (path, content) in &self.soul_md_content {
+            parts.push(format!(
+                "\n--- Soul from {} ---\n{}",
+                path.display(),
+                content
+            ));
+        }
+
+        // Agent personality override (between SOUL.md and AGENTS.md)
+        if !agent_def.personality.is_empty() {
+            parts.push(format!(
+                "\n--- Agent Personality: {} ---\n{}",
+                agent_def.name, agent_def.personality
+            ));
+        }
+
+        // AGENTS.md / CLAUDE.md (closest = highest priority)
+        for (path, content) in &self.agents_md_content {
+            parts.push(format!(
+                "\n--- Context from {} ---\n{}",
+                path.display(),
+                content
+            ));
+        }
+
+        // KMS TOC
+        if let Some(toc) = &self.kms_toc {
+            parts.push(format!("\n--- Project Knowledge Base ---\n{}", toc));
+        }
+
+        parts.join("\n\n")
     }
 
     /// Get relative paths of loaded context files for display.

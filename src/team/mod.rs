@@ -75,6 +75,9 @@ pub struct WorkerDef {
     pub branch: Option<String>,
     /// Whether to use a git worktree (default: false).
     pub use_worktree: Option<bool>,
+    /// Agent personality to load for this worker (from .harness/agents/<name>.md).
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 /// A message in the mailbox queue.
@@ -575,6 +578,91 @@ impl TeamService {
         self.state.as_ref()
     }
 
+    /// Load a team config from `.harness/teams/<name>.yml`.
+    pub fn load_team_config(&self, name: &str) -> anyhow::Result<TeamConfig> {
+        let config_path = self
+            .project_path
+            .join(".harness")
+            .join("teams")
+            .join(format!("{name}.yml"));
+
+        if !config_path.exists() {
+            // Also try .yaml extension
+            let yaml_path = config_path.with_extension("yaml");
+            if yaml_path.exists() {
+                return Self::parse_team_config(&yaml_path, name);
+            }
+            Err(anyhow::anyhow!(
+                "Team config '{}' not found at {}",
+                name,
+                config_path.display()
+            ))
+        } else {
+            Self::parse_team_config(&config_path, name)
+        }
+    }
+
+    /// List all available team configs in `.harness/teams/`.
+    pub fn list_team_configs(&self) -> anyhow::Result<Vec<String>> {
+        let teams_dir = self.project_path.join(".harness").join("teams");
+        if !teams_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(&teams_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext == "yml" || ext == "yaml" {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    names.push(stem.to_string());
+                }
+            }
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    /// Convert a TeamConfig into WorkerDefs.
+    pub fn config_to_workers(config: &TeamConfig) -> Vec<WorkerDef> {
+        config
+            .workers
+            .iter()
+            .map(|w| WorkerDef {
+                name: w.name.clone(),
+                task: w.task.clone(),
+                branch: w.branch.clone(),
+                use_worktree: w.worktree,
+                agent: w.agent.clone(),
+            })
+            .collect()
+    }
+
+    fn parse_team_config(path: &Path, name: &str) -> anyhow::Result<TeamConfig> {
+        let content = std::fs::read_to_string(path)?;
+        let config: TeamConfig = serde_yaml::from_str(&content).map_err(|e| {
+            anyhow::anyhow!("Failed to parse team config '{}': {e}", name)
+        })?;
+
+        if config.workers.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Team config '{}' has no workers defined.",
+                name
+            ));
+        }
+
+        if config.workers.len() > 8 {
+            return Err(anyhow::anyhow!(
+                "Team config '{}' has too many workers ({}). Maximum is 8.",
+                name,
+                config.workers.len()
+            ));
+        }
+
+        Ok(config)
+    }
+
     /// Start a new team with the given workers.
     pub fn start(&mut self, workers: Vec<WorkerDef>) -> anyhow::Result<String> {
         if self.state.is_some() {
@@ -663,10 +751,18 @@ impl TeamService {
                     .unwrap_or_else(|_| "momo-fetch".into());
 
                 let work_dir_str = work_dir.display().to_string();
+
+                // Build command with optional --agent flag
+                let agent_flag = match &worker_def.agent {
+                    Some(agent_name) => format!(" -a '{}'", agent_name.replace('\'', "'\\''")),
+                    None => String::new(),
+                };
+
                 let cmd = format!(
-                    "cd {} && {} -p '{}' 2>&1 | tee .harness/worker-{}.log",
+                    "cd {} && {}{} -p '{}' 2>&1 | tee .harness/worker-{}.log",
                     work_dir_str,
                     binary_path,
+                    agent_flag,
                     worker_def.task.replace('\'', "'\\''"),
                     worker_def.name,
                 );
@@ -899,6 +995,36 @@ pub struct MergeResult {
     pub branch: String,
     pub success: bool,
     pub message: String,
+}
+
+// ─── Team Config File ──────────────────────────────────────────────
+
+/// Team configuration loaded from `.harness/teams/<name>.yml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamConfig {
+    /// Display name for the team.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Worker definitions.
+    pub workers: Vec<TeamWorkerConfig>,
+}
+
+/// A single worker in a team config file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamWorkerConfig {
+    /// Worker name.
+    pub name: String,
+    /// Task description.
+    pub task: String,
+    /// Agent personality to load (from .harness/agents/).
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// Branch name (defaults to team/<name>).
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Whether to use a git worktree.
+    #[serde(default)]
+    pub worktree: Option<bool>,
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────
@@ -1174,6 +1300,7 @@ mod tests {
                 task: format!("task {i}"),
                 branch: None,
                 use_worktree: Some(false),
+                agent: None,
             })
             .collect();
 

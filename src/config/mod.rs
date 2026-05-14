@@ -18,6 +18,8 @@ pub struct HarnessConfig {
     pub provider: ProviderSettings,
     pub resume_session_id: Option<String>,
     pub memory: MemorySettings,
+    /// Agent personality name (from .harness/agents/<name>.md). None = default mode.
+    pub agent_name: Option<String>,
 }
 
 /// Settings file schema (both global and project-level).
@@ -176,6 +178,7 @@ impl HarnessConfig {
                 .memory
                 .or(global_settings.memory)
                 .unwrap_or_default(),
+            agent_name: args.agent.clone(),
         })
     }
 
