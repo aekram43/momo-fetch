@@ -180,6 +180,9 @@ Ensure Rust 1.85.0+: `rustc --version`
 **Install globally:**
 ```bash
 cargo install --path .
+
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 # Now use anywhere:
 momo-fetch --project ~/my-project
 ```
