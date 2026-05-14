@@ -1,6 +1,6 @@
 [package]
 name = "momo-fetch"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.85.0"
 description = "Rust-native AI agent workspace with EverMemOS memory vault"
@@ -15,7 +15,7 @@ adk-rust = { version = "0.7.0", features = [
 adk-model = { version = "0.7.0", features = [
     "openai", "anthropic", "deepseek", "ollama", "groq", "openrouter"
 ] }
-adk-tool = "0.7"
+adk-tool = { version = "0.7", features = ["http-transport"] }
 adk-session = { version = "0.7.0", features = ["sqlite"] }
 schemars = "0.8"
 
@@ -74,3 +74,8 @@ strip = true
 
 [profile.dev]
 opt-level = 1
+
+# Patch rmcp to handle 200 OK with no Content-Type (some MCP servers
+# return this for notifications instead of 202 Accepted).
+[patch.crates-io]
+rmcp = { path = "patches/rmcp-1.6.0" }

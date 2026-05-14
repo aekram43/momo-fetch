@@ -187,7 +187,42 @@ cat README.md | ./target/debug/momo-fetch -p "Summarize this"
 ./target/debug/momo-fetch -p "Write a hello world" --provider openai --model gpt-4o
 ```
 
-## 4. Useful First Commands
+## 4. MCP Server Setup (Optional)
+
+Add MCP servers for extra tools (web search, file system access, etc.):
+
+```bash
+mkdir -p .harness
+cat > .harness/mcp.json << 'EOF'
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-filesystem", "/tmp"],
+      "env": {},
+      "disabled": false
+    },
+    "remote-api": {
+      "type": "http",
+      "url": "https://api.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-key"
+      }
+    }
+  }
+}
+EOF
+```
+
+**Test your MCP connections** before starting the REPL:
+
+```bash
+./target/debug/momo-fetch --test-mcp
+```
+
+This connects to all configured servers and lists available tools. Exit code 0 = success, 1 = failure.
+
+## 5. Useful First Commands
 
 Inside the REPL:
 
@@ -199,6 +234,7 @@ Inside the REPL:
 | `/permission auto` | Switch permission mode (strict/auto/yolo) |
 | `/cost` | Show current session cost |
 | `/mem` | Show memory vault status |
+| `/mcp list` | Show MCP server status and tools |
 | `/agent list` | List agent personalities |
 | `/agent switch <name>` | Switch to a specialist personality |
 | `/agent default` | Switch back to default mode |
@@ -231,7 +267,7 @@ mkdir -p .harness/teams
 # /team start auth-squad
 ```
 
-## 5. Next Steps
+## 6. Next Steps
 
 - [CLI Guide](cli-guide.md) — detailed command reference
 - [User Guide](user-guide.md) — all features explained

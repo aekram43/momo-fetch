@@ -528,16 +528,18 @@ Knowledge bases:
 
 ## 8. MCP Servers
 
-MCP (Model Context Protocol) servers extend the agent with additional tools.
+MCP (Model Context Protocol) servers extend the agent with additional tools. MOMO Fetch supports both **stdio** (local child process) and **HTTP/SSE** (remote server) transports.
 
 ### Adding an MCP Server
+
+**Stdio server** (local process):
 
 ```
 gpt-4o> /mcp add filesystem npx -y @anthropic/mcp-filesystem /tmp
 ✓ Added MCP server 'filesystem' and starting...
 ```
 
-Server config is saved to `.harness/mcp.json`:
+**HTTP server** (remote endpoint) — configured via `.harness/mcp.json`:
 
 ```json
 {
@@ -547,10 +549,19 @@ Server config is saved to `.harness/mcp.json`:
       "args": ["-y", "@anthropic/mcp-filesystem", "/tmp"],
       "env": {},
       "disabled": false
+    },
+    "zread": {
+      "type": "http",
+      "url": "https://api.z.ai/api/mcp/zread/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-key"
+      }
     }
   }
 }
 ```
+
+**Stdio servers** use `command` + `args` to spawn a local process. **HTTP/SSE servers** use `"type": "http"` (or `"sse"`) with a `url` and optional `headers` for authentication (e.g., Bearer tokens).
 
 ### Managing Servers
 
@@ -562,6 +573,31 @@ MCP servers:
 
 gpt-4o> /mcp remove filesystem
 ✓ Removed MCP server 'filesystem'
+```
+
+### Testing MCP Connections
+
+Use `--test-mcp` to verify all configured servers connect successfully without entering the REPL:
+
+```bash
+momo-fetch --test-mcp
+MCP Connection Test
+──────────────────────────────────────────────────
+
+Stdio servers:
+  ✓ zai-mcp-server: Running
+    command: npx -y @z_ai/mcp-server
+
+HTTP servers:
+  ✓ zread (type: http)
+    url: https://api.z.ai/api/mcp/zread/mcp
+    headers: Authorization
+  ✓ web-reader (type: http)
+    url: https://api.z.ai/api/mcp/web_reader/mcp
+    headers: Authorization
+
+──────────────────────────────────────────────────
+Total tools available: 13
 ```
 
 MCP tools are automatically available to the agent with the `mcp_` namespace prefix (e.g., `mcp_filesystem__read_file`).

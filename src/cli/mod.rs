@@ -3,6 +3,8 @@ mod commands;
 mod oneshot;
 mod repl;
 
+use std::sync::Arc;
+
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -39,6 +41,10 @@ pub struct CliArgs {
     /// Start as a specific agent specialist (from .harness/agents/<name>.md)
     #[arg(short = 'a', long = "agent")]
     pub agent: Option<String>,
+
+    /// Test MCP server connections and exit
+    #[arg(long = "test-mcp")]
+    pub test_mcp: bool,
 }
 
 /// Main CLI entry point.
@@ -53,6 +59,11 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
 
     let config = crate::config::HarnessConfig::from_cli_args(&args)?;
     let mut harness = crate::harness::Harness::build(config).await?;
+
+    // --test-mcp: connect all MCP servers, report status, exit
+    if args.test_mcp {
+        return run_test_mcp(&harness).await;
+    }
 
     // Apply CLI overrides (rebuilds runner internally)
     if let Some(provider) = &args.provider {
@@ -77,6 +88,96 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
             result
         }
     }
+}
+
+/// Test all MCP server connections and report results.
+async fn run_test_mcp(harness: &crate::harness::Harness) -> anyhow::Result<()> {
+    use colored::Colorize;
+
+    struct TestCtx;
+    impl adk_rust::ReadonlyContext for TestCtx {
+        fn invocation_id(&self) -> &str { "test" }
+        fn agent_name(&self) -> &str { "momo-fetch" }
+        fn user_id(&self) -> &str { "default-user" }
+        fn app_name(&self) -> &str { "momo-fetch" }
+        fn session_id(&self) -> &str { "test" }
+        fn branch(&self) -> &str { "" }
+        fn user_content(&self) -> &adk_rust::Content {
+            static EMPTY: std::sync::OnceLock<adk_rust::Content> = std::sync::OnceLock::new();
+            EMPTY.get_or_init(|| adk_rust::Content::new("".to_string()))
+        }
+    }
+
+    let mcp = harness.mcp_service();
+
+    // Stdio servers
+    let stdio_configs = mcp.configs();
+    let statuses = mcp.all_statuses().await;
+
+    if stdio_configs.is_empty() && !mcp.has_http_servers() {
+        println!("No MCP servers configured.");
+        println!("Add servers to .harness/mcp.json or use /mcp add <name> <command>");
+        return Ok(());
+    }
+
+    println!("MCP Connection Test");
+    println!("{}", "─".repeat(50));
+
+    // Stdio servers
+    if !stdio_configs.is_empty() {
+        println!("\nStdio servers:");
+        for (id, config) in stdio_configs {
+            let disabled = if config.disabled { " [disabled]" } else { "" };
+            let status = statuses
+                .get(id)
+                .map(|s| format!("{s:?}"))
+                .unwrap_or_else(|| "Unknown".to_string());
+            let icon = match statuses.get(id) {
+                Some(adk_tool::mcp::manager::ServerStatus::Running) => "\u{2713}".green(),
+                Some(adk_tool::mcp::manager::ServerStatus::Disabled) => "\u{25CB}".yellow(),
+                _ => "\u{2717}".red(),
+            };
+            println!("  {icon} {id}: {status}{disabled}");
+            println!("    command: {} {}", config.command, config.args.join(" "));
+        }
+    }
+
+    // HTTP servers
+    if mcp.has_http_servers() {
+        println!("\nHTTP servers:");
+        let http_configs = mcp.http_configs();
+        for (id, config) in http_configs {
+            let icon = "\u{2713}".green(); // already connected during build
+            println!("  {icon} {id} (type: {})", config.server_type);
+            println!("    url: {}", config.url);
+            if !config.headers.is_empty() {
+                let header_keys: Vec<&str> = config.headers.keys().map(|k| k.as_str()).collect();
+                println!("    headers: {}", header_keys.join(", "));
+            }
+        }
+    }
+
+    // Count tools
+    let toolset = mcp.toolset();
+    let tool_count = if let Some(ts) = &toolset {
+        let ctx = Arc::new(TestCtx);
+        match ts.tools(ctx).await {
+            Ok(tools) => tools.len(),
+            Err(e) => {
+                println!("\n{} Failed to list tools: {e}", "\u{2717}".red());
+                let _ = harness.mcp_service().shutdown().await;
+                return Ok(());
+            }
+        }
+    } else {
+        0
+    };
+
+    println!("\n{}", "─".repeat(50));
+    println!("Total tools available: {}", tool_count.to_string().green());
+
+    let _ = harness.mcp_service().shutdown().await;
+    Ok(())
 }
 
 /// Run as a memory sidecar process (Option C).

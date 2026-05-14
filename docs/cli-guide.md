@@ -36,6 +36,7 @@ Options:
       --project <PATH>        Working directory (default: current directory)
       --permission <MODE>     Permission mode: strict (default), auto, yolo
       --resume <SESSION_ID>   Resume a previous session
+      --test-mcp              Test MCP server connections and exit
   -h, --help                  Show help
   -V, --version               Show version
 ```
@@ -271,6 +272,29 @@ gpt-4o> /mcp add fs npx -y @anthropic/mcp-filesystem /tmp
 
 MCP tools are automatically available to the agent with the `mcp_` prefix.
 
+**Testing MCP connections** — use `--test-mcp` to verify all servers connect successfully:
+
+```bash
+momo-fetch --test-mcp
+MCP Connection Test
+──────────────────────────────────────────────────
+
+Stdio servers:
+  ✓ zai-mcp-server: Running
+    command: npx -y @z_ai/mcp-server
+
+HTTP servers:
+  ✓ zread (type: http)
+    url: https://api.z.ai/api/mcp/zread/mcp
+    headers: Authorization
+  ✓ web-reader (type: http)
+    url: https://api.z.ai/api/mcp/web_reader/mcp
+    headers: Authorization
+
+──────────────────────────────────────────────────
+Total tools available: 13
+```
+
 ### Secrets (OS Keychain)
 
 | Command | Description |
@@ -401,7 +425,7 @@ Project-level settings (overrides global defaults):
 
 ### `.harness/mcp.json`
 
-MCP server definitions:
+MCP server definitions. Supports both **stdio** (local child process) and **HTTP/SSE** (remote server) transports:
 
 ```json
 {
@@ -411,10 +435,19 @@ MCP server definitions:
       "args": ["-y", "@anthropic/mcp-filesystem", "/tmp"],
       "env": {},
       "disabled": false
+    },
+    "zread": {
+      "type": "http",
+      "url": "https://api.z.ai/api/mcp/zread/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-key"
+      }
     }
   }
 }
 ```
+
+**Stdio servers** use `command` + `args` to spawn a local process. **HTTP/SSE servers** use `type: "http"` (or `"sse"`) with a `url` and optional `headers` for authentication.
 
 ### `.agentignore`
 

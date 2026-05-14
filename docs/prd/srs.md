@@ -450,8 +450,8 @@ The system SHALL provide an interactive REPL using `rustyline` with:
 | `/kms` | List attached knowledge bases |
 | `/skill list` | List installed skills |
 | `/skill install <url>` | Install skill from git URL |
-| `/mcp list` | List connected MCP servers |
-| `/mcp add <name> <cmd>` | Add MCP server |
+| `/mcp list` | List connected MCP servers (stdio + HTTP) |
+| `/mcp add <name> <cmd>` | Add stdio MCP server |
 | `/key set <provider>` | Store API key in OS keychain |
 | `/key list` | List stored keys (masked) |
 | `/team start` | Start agent team |
@@ -728,6 +728,7 @@ The system SHALL use adk-tool's built-in MCP client:
 - `/mcp add <name> <command-or-url>` to add servers
 - `/mcp list` to show connected servers
 - Config stored in `.harness/mcp.json`
+- `--test-mcp` CLI flag to verify MCP server connectivity and report status per transport type
 
 #### FR-MC-02: MCP tool namespace
 
@@ -736,6 +737,10 @@ MCP-provided tools SHALL be auto-registered with `mcp_` namespace prefix to avoi
 #### FR-MC-03: MCP Elicitation
 
 The system SHALL support MCP Elicitation protocol — MCP servers can request user input during tool execution.
+
+#### FR-MC-04: MCP connection testing
+
+The system SHALL provide a `--test-mcp` CLI flag that connects to all configured MCP servers (stdio and HTTP), reports their connection status, transport type, and total available tool count, then exits.
 
 ---
 
@@ -1265,7 +1270,7 @@ None. The system runs on standard consumer hardware.
 | FR-CR-01, FR-CR-02 | US-008: CLI REPL | 1 |
 | FR-CO-01 | US-009: One-shot mode | 1 |
 | FR-CX-01, FR-CX-02, FR-CX-03 | US-010: Context injection | 1 |
-| FR-MC-01, FR-MC-02, FR-MC-03 | US-011: MCP integration | 2 |
+| FR-MC-01, FR-MC-02, FR-MC-03, FR-MC-04 | US-011: MCP integration | 2 |
 | FR-MW-01, FR-MW-02 | US-012: Memory write & extract | 2 |
 | FR-MR-01, FR-MR-02, FR-MR-03, FR-MR-04 | US-013: Memory retrieval | 2 |
 | FR-ML-01, FR-ML-02, FR-ML-03, FR-ML-04 | US-014: Memory consolidation | 2 |

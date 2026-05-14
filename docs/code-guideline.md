@@ -379,13 +379,96 @@ Two system prompt methods:
 
 ## 11. MCP Integration (`src/mcp/mod.rs`)
 
-- Config stored in `.harness/mcp.json`
-- `McpService` wraps `adk_tool::McpServerManager`
-- Auto-starts configured servers on harness build
-- Background health monitoring
-- Tools registered with `mcp_` namespace prefix via `McpToolset`
+### Dual Transport Support
+
+MCP supports two transport types, both configured in `.harness/mcp.json`:
+
+| Transport | Config fields | Mechanism |
+|-----------|--------------|-----------|
+| **stdio** | `command`, `args`, `env` | Spawns a local child process |
+| **HTTP/SSE** | `type: "http"`, `url`, `headers` | Connects to a remote HTTP server |
+
+### Config Parsing
+
+`parse_mcp_config()` deserializes `mcp.json` as `serde_json::Value`, then separates servers by type:
+
+```rust
+// Stdio servers have a "command" field
+// HTTP/SSE servers have a "type" field ("http" or "sse") + "url" field
+```
+
+Two config structs:
+
+- `McpServerConfig` — stdio servers (command + args), used by `McpServerManager`
+- `HttpMcpServerConfig` — HTTP/SSE servers (url + headers), used by `McpHttpClientBuilder`
+
+### McpService Architecture
+
+`McpService` manages both transport types:
+
+| Component | Purpose |
+|-----------|---------|
+| `configs` | Stdio server configs (managed by `McpServerManager`) |
+| `http_configs` | HTTP/SSE server configs |
+| `http_toolsets` | Connected HTTP server toolsets (`Vec<Arc<dyn Toolset>>`) |
+
+Key methods:
+
+- `new()` — loads config, parses into stdio/HTTP groups, starts stdio servers
+- `connect_http_servers()` — connects all HTTP servers via `McpHttpClientBuilder`
+- `toolset()` — returns `MergedToolset` combining stdio + HTTP toolsets
+- `has_http_servers()` — checks if any HTTP servers are configured
+
+### HTTP Connection Flow
+
+1. `McpHttpClientBuilder::new(url)` creates a builder
+2. Auth token extracted from `headers.Authorization` (strips `"Bearer "` prefix)
+3. `builder.auth(McpAuth::bearer(token))` sets authentication
+4. `builder.connect()` establishes the MCP session (uses `StreamableHttpClientTransport` from rmcp)
+5. Resulting `Toolset` is wrapped in `Arc` and stored in `http_toolsets`
+
+### Merged Toolset
+
+When both stdio and HTTP servers are present, `McpService::toolset()` combines them:
+
+```rust
+// MergedToolset from adk_tool merges multiple toolsets into one
+// Tools are prefixed with mcp_ namespace automatically
+let merged = MergedToolset::new(vec![stdio_toolset, http_toolset1, http_toolset2, ...]);
+```
+
+### Patched rmcp
+
+Some MCP servers return HTTP 200 with no Content-Type for notifications. The stock rmcp crate treats this as an error (`UnexpectedContentType(None)`). A local patch in `patches/rmcp-1.6.0/` adds:
+
+```rust
+// Handle 200 OK with no body / no content-type
+if status == reqwest::StatusCode::OK && content_type.is_none() {
+    return Ok(StreamableHttpPostResponse::Accepted);
+}
+```
+
+Patched via `[patch.crates-io]` in `Cargo.toml`:
+
+```toml
+[patch.crates-io]
+rmcp = { path = "patches/rmcp-1.6.0" }
+```
+
+### MCP Connectivity Testing
+
+`--test-mcp` CLI flag runs `run_test_mcp()` in `src/cli/mod.rs`:
+
+1. Creates a `TestCtx` struct implementing `ReadonlyContext` (required for tool listing)
+2. Connects all configured stdio and HTTP servers
+3. Lists available tools from each server
+4. Prints a summary table with connection status and total tool count
+5. Exits with code 0 on success, 1 on any failure
+
+### REPL Commands
+
+- `/mcp add`, `/mcp list`, `/mcp remove` — manage MCP servers
 - Graceful shutdown on exit
-- `/mcp add`, `/mcp list`, `/mcp remove` commands
 
 ---
 

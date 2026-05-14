@@ -1671,6 +1671,7 @@ Options:
       --permission <MODE>    Permission mode: strict|auto|yolo [default: strict]
       --vault <PATH>         Memory vault path [default: ./memory-vault]
       --config <PATH>        Config file path
+      --test-mcp             Test MCP server connections and exit
   -v, --verbose              Increase log verbosity
   -q, --quiet                Decrease log verbosity
   -V, --version              Show version
@@ -1775,6 +1776,7 @@ Color scheme:
 | Shell injection | Malicious args in tool params | `sh -c` with isolated env, no shell var expansion in prompts |
 | .agentignore bypass | Hidden files/dirs | `ignore` crate with same semantics as ripgrep |
 | MCP tool abuse | Malicious MCP server | Namespace prefix `mcp_`, tool confirmation policy |
+| HTTP MCP MITM | Network interception | TLS-only (HTTPS) for HTTP transport, Bearer auth |
 | Tool prompt injection | LLM generates malicious tool args | Input guardrails (adk-guardrail), confirmation for mutating ops |
 
 ### 6.2 Permission Mode Implementation

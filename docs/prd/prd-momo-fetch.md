@@ -276,6 +276,7 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 - [ ] MCP tools auto-registered with `mcp_` namespace prefix
 - [ ] Server config stored in `.harness/mcp.json`
 - [ ] Support MCP Elicitation (servers can request user input)
+- [ ] `--test-mcp` CLI flag to verify MCP server connectivity and report status
 
 ---
 
@@ -486,12 +487,13 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 - **FR-24**: System MUST use adk-tool's built-in MCP integration (stdio + HTTP)
 - **FR-25**: System MUST auto-register MCP tools with `mcp_` namespace prefix
 - **FR-26**: System MUST support MCP Elicitation for runtime user input
+- **FR-27**: System MUST provide `--test-mcp` CLI flag to verify MCP server connectivity
 
 ### Interface (custom CLI on top of adk-cli)
 
-- **FR-27**: System MUST provide enhanced REPL with domain-specific slash commands
-- **FR-28**: System MUST provide one-shot mode (`-p "prompt"`) for scripts/CI
-- **FR-29**: System MUST support `! command` shell escape
+- **FR-28**: System MUST provide enhanced REPL with domain-specific slash commands
+- **FR-29**: System MUST provide one-shot mode (`-p "prompt"`) for scripts/CI
+- **FR-30**: System MUST support `! command` shell escape
 
 ### Skills (from adk-skill)
 

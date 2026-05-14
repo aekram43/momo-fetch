@@ -90,9 +90,9 @@ impl Harness {
         };
 
         // Initialize MCP service
-        let mcp_service = McpService::new(&config.project_path)?;
+        let mut mcp_service = McpService::new(&config.project_path)?;
 
-        // Start all configured MCP servers
+        // Start all configured stdio MCP servers
         let start_results = mcp_service.start_all().await;
         for (id, result) in &start_results {
             if let Err(e) = result {
@@ -102,9 +102,20 @@ impl Harness {
         if !start_results.is_empty() {
             let running = mcp_service.running_count().await;
             tracing::info!(
-                "MCP: {}/{} servers started",
+                "MCP: {}/{} stdio servers started",
                 running,
                 start_results.len()
+            );
+        }
+
+        // Connect to all HTTP MCP servers
+        if mcp_service.has_http_servers() {
+            let http_results = mcp_service.connect_http_servers().await;
+            let connected = http_results.values().filter(|r| r.is_ok()).count();
+            tracing::info!(
+                "MCP: {}/{} HTTP servers connected",
+                connected,
+                http_results.len()
             );
         }
 
@@ -292,9 +303,9 @@ impl Harness {
             agent_builder = agent_builder.tool(tool);
         }
 
-        // Register MCP toolset (if any servers configured)
-        if mcp_service.has_servers() {
-            agent_builder = agent_builder.toolset(mcp_service.manager());
+        // Register MCP toolset (stdio + HTTP merged)
+        if let Some(toolset) = mcp_service.toolset() {
+            agent_builder = agent_builder.toolset(toolset);
         }
 
         let agent = agent_builder.build()?;
