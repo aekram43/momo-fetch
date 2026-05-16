@@ -1404,7 +1404,8 @@ impl ObsidianVault {
                 facts.push(format!(
                     "{kw}: {} related to {topic}",
                     if context.len() > 60 {
-                        format!("{}...", &context[..60])
+                        let end = context.ceil_char_boundary(60);
+                        format!("{}...", &context[..end])
                     } else {
                         context.to_string()
                     }

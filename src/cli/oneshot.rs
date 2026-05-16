@@ -100,7 +100,8 @@ async fn consume_stream_oneshot(mut stream: EventStream) -> bool {
                                     let summary =
                                         summarize_response(&function_response.response);
                                     let truncated = if summary.len() > 200 {
-                                        format!("{}...", &summary[..200])
+                                        let end = summary.ceil_char_boundary(200);
+                                        format!("{}...", &summary[..end])
                                     } else {
                                         summary
                                     };
@@ -156,7 +157,8 @@ fn summarize_args(args: &serde_json::Value) -> String {
                     let val_str = match v {
                         serde_json::Value::String(s) => {
                             if s.len() > 40 {
-                                format!("\"{}...\"", &s[..37])
+                                let end = s.ceil_char_boundary(37);
+                                format!("\"{}...\"", &s[..end])
                             } else {
                                 format!("\"{s}\"")
                             }
