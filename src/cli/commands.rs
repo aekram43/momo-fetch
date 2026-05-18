@@ -377,29 +377,63 @@ impl Command {
             }
             Self::SkillList => {
                 let skills = harness.skill_service().index().skills();
-                if skills.is_empty() {
+                let convention_names = [
+                    "AGENTS.md", "AGENT.md", "CLAUDE.md", "GEMINI.md",
+                    "COPILOT.md", "SKILLS.md", "SOUL.md",
+                ];
+                let skills_dir_prefixes = [
+                    std::path::Path::new(".skills"),
+                    std::path::Path::new(".claude/skills"),
+                    std::path::Path::new(".harness/skills"),
+                ];
+
+                let (conventions, real_skills): (Vec<_>, Vec<_>) = skills.iter().partition(|s| {
+                    let is_convention_name = s.path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|name| {
+                            convention_names.iter().any(|c| name.eq_ignore_ascii_case(c))
+                        });
+                    let in_skills_dir = skills_dir_prefixes.iter().any(|prefix| {
+                        s.path.starts_with(prefix)
+                    });
+                    is_convention_name && !in_skills_dir
+                });
+
+                if real_skills.is_empty() && conventions.is_empty() {
                     println!("No skills installed.");
                     println!("Use /skill install <git-url> to install a skill.");
                     println!("Skills can also be placed in .skills/ or .claude/skills/ or .harness/skills/");
                 } else {
-                    println!("Installed skills ({}):", skills.len());
-                    for skill in skills {
-                        let trigger_marker = if skill.trigger { " [explicit]" } else { "" };
-                        let version_marker = skill
-                            .version
-                            .as_ref()
-                            .map(|v| format!(" v{v}"))
-                            .unwrap_or_default();
-                        let tags = if skill.tags.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" [{}]", skill.tags.join(", "))
-                        };
-                        println!(
-                            "  {}{}: {}{}{}",
-                            skill.name, version_marker, skill.description, tags, trigger_marker
-                        );
-                        println!("    {}", skill.path.display());
+                    if !real_skills.is_empty() {
+                        println!("Installed skills ({}):", real_skills.len());
+                        for skill in &real_skills {
+                            let trigger_marker = if skill.trigger { " [explicit]" } else { "" };
+                            let version_marker = skill
+                                .version
+                                .as_ref()
+                                .map(|v| format!(" v{v}"))
+                                .unwrap_or_default();
+                            let tags = if skill.tags.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" [{}]", skill.tags.join(", "))
+                            };
+                            println!(
+                                "  {}{}: {}{}{}",
+                                skill.name, version_marker, skill.description, tags, trigger_marker
+                            );
+                            println!("    {}", skill.path.display());
+                        }
+                    }
+                    if !conventions.is_empty() {
+                        if !real_skills.is_empty() {
+                            println!();
+                        }
+                        println!("Project instructions ({}):", conventions.len());
+                        for skill in &conventions {
+                            println!("  {}: {}", skill.name, skill.path.display());
+                        }
                     }
                 }
                 Ok(true)
