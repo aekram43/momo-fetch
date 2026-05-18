@@ -11,6 +11,66 @@ use rustyline::DefaultEditor;
 use crate::harness::Harness;
 use crate::memory::sidecar::TurnSummary;
 
+// ─── Thinking spinner ──
+
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⦦", "⠧", "⠇", "⠏"];
+const SPINNER_LABELS: &[&str] = &["Thinking", "Analyzing", "Processing", "Generating"];
+
+struct ThinkingSpinner {
+    active: Arc<AtomicBool>,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl ThinkingSpinner {
+    fn start() -> Self {
+        let active = Arc::new(AtomicBool::new(true));
+        let active_clone = active.clone();
+        let handle = tokio::spawn(async move {
+            let mut frame = 0usize;
+            let mut label = 0usize;
+            let mut tick = 0u32;
+            loop {
+                if !active_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+                // Clear previous spinner line: \r + spaces + \r
+                eprint!("\r\u{1b}[2K  {} {}", SPINNER_FRAMES[frame].dimmed(), SPINNER_LABELS[label].dimmed());
+                let _ = std::io::stderr().flush();
+                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                frame = (frame + 1) % SPINNER_FRAMES.len();
+                tick += 1;
+                // Rotate label every 25 ticks (~2 seconds)
+                if tick % 25 == 0 {
+                    label = (label + 1) % SPINNER_LABELS.len();
+                }
+            }
+            // Clear the spinner line
+            eprint!("\r\u{1b}[2K");
+            let _ = std::io::stderr().flush();
+        });
+        Self {
+            active,
+            handle: Some(handle),
+        }
+    }
+
+    fn stop(&mut self) {
+        self.active.store(false, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+        // Ensure spinner line is cleared
+        eprint!("\r\u{1b}[2K");
+        let _ = std::io::stderr().flush();
+    }
+}
+
+impl Drop for ThinkingSpinner {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 // ─── Thread-local for collecting turn data during stream consumption ──
 
 thread_local! {
@@ -359,6 +419,7 @@ async fn consume_stream(
     let mut has_output = false;
     let mut tool_calls: Vec<String> = Vec::new();
     let mut response_parts: Vec<String> = Vec::new();
+    let mut spinner = ThinkingSpinner::start();
 
     loop {
         tokio::select! {
@@ -366,6 +427,7 @@ async fn consume_stream(
                 match result {
                     Some(Ok(event)) => {
                         has_output = true;
+                        spinner.stop();
 
                         // Capture usage metadata for cost tracking
                         if let Some(ref usage) = event.llm_response.usage_metadata {
@@ -441,6 +503,12 @@ async fn consume_stream(
                             break;
                         }
 
+                        // Restart spinner: LLM will think again after tool response
+                        // or while processing next step
+                        if !in_tool_call {
+                            spinner = ThinkingSpinner::start();
+                        }
+
                         // Graceful shutdown: if not in a tool call, break
                         // (tool calls will be allowed to finish)
                         if shutting_down.load(Ordering::Relaxed) && !in_tool_call {
@@ -448,6 +516,7 @@ async fn consume_stream(
                         }
                     }
                     Some(Err(e)) => {
+                        spinner.stop();
                         println!("\n{} Stream error: {}", "\u{2717}".red(), e);
                         break;
                     }
