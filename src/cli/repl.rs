@@ -337,10 +337,53 @@ fn read_multiline_continuation(rl: &mut DefaultEditor, first_line: &str) -> Stri
     buffer
 }
 
+/// Prompt the user to approve or deny a tool call.
+/// Returns Some(true) for approve, Some(false) for deny, None for no input.
+fn prompt_tool_approval(tool_name: &str) -> Option<bool> {
+    println!(
+        "\n  {} Allow {} to proceed? {}",
+        "?".yellow(),
+        tool_name.yellow(),
+        "[y/n]".dimmed()
+    );
+    let mut answer = String::new();
+    match std::io::stdin().read_line(&mut answer) {
+        Ok(_) => {
+            let trimmed = answer.trim().to_lowercase();
+            match trimmed.as_str() {
+                "y" | "yes" => Some(true),
+                "n" | "no" => Some(false),
+                _ => None,
+            }
+        }
+        Err(_) => None,
+    }
+}
+
+/// Result of consuming a stream, including any pending tool confirmation.
+struct StreamResult {
+    has_output: bool,
+    tool_calls: Vec<String>,
+    response_parts: Vec<String>,
+    pending_confirmation: Option<(String, String)>, // (tool_name, function_call_id)
+}
+
+impl Default for StreamResult {
+    fn default() -> Self {
+        Self {
+            has_output: false,
+            tool_calls: Vec::new(),
+            response_parts: Vec::new(),
+            pending_confirmation: None,
+        }
+    }
+}
+
 /// Run a single conversational turn with streaming output.
 ///
 /// If auto_search is enabled, enriches the input with relevant memories.
 /// If auto_write is enabled, writes a MemCell after the turn completes.
+/// Handles tool confirmation prompts interactively.
 async fn run_turn_streaming(
     harness: &Harness,
     input: &str,
@@ -354,12 +397,31 @@ async fn run_turn_streaming(
 
     // Use enriched turn (auto-search prepends relevant memories)
     let enriched_result = harness.run_turn_enriched(input).await;
-    match enriched_result {
+    let result = match enriched_result {
         Ok((_enriched_input, stream)) => {
-            consume_stream(harness, stream, shutting_down).await;
+            consume_stream(harness, stream, shutting_down).await
         }
         Err(e) => {
             println!("{} {}", "\u{2717}".red(), format!("{e}").red());
+            StreamResult::default()
+        }
+    };
+
+    // Handle pending tool confirmation with interactive prompt
+    if let Some((tool_name, _call_id)) = &result.pending_confirmation {
+        let decision = prompt_tool_approval(tool_name);
+        if let Some(approved) = decision {
+            harness.cost_tracker().reset_turn();
+            match harness.run_confirmation_turn(approved).await {
+                Ok(stream) => {
+                    consume_stream(harness, stream, shutting_down).await;
+                }
+                Err(e) => {
+                    println!("{} {}", "\u{2717}".red(), format!("{e}").red());
+                }
+            }
+        } else {
+            println!("  {} Tool call denied.", "\u{2717}".red());
         }
     }
 
@@ -409,24 +471,22 @@ async fn run_turn_streaming(
 /// Consume an EventStream with colored output, Ctrl+C cancellation, and
 /// graceful shutdown support.
 ///
-/// Also collects tool calls and response text for post-turn memory write.
+/// Returns a StreamResult with collected data and any pending tool confirmation.
 async fn consume_stream(
     harness: &Harness,
     mut stream: EventStream,
     shutting_down: &Arc<AtomicBool>,
-) {
+) -> StreamResult {
+    let mut result = StreamResult::default();
     let mut in_tool_call = false;
-    let mut has_output = false;
-    let mut tool_calls: Vec<String> = Vec::new();
-    let mut response_parts: Vec<String> = Vec::new();
     let mut spinner = ThinkingSpinner::start();
 
     loop {
         tokio::select! {
-            result = stream.next() => {
-                match result {
+            event_result = stream.next() => {
+                match event_result {
                     Some(Ok(event)) => {
-                        has_output = true;
+                        result.has_output = true;
                         spinner.stop();
 
                         // Capture usage metadata for cost tracking
@@ -442,6 +502,8 @@ async fn consume_stream(
                                 confirm_req.tool_name.yellow(),
                                 summarize_args(&confirm_req.args),
                             );
+                            let call_id = confirm_req.function_call_id.clone().unwrap_or_default();
+                            result.pending_confirmation = Some((confirm_req.tool_name.clone(), call_id));
                         }
 
                         // Display content parts
@@ -452,7 +514,7 @@ async fn consume_stream(
                                         print!("{}", text);
                                         let _ = std::io::stdout().flush();
                                         in_tool_call = false;
-                                        response_parts.push(text.clone());
+                                        result.response_parts.push(text.clone());
                                     }
                                     Part::FunctionCall { name, args, .. } => {
                                         if in_tool_call {
@@ -465,7 +527,7 @@ async fn consume_stream(
                                             summarize_args(args),
                                         );
                                         in_tool_call = true;
-                                        tool_calls.push(format!("{}({})", name, summarize_args(args)));
+                                        result.tool_calls.push(format!("{}({})", name, summarize_args(args)));
                                     }
                                     Part::FunctionResponse { function_response, .. } => {
                                         if in_tool_call {
@@ -539,12 +601,12 @@ async fn consume_stream(
         }
     }
 
-    if has_output {
+    if result.has_output {
         println!(); // Trailing newline after response
     }
 
     // Store turn summary for post-turn memory write
-    let response_preview: String = response_parts.join("");
+    let response_preview: String = result.response_parts.join("");
     let preview = if response_preview.len() > 300 {
         let mut end = 300;
         while end > 0 && !response_preview.is_char_boundary(end) {
@@ -563,11 +625,13 @@ async fn consume_stream(
     TURN_SUMMARY.with(|t| {
         *t.borrow_mut() = Some(TurnSummary {
             user_message: String::new(), // Filled in by run_turn_streaming
-            tool_calls,
+            tool_calls: result.tool_calls.clone(),
             response_preview: preview,
             project: project_name,
         });
     });
+
+    result
 }
 
 /// Summarize tool arguments for display.

@@ -365,6 +365,19 @@ impl Harness {
         Ok((enriched, stream))
     }
 
+
+    /// Run a follow-up turn after tool confirmation prompt.
+    /// The approval text is sent as the user message so the agent knows to proceed.
+    pub async fn run_confirmation_turn(&self, approved: bool) -> anyhow::Result<EventStream> {
+        let text = if approved { "approved" } else { "denied" };
+        let content = Content::new("user").with_text(text);
+        let stream = self
+            .runner
+            .run_str("default-user", &self.current_session_id, content)
+            .await?;
+        Ok(stream)
+    }
+
     /// Interrupt current generation.
     pub fn interrupt(&self) -> bool {
         self.runner.interrupt(&self.current_session_id)
