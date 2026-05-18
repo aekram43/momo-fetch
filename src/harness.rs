@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use adk_rust::agent::LlmAgentBuilder;
 use adk_rust::runner::Runner;
-use adk_rust::{Content, EventStream, ToolConfirmationPolicy};
+use adk_rust::{Content, EventStream, RunConfig, ToolConfirmationDecision, ToolConfirmationPolicy};
 
 use crate::agent::AgentRegistry;
 use crate::config::HarnessConfig;
@@ -33,6 +33,8 @@ pub struct Harness {
     team_service: TeamService,
     agent_registry: AgentRegistry,
     cost_tracker: CostTracker,
+    /// Tool names that have been approved by the user during this session.
+    approved_tools: Arc<Mutex<std::collections::HashSet<String>>>,
     runner: Runner,
     current_session_id: String,
     config: HarnessConfig,
@@ -177,6 +179,7 @@ impl Harness {
             &mcp_service,
             &skill_service,
             agent_def.as_ref(),
+            &std::collections::HashSet::new(),
         )?;
 
         // Initialize cost tracker session context
@@ -204,6 +207,7 @@ impl Harness {
             team_service,
             agent_registry,
             cost_tracker,
+            approved_tools: Arc::new(Mutex::new(std::collections::HashSet::new())),
             runner,
             current_session_id,
             config,
@@ -221,6 +225,7 @@ impl Harness {
         mcp_service: &McpService,
         skill_service: &SkillService,
         agent_def: Option<&crate::agent::AgentDef>,
+        approved_tools: &std::collections::HashSet<String>,
     ) -> anyhow::Result<Runner> {
         let tools = crate::tools::build_tool_registry_with_orchestrator(
             sandbox.clone(),
@@ -310,11 +315,23 @@ impl Harness {
 
         let agent = agent_builder.build()?;
 
-        let runner = Runner::builder()
+        let mut run_config = RunConfig::default();
+        for tool_name in approved_tools {
+            run_config
+                .tool_confirmation_decisions
+                .insert(tool_name.clone(), ToolConfirmationDecision::Approve);
+        }
+
+        let mut runner_builder = Runner::builder()
             .app_name("momo-fetch")
             .agent(Arc::new(agent))
-            .session_service(session_service)
-            .build()?;
+            .session_service(session_service);
+
+        if !approved_tools.is_empty() {
+            runner_builder = runner_builder.run_config(run_config);
+        }
+
+        let runner = runner_builder.build()?;
 
         Ok(runner)
     }
@@ -326,6 +343,7 @@ impl Harness {
             .agent_name
             .as_ref()
             .and_then(|name| self.agent_registry.get(name));
+        let approved = self.approved_tools.lock().map(|g| g.clone()).unwrap_or_default();
         self.runner = Self::build_runner(
             &self.provider_mgr,
             &self.context_builder,
@@ -336,6 +354,7 @@ impl Harness {
             &self.mcp_service,
             &self.skill_service,
             agent_def,
+            &approved,
         )?;
         Ok(())
     }
@@ -367,8 +386,20 @@ impl Harness {
 
 
     /// Run a follow-up turn after tool confirmation prompt.
-    /// The approval text is sent as the user message so the agent knows to proceed.
-    pub async fn run_confirmation_turn(&self, approved: bool) -> anyhow::Result<EventStream> {
+    /// Records the approval decision and rebuilds the runner with the decision
+    /// baked into RunConfig so adk-agent won't ask again for this tool.
+    pub async fn run_confirmation_turn(
+        &mut self,
+        tool_name: &str,
+        approved: bool,
+    ) -> anyhow::Result<EventStream> {
+        if approved {
+            if let Ok(mut guard) = self.approved_tools.lock() {
+                guard.insert(tool_name.to_string());
+            }
+            // Rebuild runner with the approved tool in RunConfig
+            self.rebuild_runner()?;
+        }
         let text = if approved { "approved" } else { "denied" };
         let content = Content::new("user").with_text(text);
         let stream = self
@@ -498,6 +529,7 @@ impl Harness {
         &mut self,
         agent_def: Option<&crate::agent::AgentDef>,
     ) -> anyhow::Result<()> {
+        let approved = self.approved_tools.lock().map(|g| g.clone()).unwrap_or_default();
         self.runner = Self::build_runner(
             &self.provider_mgr,
             &self.context_builder,
@@ -508,6 +540,7 @@ impl Harness {
             &self.mcp_service,
             &self.skill_service,
             agent_def,
+            &approved,
         )?;
 
         // Update task context with the new system prompt

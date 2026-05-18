@@ -858,7 +858,7 @@ impl<C: StreamableHttpClient> Worker for StreamableHttpClientWorker<C> {
                     )
                 }
                 Ok(Err(e)) => {
-                    tracing::error!(
+                    tracing::debug!(
                         session_id = cleanup_session_id.as_ref(),
                         "fail to delete session: {e}"
                     );

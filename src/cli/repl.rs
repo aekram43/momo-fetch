@@ -385,7 +385,7 @@ impl Default for StreamResult {
 /// If auto_write is enabled, writes a MemCell after the turn completes.
 /// Handles tool confirmation prompts interactively.
 async fn run_turn_streaming(
-    harness: &Harness,
+    harness: &mut Harness,
     input: &str,
     shutting_down: &Arc<AtomicBool>,
     turn_active: &Arc<AtomicBool>,
@@ -408,11 +408,12 @@ async fn run_turn_streaming(
     };
 
     // Handle pending tool confirmation with interactive prompt
-    if let Some((tool_name, _call_id)) = &result.pending_confirmation {
-        let decision = prompt_tool_approval(tool_name);
+    if let Some((tool_name, _call_id)) = result.pending_confirmation {
+        let tool_name_clone = tool_name.clone();
+        let decision = prompt_tool_approval(&tool_name_clone);
         if let Some(approved) = decision {
             harness.cost_tracker().reset_turn();
-            match harness.run_confirmation_turn(approved).await {
+            match harness.run_confirmation_turn(&tool_name_clone, approved).await {
                 Ok(stream) => {
                     consume_stream(harness, stream, shutting_down).await;
                 }
@@ -473,7 +474,7 @@ async fn run_turn_streaming(
 ///
 /// Returns a StreamResult with collected data and any pending tool confirmation.
 async fn consume_stream(
-    harness: &Harness,
+    harness: &mut Harness,
     mut stream: EventStream,
     shutting_down: &Arc<AtomicBool>,
 ) -> StreamResult {
