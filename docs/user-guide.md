@@ -192,13 +192,21 @@ Here are the TODOs:
 
 ### Permission Prompts
 
-By default (strict mode), the agent asks before every write/shell action:
+By default (strict mode), the agent asks before every write/shell action. A thinking spinner shows while waiting for the LLM to respond:
 
 ```
+  ⠹ Thinking
   ⏺ file_write(path="src/lib.rs")
   ! Tool file_write requires approval: path="src/lib.rs"
-  Approve? [y/n]: y
+
+  ? Allow file_write to proceed? [y/n]
+y
+
+  ⠹ Thinking
+  → File updated successfully
 ```
+
+Once you approve a tool, it won't ask again for the same tool name during the session. Type `n` to deny.
 
 Use `--permission auto` to only prompt for destructive commands, or `--permission yolo` to skip all prompts.
 

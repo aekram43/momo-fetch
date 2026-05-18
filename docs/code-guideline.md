@@ -96,7 +96,7 @@ This is the central construction sequence. Order matters:
 ### Step 5: REPL Loop (`src/cli/repl.rs`)
 
 1. Prints MoMo banner (pitbull ASCII art) via `banner::print_banner()`
-2. Shows startup info (provider/model, session ID, loaded context, MCP status, skills)
+2. Shows startup info (provider/model, session ID, loaded context, MCP status, skills count excluding convention files)
 3. Enters `rustyline` loop:
    - Reads input with `<model>>` prompt
    - If slash command (`/help`, `/model`, etc.) → `Command::parse()` + `Command::execute()`
@@ -108,25 +108,35 @@ This is the central construction sequence. Order matters:
 ### Step 6: Agent Turn (`repl::run_turn_streaming()`)
 
 1. Resets cost tracker turn counters
-2. Calls `harness.run_turn(input)` which:
-   - Creates `Content::new("user").with_text(input)`
+2. Calls `harness.run_turn_enriched(input)` which:
+   - Enriches input with relevant memories (if auto_search enabled)
+   - Creates `Content::new("user").with_text(enriched_input)`
    - Calls `runner.run_str("default-user", session_id, content)` → returns `EventStream`
-3. Consumes the `EventStream` via `tokio::select!`:
-   - **Text parts** → `print!()` (streamed token by token)
-   - **FunctionCall parts** → yellow `⏺ tool_name(args...)`
-   - **FunctionResponse parts** → dimmed `→ result summary`
-   - **Tool confirmation** → yellow `! tool_name requires approval`
+3. Consumes the `EventStream` via `consume_stream()`:
+   - **Thinking spinner** → `ThinkingSpinner` shows braille animation while waiting for LLM
+   - **Text parts** → spinner stops, `print!()` (streamed token by token)
+   - **FunctionCall parts** → spinner stops, yellow `⏺ tool_name(args...)`
+   - **FunctionResponse parts** → dimmed `→ result summary`, spinner restarts (LLM thinking again)
+   - **Tool confirmation** → spinner stops, interactive `[y/n]` prompt
    - **Errors** → red error message
    - **Ctrl+C** → interrupts generation (first), force quit (second)
    - **Ctrl+D** → graceful shutdown (waits for tool to finish)
-4. Records usage metadata for cost tracking
-5. Finalizes cost tracking turn, checks budget alerts
+4. If tool confirmation was pending:
+   - Shows `? Allow <tool> to proceed? [y/n]` prompt
+   - On approval: records tool in `Harness.approved_tools`, rebuilds runner with `RunConfig` containing `ToolConfirmationDecision::Approve`, sends follow-up turn
+   - On denial: prints denial message
+5. Records usage metadata for cost tracking
+6. Finalizes cost tracking turn, checks budget alerts
 
 ### Step 7: Tool Execution
 
 When the LLM calls a tool, adk-rust handles the dispatch:
 
 1. **Confirmation check** — `ToolConfirmationPolicy` determines if user approval is needed
+   - If confirmation required and no decision in `RunConfig.tool_confirmation_decisions`: yields `tool_confirmation` event, stream ends
+   - REPL shows interactive `[y/n]` prompt via `prompt_tool_approval()`
+   - On approval: tool name added to `Harness.approved_tools` (persists for session), runner rebuilt with `RunConfig` containing the decision
+   - Subsequent calls to the same tool skip confirmation (decision baked into `RunConfig`)
 2. **Tool function runs** — e.g., `file_read(args)` in `src/tools/file.rs`
 3. **Tool accesses thread-local context** — `get_sandbox()` to get the `FilesystemSandbox`
 4. **Result returned** to the LLM as `FunctionResponse`
@@ -621,3 +631,53 @@ tokio::fs::rename(&tmp, &path).await?;
   ```
 - Session tests use `InMemorySessionService`
 - Total: 191 tests across all modules
+
+### UTF-8 Safe String Truncation
+
+All string truncation for display uses `ceil_char_boundary()` to avoid panics with multibyte characters (Thai, CJK, emoji):
+
+```rust
+// NEVER do this (panics on multibyte UTF-8):
+&summary[..200]
+
+// Always use this:
+let end = summary.ceil_char_boundary(200);
+&summary[..end]
+```
+
+Applied in: `repl.rs`, `oneshot.rs`, `vault.rs`.
+
+### Thinking Spinner
+
+`ThinkingSpinner` in `repl.rs` shows a braille animation while the LLM is processing:
+- Started when `consume_stream` begins and after tool responses (LLM thinking again)
+- Stopped when text/function call events arrive
+- Runs on a `tokio::spawn` task, communicates via `AtomicBool` flag
+- Cycles through labels: Thinking → Analyzing → Processing → Generating
+
+### Tool Confirmation Flow
+
+When `ToolConfirmationPolicy` requires approval:
+
+1. adk-agent yields `tool_confirmation` event, stream ends
+2. `consume_stream` returns `StreamResult` with `pending_confirmation`
+3. `run_turn_streaming` calls `prompt_tool_approval()` → interactive `[y/n]` prompt
+4. On approval: `harness.run_confirmation_turn()` adds tool to `approved_tools` set, rebuilds runner with `RunConfig` containing `ToolConfirmationDecision::Approve`, sends follow-up turn
+5. Subsequent calls to same tool skip confirmation (decision in `RunConfig`)
+
+`approved_tools` is `Arc<Mutex<HashSet<String>>>` in Harness, passed through `build_runner()` to `RunConfig.tool_confirmation_decisions`.
+
+### StreamResult
+
+`consume_stream` returns `StreamResult` struct (not `()`):
+
+```rust
+struct StreamResult {
+    has_output: bool,
+    tool_calls: Vec<String>,
+    response_parts: Vec<String>,
+    pending_confirmation: Option<(String, String)>, // (tool_name, function_call_id)
+}
+```
+
+This allows `run_turn_streaming` to handle tool confirmations interactively after the stream ends.

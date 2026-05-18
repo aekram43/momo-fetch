@@ -92,6 +92,7 @@ parses CLI arguments via clap, and delegates to cli::run()...
 ```
 
 **What the colors mean:**
+- Dimmed spinner `⠹ Thinking` — agent is waiting for LLM response
 - Yellow `⏺` — agent is calling a tool
 - Dimmed `→` — tool result summary
 - White text — agent's response
@@ -251,6 +252,10 @@ Installed skills (2):
     /path/to/.skills/code-review/SKILL.md
   commit: Create well-formatted commits [git, commit]
     /path/to/.skills/commit/SKILL.md
+
+Project instructions (2):
+  agents: /path/to/project/AGENTS.md
+  soul: /path/to/project/SOUL.md
 ```
 
 Skills are auto-matched when relevant, or invoked explicitly with `/<skill-name>`.
@@ -381,10 +386,15 @@ When the agent needs approval:
 ```
   ⏺ file_write(path="src/main.rs")
   ! Tool file_write requires approval: path="src/main.rs", content="..."
-  Approve? [y/n]:
+
+  ? Allow file_write to proceed? [y/n]
+> y
+
+  ⠹ Thinking
+  → File updated successfully
 ```
 
-Type `y` to proceed, `n` to block the action.
+Type `y` to proceed, `n` to block the action. Once approved, the tool won't ask again for the same tool name during the session.
 
 ---
 

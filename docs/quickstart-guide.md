@@ -107,12 +107,31 @@ You'll see the MoMo banner and a prompt:
 
 MOMO Fetch 0.1.0 — anthropic (claude-sonnet-4-20250514)
 Session: a1b2c3d4
+MCP: 4/4 servers connected
 Type /help for commands, Ctrl+D to quit.
 
 llama3.2>
 ```
 
-Start chatting with the agent. It has file, shell, search, web, and memory tools.
+Start chatting with the agent. A thinking spinner (`⠹ Thinking`) shows while the LLM is processing. When a tool needs approval, you'll see an interactive prompt:
+
+```
+llama3.2> edit the README
+
+  ⠹ Thinking
+  ⏺ file_edit(path="README.md", old_string="...", new_string="...")
+  ! Tool file_edit requires approval: path="README.md", old_string="...", new_string="..."
+
+  ? Allow file_edit to proceed? [y/n]
+y
+
+  ⠹ Thinking
+  → File updated successfully
+
+The README has been updated...
+```
+
+Once you approve a tool, it won't ask again for the same tool during the session.
 
 ### Customizing Agent Personality
 
@@ -234,7 +253,7 @@ Inside the REPL:
 | `/permission auto` | Switch permission mode (strict/auto/yolo) |
 | `/cost` | Show current session cost |
 | `/mem` | Show memory vault status |
-| `/mcp list` | Show MCP server status and tools |
+| `/mcp list` | Show MCP servers (stdio + HTTP) and connection status |
 | `/agent list` | List agent personalities |
 | `/agent switch <name>` | Switch to a specialist personality |
 | `/agent default` | Switch back to default mode |
@@ -283,6 +302,9 @@ Make sure Ollama is running: `ollama serve`
 
 **Build fails on adk-rust**
 Ensure Rust 1.85.0+: `rustc --version`
+
+**MCP server logs appearing on startup**
+MCP server stderr is suppressed automatically. If you see logs, rebuild after the latest patches.
 
 **Install globally:**
 ```bash
