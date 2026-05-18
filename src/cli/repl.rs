@@ -57,11 +57,13 @@ impl ThinkingSpinner {
     fn stop(&mut self) {
         self.active.store(false, Ordering::Relaxed);
         if let Some(handle) = self.handle.take() {
-            // Don't abort — let the task notice the flag and clean up.
-            // It will clear the line and exit on its own within ~80ms.
-            // Detach the task so it cleans up in the background.
-            tokio::spawn(async move {
-                let _ = handle.await;
+            // Block until the spinner task has cleaned up its line.
+            // Using block_in_place so we don't deadlock the tokio runtime
+            // (we're inside a select! / async context).
+            let _ = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    let _ = handle.await;
+                })
             });
         }
     }
@@ -492,6 +494,7 @@ async fn consume_stream(
     let mut result = StreamResult::default();
     let mut in_tool_call = false;
     let mut spinner = ThinkingSpinner::start();
+    let mut event_count = 0usize;
 
     loop {
         tokio::select! {
@@ -499,6 +502,7 @@ async fn consume_stream(
                 match event_result {
                     Some(Ok(event)) => {
                         result.has_output = true;
+                        event_count += 1;
                         spinner.stop();
 
                         // Capture usage metadata for cost tracking
@@ -577,9 +581,11 @@ async fn consume_stream(
                             break;
                         }
 
-                        // Restart spinner: LLM will think again after tool response
-                        // or while processing next step
-                        if !in_tool_call {
+                        // Restart spinner only if we just finished a tool call
+                        // (LLM will think again to process the tool response).
+                        // Don't restart if we just printed text — the LLM is
+                        // still streaming and will send more content soon.
+                        if in_tool_call {
                             spinner = ThinkingSpinner::start();
                         }
 
