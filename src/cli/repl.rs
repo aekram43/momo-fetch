@@ -57,11 +57,13 @@ impl ThinkingSpinner {
     fn stop(&mut self) {
         self.active.store(false, Ordering::Relaxed);
         if let Some(handle) = self.handle.take() {
-            handle.abort();
+            // Don't abort — let the task notice the flag and clean up.
+            // It will clear the line and exit on its own within ~80ms.
+            // Detach the task so it cleans up in the background.
+            tokio::spawn(async move {
+                let _ = handle.await;
+            });
         }
-        // Ensure spinner line is cleared
-        eprint!("\r\u{1b}[2K");
-        let _ = std::io::stderr().flush();
     }
 }
 
@@ -406,6 +408,15 @@ async fn run_turn_streaming(
             StreamResult::default()
         }
     };
+
+    if !result.has_output && result.pending_confirmation.is_none() {
+        println!(
+            "  {} No response from {} ({}). Check your API key and network.",
+            "\u{26a0}".yellow(),
+            harness.provider_mgr().current_provider(),
+            harness.provider_mgr().current_model_name(),
+        );
+    }
 
     // Handle pending tool confirmation with interactive prompt
     if let Some((tool_name, _call_id)) = result.pending_confirmation {
