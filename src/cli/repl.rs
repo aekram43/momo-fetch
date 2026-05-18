@@ -583,7 +583,10 @@ async fn consume_stream(
                         println!("\n{} Stream error: {}", "\u{2717}".red(), e);
                         break;
                     }
-                    None => break,
+                    None => {
+                        spinner.stop();
+                        break;
+                    }
                 }
             }
             _ = tokio::signal::ctrl_c() => {
@@ -604,6 +607,9 @@ async fn consume_stream(
 
     if result.has_output {
         println!(); // Trailing newline after response
+    } else if result.pending_confirmation.is_none() {
+        // No output and no confirmation — likely a connection or empty response issue
+        tracing::warn!("Turn completed with no output");
     }
 
     // Store turn summary for post-turn memory write
