@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use adk_rust::agent::LlmAgentBuilder;
-use adk_rust::prelude::{Agent, Content};
+use adk_rust::prelude::Content;
 use adk_rust::runner::Runner;
 use adk_tool::{AdkError, tool};
 use adk_rust::futures::StreamExt;
@@ -140,7 +140,7 @@ async fn spawn_inline(
     let system_prompt = build_agent_prompt(agent_def);
 
     // Select model — agent override or current
-    let model = if let Some(ref provider) = agent_def.provider {
+    let model = if let Some(ref _provider) = agent_def.provider {
         // TODO: support provider override when ProviderManager supports it
         ctx.provider_mgr.current()
     } else {

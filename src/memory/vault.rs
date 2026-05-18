@@ -56,6 +56,7 @@ impl ObsidianVault {
     }
 
     /// Get the vault configuration.
+    #[allow(dead_code)]
     pub fn config(&self) -> &VaultConfig {
         &self.config
     }

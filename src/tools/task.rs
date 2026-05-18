@@ -44,6 +44,7 @@ pub fn set_task_context(ctx: TaskContext) {
 }
 
 /// Clear the task context for the current thread.
+#[allow(dead_code)]
 pub fn clear_task_context() {
     TASK_CTX.with(|c| *c.borrow_mut() = None);
 }

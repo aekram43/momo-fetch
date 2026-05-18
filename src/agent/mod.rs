@@ -51,6 +51,7 @@ pub struct AgentConfigFile {
 #[derive(Debug, Clone)]
 pub struct AgentRegistry {
     /// Path to the agents directory.
+    #[allow(dead_code)]
     agents_dir: PathBuf,
     /// Loaded agent definitions keyed by name.
     agents: HashMap<String, AgentDef>,
@@ -169,6 +170,7 @@ impl AgentRegistry {
     }
 
     /// Check if an agent has orchestration capability.
+    #[allow(dead_code)]
     pub fn is_orchestrator(&self, name: &str) -> bool {
         self.agents
             .get(name)
@@ -177,6 +179,7 @@ impl AgentRegistry {
     }
 
     /// Get the agents directory path.
+    #[allow(dead_code)]
     pub fn agents_dir(&self) -> &Path {
         &self.agents_dir
     }

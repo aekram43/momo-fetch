@@ -114,6 +114,7 @@ impl ContextBuilder {
     }
 
     /// Get the loaded context files (for logging).
+    #[allow(dead_code)]
     pub fn loaded_files(&self) -> &[(PathBuf, String)] {
         &self.agents_md_content
     }

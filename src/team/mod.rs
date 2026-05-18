@@ -365,6 +365,7 @@ impl TmuxManager {
     }
 
     /// List panes in a session with their names.
+    #[allow(dead_code)]
     pub fn list_panes(session_name: &str) -> anyhow::Result<Vec<(String, String)>> {
         let output = std::process::Command::new("tmux")
             .args([
@@ -1039,6 +1040,7 @@ fn sanitize_branch_name(name: &str) -> String {
 }
 
 /// Generate a unique ID.
+#[allow(dead_code)]
 fn generate_id() -> String {
     uuid::Uuid::new_v4().to_string()[..8].to_string()
 }

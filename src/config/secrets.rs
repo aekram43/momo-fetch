@@ -148,6 +148,7 @@ impl SecretStore {
     }
 
     /// Get the env var name for a provider.
+    #[allow(dead_code)]
     pub fn env_var_for(provider: &str) -> String {
         env_var_for_provider(provider)
     }

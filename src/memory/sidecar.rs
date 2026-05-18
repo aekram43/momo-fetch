@@ -68,6 +68,7 @@ impl MemorySidecar {
     }
 
     /// Whether Option B (sub-agent) is configured.
+    #[allow(dead_code)]
     pub fn has_sidecar_model(&self) -> bool {
         self.config.sidecar_model.is_some()
     }
@@ -78,11 +79,13 @@ impl MemorySidecar {
     }
 
     /// Get the sidecar provider name (for Option B).
+    #[allow(dead_code)]
     pub fn sidecar_provider(&self) -> Option<&str> {
         self.config.sidecar_provider.as_deref()
     }
 
     /// Get the memory settings.
+    #[allow(dead_code)]
     pub fn settings(&self) -> &MemorySettings {
         &self.config
     }
@@ -234,6 +237,7 @@ impl MemorySidecar {
     }
 
     /// Build a sub-agent prompt for memory extraction (Option B).
+    #[allow(dead_code)]
     ///
     /// Returns the prompt to send to the sidecar sub-agent, which will
     /// extract structured memory data from the turn summary.

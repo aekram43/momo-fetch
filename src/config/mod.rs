@@ -13,8 +13,10 @@ use crate::sandbox::PermissionMode;
 pub struct HarnessConfig {
     pub project_path: PathBuf,
     pub vault_path: PathBuf,
+    #[allow(dead_code)]
     pub session_db_path: PathBuf,
     pub permission_mode: PermissionMode,
+    #[allow(dead_code)]
     pub provider: ProviderSettings,
     pub resume_session_id: Option<String>,
     pub memory: MemorySettings,

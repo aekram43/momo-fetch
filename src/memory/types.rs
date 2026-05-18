@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// A raw experience memory cell.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct MemCell {
     pub id: String,
     pub timestamp: chrono::DateTime<chrono::Local>,
@@ -22,6 +23,7 @@ pub struct ActionRecord {
 
 /// An extracted event (fact) from a MemCell.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct Event {
     pub id: String,
     pub memcell_ref: String,
@@ -32,6 +34,7 @@ pub struct Event {
 
 /// A foresight (prediction) extracted from a MemCell.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct Foresight {
     pub id: String,
     pub memcell_ref: String,
@@ -43,6 +46,7 @@ pub struct Foresight {
 
 /// An episode (narrative summary) generated from MemCells.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct Episode {
     pub id: String,
     pub memcell_refs: Vec<String>,
@@ -53,6 +57,7 @@ pub struct Episode {
 
 /// Significance level for events.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub enum Significance {
     Low,
     Medium,
@@ -61,6 +66,7 @@ pub enum Significance {
 
 /// Status of a foresight prediction.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub enum ForesightStatus {
     Pending,
     Confirmed,

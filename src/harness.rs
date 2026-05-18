@@ -361,6 +361,7 @@ impl Harness {
 
     /// Run a single conversational turn.
     /// Returns an EventStream for the REPL to consume.
+    #[allow(dead_code)]
     pub async fn run_turn(&self, input: &str) -> anyhow::Result<EventStream> {
         let content = Content::new("user").with_text(input);
         let stream = self
@@ -572,6 +573,7 @@ impl Harness {
 
     /// Get a mutable reference to the provider manager.
     /// Note: after mutating, call `rebuild_runner()` to update the agent.
+    #[allow(dead_code)]
     pub fn provider_mgr_mut(&mut self) -> &mut ProviderManager {
         &mut self.provider_mgr
     }
@@ -652,6 +654,7 @@ impl Harness {
     }
 
     /// Start a new session, replacing the current one.
+    #[allow(dead_code)]
     pub async fn new_session(&mut self) -> anyhow::Result<String> {
         let session = self.session_mgr.create_session(None).await?;
         self.current_session_id = session.id().to_string();

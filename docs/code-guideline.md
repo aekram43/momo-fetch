@@ -116,7 +116,7 @@ This is the central construction sequence. Order matters:
    - **Thinking spinner** → `ThinkingSpinner` shows braille animation while waiting for LLM
    - **Text parts** → spinner stops, `print!()` (streamed token by token)
    - **FunctionCall parts** → spinner stops, yellow `⏺ tool_name(args...)`
-   - **FunctionResponse parts** → dimmed `→ result summary`, spinner restarts (LLM thinking again)
+   - **FunctionResponse parts** → dimmed `→ result summary`, spinner restarts only after tool call responses (LLM thinking again)
    - **Tool confirmation** → spinner stops, interactive `[y/n]` prompt
    - **Errors** → red error message
    - **Ctrl+C** → interrupts generation (first), force quit (second)
@@ -650,9 +650,11 @@ Applied in: `repl.rs`, `oneshot.rs`, `vault.rs`.
 ### Thinking Spinner
 
 `ThinkingSpinner` in `repl.rs` shows a braille animation while the LLM is processing:
-- Started when `consume_stream` begins and after tool responses (LLM thinking again)
+- Started when `consume_stream` begins and after tool call responses (LLM thinking again)
 - Stopped when text/function call events arrive
+- `stop()` is synchronous — uses `tokio::task::block_in_place` to ensure the spinner clears its line before any new output
 - Runs on a `tokio::spawn` task, communicates via `AtomicBool` flag
+- Restarts only after tool call responses (`FunctionCall` events), not on text parts
 - Cycles through labels: Thinking → Analyzing → Processing → Generating
 
 ### Tool Confirmation Flow

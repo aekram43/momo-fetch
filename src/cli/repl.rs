@@ -494,7 +494,6 @@ async fn consume_stream(
     let mut result = StreamResult::default();
     let mut in_tool_call = false;
     let mut spinner = ThinkingSpinner::start();
-    let mut event_count = 0usize;
 
     loop {
         tokio::select! {
@@ -502,7 +501,6 @@ async fn consume_stream(
                 match event_result {
                     Some(Ok(event)) => {
                         result.has_output = true;
-                        event_count += 1;
                         spinner.stop();
 
                         // Capture usage metadata for cost tracking

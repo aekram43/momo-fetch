@@ -317,6 +317,7 @@ impl ProviderManager {
 pub struct ProviderInfo {
     pub provider: String,
     pub default_model: String,
+    #[allow(dead_code)]
     pub available: bool,
 }
 

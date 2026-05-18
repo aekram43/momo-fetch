@@ -103,6 +103,7 @@ impl CostTracker {
     }
 
     /// Set budget limits.
+    #[allow(dead_code)]
     pub fn set_budget_limits(&mut self, daily: Option<f64>, session: Option<f64>) {
         self.max_cost_daily = daily;
         self.max_cost_session = session;

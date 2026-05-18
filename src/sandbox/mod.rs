@@ -68,6 +68,7 @@ const MUTATING_TOOLS: &[&str] = &[
 ];
 
 /// Tools that are always classified as "read-only".
+#[allow(dead_code)]
 const READ_ONLY_TOOLS: &[&str] = &[
     "file_read",
     "grep",
@@ -89,6 +90,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
 pub struct FilesystemSandbox {
     root: PathBuf,
     permission_mode: PermissionMode,
+    #[allow(dead_code)]
     ignore_matcher: Option<ignore::gitignore::Gitignore>,
 }
 
@@ -164,6 +166,7 @@ impl FilesystemSandbox {
     ///
     /// Returns true if the path should be excluded from operations.
     /// Paths outside the sandbox root are always considered "ignored".
+    #[allow(dead_code)]
     pub fn is_ignored(&self, path: &Path) -> bool {
         // Canonicalize the path to resolve symlinks (macOS /var → /private/var etc.)
         let canonical = match path.canonicalize() {
@@ -198,6 +201,7 @@ impl FilesystemSandbox {
     }
 
     /// Check if a path is readable (not ignored, within sandbox).
+    #[allow(dead_code)]
     pub fn check_readable(&self, path: &Path) -> anyhow::Result<()> {
         if self.is_ignored(path) {
             anyhow::bail!("Path is ignored by .agentignore rules: {}", path.display());
@@ -206,6 +210,7 @@ impl FilesystemSandbox {
     }
 
     /// Check if a path is writable (not ignored, within sandbox).
+    #[allow(dead_code)]
     pub fn check_writable(&self, path: &Path) -> anyhow::Result<()> {
         if self.is_ignored(path) {
             anyhow::bail!("Path is ignored by .agentignore rules: {}", path.display());
@@ -255,6 +260,7 @@ impl FilesystemSandbox {
     /// - Strict: all mutating tools require confirmation
     /// - Auto: only destructive tools require confirmation
     /// - Yolo: nothing requires confirmation
+    #[allow(dead_code)]
     pub fn requires_confirmation(&self, tool_name: &str, args: &serde_json::Value) -> bool {
         match self.permission_mode {
             PermissionMode::Yolo => false,
@@ -304,6 +310,7 @@ impl FilesystemSandbox {
     }
 
     /// Get the .agentignore matcher (for testing/inspection).
+    #[allow(dead_code)]
     pub fn ignore_matcher(&self) -> Option<&ignore::gitignore::Gitignore> {
         self.ignore_matcher.as_ref()
     }

@@ -30,6 +30,7 @@ fn get_sandbox() -> Result<Arc<FilesystemSandbox>, AdkError> {
 }
 
 /// Clear the sandbox for the current thread.
+#[allow(dead_code)]
 pub fn clear_sandbox() {
     SANDBOX_CTX.with(|ctx| *ctx.borrow_mut() = None);
 }

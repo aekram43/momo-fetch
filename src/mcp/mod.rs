@@ -157,11 +157,13 @@ async fn connect_http_server(
 // ─── McpManager (unused but kept for API compat) ──────────────────────
 
 /// Manages MCP server connections for the harness (stdio-only wrapper).
+#[allow(dead_code)]
 pub struct McpManager {
     manager: Arc<McpServerManager>,
     config_path: PathBuf,
 }
 
+#[allow(dead_code)]
 impl McpManager {
     pub fn new(project_path: &Path) -> Result<Self> {
         let config_path = project_path.join(".harness").join("mcp.json");
@@ -320,6 +322,7 @@ impl McpService {
     }
 
     /// Create with no servers (for testing).
+    #[allow(dead_code)]
     pub fn new_empty() -> Result<Self> {
         let manager = McpServerManager::new(HashMap::new()).with_name("momo-fetch-mcp");
         Ok(Self {
@@ -391,11 +394,13 @@ impl McpService {
     }
 
     /// Start background health monitoring (stdio servers only).
+    #[allow(dead_code)]
     pub fn start_monitoring(&self) {
         self.manager.start_monitoring();
     }
 
     /// Stop background health monitoring.
+    #[allow(dead_code)]
     pub fn stop_monitoring(&self) {
         self.manager.stop_monitoring();
     }
@@ -445,6 +450,7 @@ impl McpService {
     }
 
     /// Start a specific stdio server.
+    #[allow(dead_code)]
     pub async fn start_server(&self, id: &str) -> Result<()> {
         self.manager
             .start_server(id)
@@ -453,6 +459,7 @@ impl McpService {
     }
 
     /// Stop a specific stdio server.
+    #[allow(dead_code)]
     pub async fn stop_server(&self, id: &str) -> Result<()> {
         self.manager
             .stop_server(id)
@@ -466,6 +473,7 @@ impl McpService {
     }
 
     /// Get a specific server status.
+    #[allow(dead_code)]
     pub async fn server_status(&self, id: &str) -> Result<ServerStatus> {
         self.manager
             .server_status(id)
@@ -479,11 +487,13 @@ impl McpService {
     }
 
     /// Get the underlying stdio manager.
+    #[allow(dead_code)]
     pub fn manager(&self) -> Arc<McpServerManager> {
         self.manager.clone()
     }
 
     /// Get the config file path.
+    #[allow(dead_code)]
     pub fn config_path(&self) -> &Path {
         &self.config_path
     }

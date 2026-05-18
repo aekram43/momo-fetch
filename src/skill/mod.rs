@@ -13,6 +13,7 @@ pub struct SkillService {
     project_path: PathBuf,
     harness_skills_dir: PathBuf,
     index: SkillIndex,
+    #[allow(dead_code)]
     policy: SelectionPolicy,
 }
 
@@ -62,11 +63,13 @@ impl SkillService {
     }
 
     /// Get the selection policy.
+    #[allow(dead_code)]
     pub fn policy(&self) -> &SelectionPolicy {
         &self.policy
     }
 
     /// Get the harness skills directory path.
+    #[allow(dead_code)]
     pub fn harness_skills_dir(&self) -> &Path {
         &self.harness_skills_dir
     }
@@ -83,6 +86,7 @@ impl SkillService {
 
     /// Auto-match skills for a given query string.
     /// Returns ranked skill matches based on lexical overlap.
+    #[allow(dead_code)]
     pub fn match_skills(&self, query: &str) -> Vec<SkillMatch> {
         select_skills(&self.index, query, &self.policy)
     }
@@ -132,6 +136,7 @@ impl SkillService {
 
     /// Remove an installed skill by name.
     /// Only removes skills in the .harness/skills/ directory.
+    #[allow(dead_code)]
     pub fn remove_skill(&mut self, name: &str) -> anyhow::Result<()> {
         let skill_dir = self.harness_skills_dir.join(name);
         if !skill_dir.exists() {
@@ -179,6 +184,7 @@ impl SkillService {
     }
 
     /// List all skill files that would be discovered (without parsing).
+    #[allow(dead_code)]
     pub fn list_skill_files(&self) -> anyhow::Result<Vec<PathBuf>> {
         let extra_dirs = vec![self.harness_skills_dir.clone()];
         discover_skill_files_with_extras(&self.project_path, &extra_dirs)

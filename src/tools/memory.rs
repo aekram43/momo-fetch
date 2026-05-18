@@ -30,6 +30,7 @@ fn get_vault() -> Result<Arc<Mutex<ObsidianVault>>, AdkError> {
 }
 
 /// Clear the vault for the current thread.
+#[allow(dead_code)]
 pub fn clear_vault() {
     VAULT_CTX.with(|ctx| *ctx.borrow_mut() = None);
 }

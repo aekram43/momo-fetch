@@ -41,6 +41,7 @@ impl SessionManager {
     }
 
     /// Create an in-memory session manager (for tests).
+    #[allow(dead_code)]
     pub fn new_in_memory() -> Self {
         use adk_session::InMemorySessionService;
         Self {
@@ -107,6 +108,7 @@ impl SessionManager {
     }
 
     /// Delete a session by ID.
+    #[allow(dead_code)]
     pub async fn delete_session(&self, session_id: &str) -> anyhow::Result<()> {
         let req = DeleteRequest {
             app_name: APP_NAME.to_string(),

@@ -4,6 +4,7 @@ use crate::memory::vault::ObsidianVault;
 /// Extract events, foresights, and episodes from MemCells.
 ///
 /// This is a convenience wrapper around `ObsidianVault::extract_from_memcell()`.
+#[allow(dead_code)]
 pub fn extract_from_memcell(
     vault: &mut ObsidianVault,
     memcell_ref: &str,
@@ -21,6 +22,7 @@ pub fn extract_from_memcell(
 ///
 /// Detects clusters of related MemCells using keyword similarity (Jaccard)
 /// and same-project grouping, then updates the agent profile with learned traits.
+#[allow(dead_code)]
 pub fn consolidate(vault: &mut ObsidianVault) -> anyhow::Result<ConsolidationResult> {
     vault.consolidate()
 }
@@ -28,6 +30,7 @@ pub fn consolidate(vault: &mut ObsidianVault) -> anyhow::Result<ConsolidationRes
 /// Generate a reflection (weekly/monthly) from memories.
 ///
 /// Summarizes recent MemCells and extracts key themes for the given period.
+#[allow(dead_code)]
 pub fn reflect(vault: &mut ObsidianVault, period: &ReflectionPeriod) -> anyhow::Result<Reflection> {
     vault.reflect(period)
 }
@@ -35,6 +38,7 @@ pub fn reflect(vault: &mut ObsidianVault, period: &ReflectionPeriod) -> anyhow::
 /// Validate pending foresight predictions.
 ///
 /// Checks foresights that have passed their end_time and marks them as expired.
+#[allow(dead_code)]
 pub fn validate_foresights(vault: &mut ObsidianVault) -> anyhow::Result<Vec<ForesightValidation>> {
     vault.validate_foresights()
 }
