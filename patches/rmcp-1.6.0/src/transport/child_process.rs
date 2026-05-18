@@ -164,7 +164,7 @@ impl TokioChildProcessBuilder {
             cmd: cmd.into(),
             stdin: Stdio::piped(),
             stdout: Stdio::piped(),
-            stderr: Stdio::inherit(),
+            stderr: Stdio::null(),
         }
     }
 

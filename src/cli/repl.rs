@@ -43,21 +43,46 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
     // Show MCP servers
     let mcp = harness.mcp_service();
     if mcp.has_servers() {
-        let running = mcp.running_count().await;
-        let total = mcp.configs().len();
+        let stdio_running = mcp.running_count().await;
+        let stdio_total = mcp.configs().len();
+        let http_total = mcp.http_configs().len();
+        let http_connected = mcp.connected_http_ids().values().filter(|&&v| v).count();
+        let total = stdio_total + http_total;
+        let running = stdio_running + http_connected;
         println!(
-            "MCP: {}/{} servers running",
+            "MCP: {}/{} servers connected",
             running.to_string().green(),
             total,
         );
     }
 
-    // Show skills
+    // Show skills (exclude convention files like AGENTS.md, SOUL.md)
     let skills = harness.skill_service();
-    if skills.has_skills() {
+    let convention_names = [
+        "AGENTS.md", "AGENT.md", "CLAUDE.md", "GEMINI.md",
+        "COPILOT.md", "SKILLS.md", "SOUL.md",
+    ];
+    let skills_dir_prefixes = [
+        std::path::Path::new(".skills"),
+        std::path::Path::new(".claude/skills"),
+        std::path::Path::new(".harness/skills"),
+    ];
+    let real_skill_count = skills.index().skills().iter().filter(|s| {
+        let is_convention_name = s.path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| {
+                convention_names.iter().any(|c| name.eq_ignore_ascii_case(c))
+            });
+        let in_skills_dir = skills_dir_prefixes.iter().any(|prefix| {
+            s.path.starts_with(prefix)
+        });
+        !is_convention_name || in_skills_dir
+    }).count();
+    if real_skill_count > 0 {
         println!(
             "Skills: {} loaded",
-            skills.skill_count().to_string().green(),
+            real_skill_count.to_string().green(),
         );
     }
 

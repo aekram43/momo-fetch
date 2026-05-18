@@ -498,6 +498,16 @@ impl McpService {
         &self.http_configs
     }
 
+    /// Get set of connected HTTP server IDs (by matching toolset name against config keys).
+    pub fn connected_http_ids(&self) -> HashMap<String, bool> {
+        let connected_names: std::collections::HashSet<&str> =
+            self.http_toolsets.iter().map(|ts| ts.name()).collect();
+        self.http_configs
+            .keys()
+            .map(|id| (id.clone(), connected_names.contains(id.as_str())))
+            .collect()
+    }
+
     /// Check if any servers are configured (stdio or HTTP).
     pub fn has_servers(&self) -> bool {
         !self.configs.is_empty() || !self.http_configs.is_empty()

@@ -460,21 +460,41 @@ impl Command {
                 Ok(true)
             }
             Self::McpList => {
+                use colored::Colorize;
                 let configs = harness.mcp_service().configs();
-                if configs.is_empty() {
+                let http_configs = harness.mcp_service().http_configs();
+                if configs.is_empty() && http_configs.is_empty() {
                     println!("No MCP servers configured.");
                     println!("Use /mcp add <name> <command> to add a server.");
                 } else {
-                    println!("MCP servers:");
-                    let statuses = harness.mcp_service().all_statuses().await;
-                    for (id, config) in configs {
-                        let status = statuses
-                            .get(id)
-                            .map(|s| format!("{s:?}"))
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        let disabled = if config.disabled { " [disabled]" } else { "" };
-                        println!("  {id}: {status}{disabled}");
-                        println!("    command: {} {}", config.command, config.args.join(" "));
+                    if !configs.is_empty() {
+                        println!("Stdio servers:");
+                        let statuses = harness.mcp_service().all_statuses().await;
+                        for (id, config) in configs {
+                            let status = statuses
+                                .get(id)
+                                .map(|s| format!("{s:?}"))
+                                .unwrap_or_else(|| "Unknown".to_string());
+                            let disabled = if config.disabled { " [disabled]" } else { "" };
+                            println!("  {id}: {status}{disabled}");
+                            println!("    command: {} {}", config.command, config.args.join(" "));
+                        }
+                    }
+                    if !http_configs.is_empty() {
+                        if !configs.is_empty() {
+                            println!();
+                        }
+                        println!("HTTP servers:");
+                        let connected = harness.mcp_service().connected_http_ids();
+                        for (id, config) in http_configs {
+                            let status = if connected.get(id).copied().unwrap_or(false) {
+                                "Connected".green().to_string()
+                            } else {
+                                "Disconnected".red().to_string()
+                            };
+                            println!("  {id}: {status}");
+                            println!("    url: {}", config.url);
+                        }
                     }
                 }
                 Ok(true)
