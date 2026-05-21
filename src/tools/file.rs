@@ -37,6 +37,11 @@ pub fn clear_sandbox() {
 
 // ─── FileRead ──────────────────────────────────────────────────
 
+/// Maximum file size that can be read without a range parameter (256 KB).
+const MAX_FILE_SIZE_NO_RANGE: usize = 256 * 1024;
+/// Maximum file size that can be read even with a range parameter (2 MB).
+const MAX_FILE_SIZE_ABSOLUTE: usize = 2 * 1024 * 1024;
+
 /// Read file contents with optional line range.
 /// Returns content with line numbers (cat -n format).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -49,12 +54,45 @@ pub struct FileReadArgs {
 
 /// Reads a file and returns its content with line numbers.
 /// Supports optional line range filtering (e.g., "1-50").
+/// Returns an error if the file exceeds size limits (256 KB without range,
+/// 2 MB with range) with actionable guidance.
 #[tool]
 pub async fn file_read(args: FileReadArgs) -> Result<Value, AdkError> {
     let sandbox = get_sandbox()?;
     let resolved = sandbox.resolve_path(&args.path).map_err(|e| {
         AdkError::tool(format!("file_read: path resolution failed: {e}"))
     })?;
+
+    // Check file metadata before reading
+    let metadata = tokio::fs::metadata(&resolved).await.map_err(|e| {
+        AdkError::tool(format!("file_read: cannot access '{}': {e}", args.path))
+    })?;
+    let file_size = metadata.len() as usize;
+
+    // Enforce size limits
+    if args.range.is_none() && file_size > MAX_FILE_SIZE_NO_RANGE {
+        // Estimate total lines for range suggestion
+        let total_lines = estimate_line_count(&resolved).await;
+        return Err(AdkError::tool(format!(
+            "file_read: '{}' is {} KB — exceeds the 256 KB limit for full reads. \
+             Use the \"range\" parameter to read specific sections, e.g.: \
+             range=\"1-100\" (file has ~{} lines total). \
+             Or read it in chunks: range=\"1-200\", range=\"201-400\", etc.",
+            args.path,
+            file_size / 1024,
+            total_lines,
+        )));
+    }
+    if file_size > MAX_FILE_SIZE_ABSOLUTE {
+        return Err(AdkError::tool(format!(
+            "file_read: '{}' is {} KB — exceeds the 2 MB absolute limit. \
+             This file is too large for the context window. \
+             Consider using grep to search for specific content, \
+             or split the file into smaller parts first.",
+            args.path,
+            file_size / 1024,
+        )));
+    }
 
     let content = tokio::fs::read_to_string(&resolved).await.map_err(|e| {
         AdkError::tool(format!("file_read: failed to read '{}': {e}", args.path))
@@ -82,11 +120,33 @@ pub async fn file_read(args: FileReadArgs) -> Result<Value, AdkError> {
             .join("\n")
     };
 
+    // Include file size hint for files approaching the limit
+    let size_note = if file_size > MAX_FILE_SIZE_NO_RANGE / 2 && args.range.is_some() {
+        format!(" ({} KB read)", file_size / 1024)
+    } else {
+        String::new()
+    };
+
     Ok(json!({
         "content": result,
         "path": args.path,
         "total_lines": total_lines,
+        "size_note": size_note,
     }))
+}
+
+/// Estimate line count by reading the first 4 KB and extrapolating.
+async fn estimate_line_count(path: &Path) -> usize {
+    let sample_size = 4096usize;
+    match tokio::fs::read(path).await {
+        Ok(data) => {
+            let sample = &data[..sample_size.min(data.len())];
+            let lines_in_sample = sample.iter().filter(|&&b| b == b'\n').count().max(1);
+            let ratio = lines_in_sample as f64 / sample.len().max(1) as f64;
+            (data.len() as f64 * ratio) as usize
+        }
+        Err(_) => 0,
+    }
 }
 
 // ─── FileWrite ─────────────────────────────────────────────────

@@ -399,13 +399,23 @@ async fn run_turn_streaming(
 
     turn_active.store(true, Ordering::Relaxed);
 
+    // Show brief status — what we're about to do
+    eprint!("\r\u{1b}[2K  {} Connecting to {}...", "\u{2192}".dimmed(), harness.provider_mgr().current_model_name().dimmed());
+    let _ = std::io::stderr().flush();
+
     // Use enriched turn (auto-search prepends relevant memories)
     let enriched_result = harness.run_turn_enriched(input).await;
     let result = match enriched_result {
         Ok((_enriched_input, stream)) => {
+            // Clear the "connecting" status line
+            eprint!("\r\u{1b}[2K");
+            let _ = std::io::stderr().flush();
             consume_stream(harness, stream, shutting_down).await
         }
         Err(e) => {
+            // Clear the "connecting" status line before showing error
+            eprint!("\r\u{1b}[2K");
+            let _ = std::io::stderr().flush();
             println!("{} {}", "\u{2717}".red(), format!("{e}").red());
             StreamResult::default()
         }
@@ -413,7 +423,13 @@ async fn run_turn_streaming(
 
     if !result.has_output && result.pending_confirmation.is_none() {
         println!(
-            "  {} No response from {} ({}). Check your API key and network.",
+            "\n  {} No response from {} ({}).\n  \
+             Possible causes:\n  \
+             - API key is invalid or expired\n  \
+             - Network connectivity issue\n  \
+             - Request exceeded context window (file too large?)\n  \
+             - Rate limit or quota exceeded\n  \
+             Try again or check your setup with /config",
             "\u{26a0}".yellow(),
             harness.provider_mgr().current_provider(),
             harness.provider_mgr().current_model_name(),
@@ -482,8 +498,11 @@ async fn run_turn_streaming(
     turn_active.store(false, Ordering::Relaxed);
 }
 
-/// Consume an EventStream with colored output, Ctrl+C cancellation, and
-/// graceful shutdown support.
+/// Maximum time to wait for the next stream event before timing out (120 seconds).
+const STREAM_EVENT_TIMEOUT_SECS: u64 = 120;
+
+/// Consume an EventStream with colored output, Ctrl+C cancellation,
+/// stream timeout, and graceful shutdown support.
 ///
 /// Returns a StreamResult with collected data and any pending tool confirmation.
 async fn consume_stream(
@@ -494,10 +513,12 @@ async fn consume_stream(
     let mut result = StreamResult::default();
     let mut in_tool_call = false;
     let mut spinner = ThinkingSpinner::start();
+    let mut consecutive_timeouts = 0u32;
 
     loop {
         tokio::select! {
             event_result = stream.next() => {
+                consecutive_timeouts = 0; // Reset on any event
                 match event_result {
                     Some(Ok(event)) => {
                         result.has_output = true;
@@ -603,6 +624,35 @@ async fn consume_stream(
                         break;
                     }
                 }
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(STREAM_EVENT_TIMEOUT_SECS)) => {
+                consecutive_timeouts += 1;
+                spinner.stop();
+
+                if consecutive_timeouts >= 2 {
+                    // Two consecutive timeouts — the API is likely stuck
+                    harness.interrupt();
+                    println!(
+                        "\n{} API timeout: no response from {} ({}) for {}s. \
+                         Generation cancelled. You can continue chatting.",
+                        "\u{26a0}".yellow(),
+                        harness.provider_mgr().current_provider(),
+                        harness.provider_mgr().current_model_name(),
+                        STREAM_EVENT_TIMEOUT_SECS * 2,
+                    );
+                    break;
+                }
+
+                // First timeout — warn and keep waiting
+                println!(
+                    "\n  {} Still waiting for response from {} ({}s elapsed)... \
+                     Press Ctrl+C to cancel.",
+                    "\u{23f3}".yellow(),
+                    harness.provider_mgr().current_model_name(),
+                    STREAM_EVENT_TIMEOUT_SECS,
+                );
+                // Restart spinner and keep waiting
+                spinner = ThinkingSpinner::start();
             }
             _ = tokio::signal::ctrl_c() => {
                 if shutting_down.load(Ordering::Relaxed) {
