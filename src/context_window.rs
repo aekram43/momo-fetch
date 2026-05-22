@@ -77,7 +77,7 @@ impl ContextUsage {
     pub fn format_warning(&self) -> Option<String> {
         match self.warning_level() {
             ContextWarning::Critical => {
-                let window = self.context_window.unwrap();
+                let _window = self.context_window.unwrap();
                 Some(format!(
                     "{} Context CRITICAL: {} — responses may be truncated. Start a new session.",
                     "\u{26a0}".red().bold(),
