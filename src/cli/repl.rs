@@ -176,18 +176,7 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
             break;
         }
 
-        let prompt = {
-            let mode_tag = match harness.sandbox().permission_mode() {
-                crate::sandbox::PermissionMode::Strict => String::new(),
-                crate::sandbox::PermissionMode::Auto => " [auto]".to_string(),
-                crate::sandbox::PermissionMode::Yolo => " [yolo]".to_string(),
-            };
-            format!(
-                "{}{}> ",
-                harness.provider_mgr().current_model_name().dimmed(),
-                mode_tag.yellow(),
-            )
-        };
+        let prompt = "you> ".to_string();
         let readline = rl.readline(&prompt);
         match readline {
             Ok(line) => {
@@ -410,6 +399,36 @@ async fn run_turn_streaming(
             // Clear the "connecting" status line
             eprint!("\r\u{1b}[2K");
             let _ = std::io::stderr().flush();
+
+            // Print agent response header (model + context usage)
+            {
+                let mode_tag = match harness.sandbox().permission_mode() {
+                    crate::sandbox::PermissionMode::Strict => String::new(),
+                    crate::sandbox::PermissionMode::Auto => " [auto]".to_string(),
+                    crate::sandbox::PermissionMode::Yolo => " [yolo]".to_string(),
+                };
+                let context_tag = {
+                    let tokens = harness.cost_tracker().last_prompt_tokens();
+                    if tokens > 0 {
+                        let provider = harness.provider_mgr().current_provider();
+                        let model = harness.provider_mgr().current_model_name();
+                        let usage = crate::context_window::ContextUsage::new(
+                            tokens as i64, &provider, &model,
+                        );
+                        format!(" \u{00b7} {}", usage.format_status())
+                    } else {
+                        String::new()
+                    }
+                };
+                println!(
+                    "{}{}{}",
+                    harness.provider_mgr().current_model_name().bright_cyan(),
+                    context_tag.dimmed(),
+                    mode_tag.yellow(),
+                );
+                let _ = std::io::stdout().flush();
+            }
+
             consume_stream(harness, stream, shutting_down).await
         }
         Err(e) => {
@@ -421,19 +440,33 @@ async fn run_turn_streaming(
         }
     };
 
-    if !result.has_output && result.pending_confirmation.is_none() {
-        println!(
-            "\n  {} No response from {} ({}).\n  \
-             Possible causes:\n  \
-             - API key is invalid or expired\n  \
-             - Network connectivity issue\n  \
-             - Request exceeded context window (file too large?)\n  \
-             - Rate limit or quota exceeded\n  \
-             Try again or check your setup with /config",
-            "\u{26a0}".yellow(),
-            harness.provider_mgr().current_provider(),
-            harness.provider_mgr().current_model_name(),
-        );
+    if result.response_parts.is_empty() && result.pending_confirmation.is_none() {
+        if result.tool_calls.is_empty() {
+            // No events at all — likely a connection or auth issue
+            println!(
+                "\n  {} No response from {} ({})\n  \
+                 Possible causes:\n  \
+                 - API key is invalid or expired\n  \
+                 - Network connectivity issue\n  \
+                 - Request exceeded context window (file too large?)\n  \
+                 - Rate limit or quota exceeded\n  \
+                 Try again or check your setup with /config",
+                "\u{26a0}".yellow(),
+                harness.provider_mgr().current_provider().dimmed(),
+                harness.provider_mgr().current_model_name().dimmed(),
+            );
+        } else {
+            // Tool calls executed but LLM didn't generate a text response
+            let tool_count = result.tool_calls.len();
+            println!(
+                "\n  {} {} processed {} tool call(s) but didn't generate a response.\n  \
+                 This usually means context window exceeded or response was filtered.\n  \
+                 Try rephrasing or splitting the request into smaller parts.",
+                "\u{26a0}".yellow(),
+                harness.provider_mgr().current_model_name(),
+                tool_count,
+            );
+        }
     }
 
     // Handle pending tool confirmation with interactive prompt
@@ -461,6 +494,21 @@ async fn run_turn_streaming(
     // Check budget alerts
     if let Some(alert) = harness.cost_tracker().budget_alert() {
         println!("\n{}", alert.yellow());
+    }
+
+    // Check context window warnings
+    {
+        let tokens = harness.cost_tracker().last_prompt_tokens();
+        if tokens > 0 {
+            let provider = harness.provider_mgr().current_provider();
+            let model = harness.provider_mgr().current_model_name();
+            let usage = crate::context_window::ContextUsage::new(
+                tokens as i64, &provider, &model,
+            );
+            if let Some(warning) = usage.format_warning() {
+                println!("\n{}", warning);
+            }
+        }
     }
 
     // Post-turn: auto-write memory (Option A or B)
@@ -512,6 +560,8 @@ async fn consume_stream(
 ) -> StreamResult {
     let mut result = StreamResult::default();
     let mut in_tool_call = false;
+    let mut last_event_was_text = false;
+    let mut had_tool_calls = false;
     let mut spinner = ThinkingSpinner::start();
     let mut consecutive_timeouts = 0u32;
 
@@ -532,9 +582,9 @@ async fn consume_stream(
                         // Handle tool confirmation request
                         if let Some(confirm_req) = &event.actions.tool_confirmation {
                             println!(
-                                "\n  {} Tool {} requires approval: {}",
-                                "!".yellow(),
-                                confirm_req.tool_name.yellow(),
+                                "\n  {} {} requires approval: {}",
+                                "\u{26a0}".yellow(),
+                                confirm_req.tool_name.cyan(),
                                 summarize_args(&confirm_req.args),
                             );
                             let call_id = confirm_req.function_call_id.clone().unwrap_or_default();
@@ -546,22 +596,26 @@ async fn consume_stream(
                             for part in &content.parts {
                                 match part {
                                     Part::Text { text } => {
+                                        // Add separator when transitioning from tools to text
+                                        if had_tool_calls && !last_event_was_text {
+                                            println!();
+                                        }
                                         print!("{}", text);
                                         let _ = std::io::stdout().flush();
                                         in_tool_call = false;
+                                        last_event_was_text = true;
                                         result.response_parts.push(text.clone());
                                     }
                                     Part::FunctionCall { name, args, .. } => {
-                                        if in_tool_call {
-                                            println!();
-                                        }
                                         println!(
-                                            "\n  {} {}({})",
-                                            "\u{23fa}".yellow(),
-                                            name.yellow(),
+                                            "  {} {}({})",
+                                            "\u{25b8}".cyan(),
+                                            name.cyan(),
                                             summarize_args(args),
                                         );
                                         in_tool_call = true;
+                                        last_event_was_text = false;
+                                        had_tool_calls = true;
                                         result.tool_calls.push(format!("{}({})", name, summarize_args(args)));
                                     }
                                     Part::FunctionResponse { function_response, .. } => {
@@ -576,11 +630,12 @@ async fn consume_stream(
                                                 summary
                                             };
                                             println!(
-                                                "  {} {}",
-                                                "\u{2192}".dimmed(),
+                                                "    {} {}",
+                                                "\u{21b3}".dimmed(),
                                                 truncated.dimmed(),
                                             );
                                             in_tool_call = false;
+                                            last_event_was_text = false;
                                         }
                                     }
                                     _ => {}
@@ -591,7 +646,7 @@ async fn consume_stream(
                         // Check for errors in the response
                         if let Some(ref err) = event.llm_response.error_message {
                             if !err.is_empty() {
-                                println!("\n{} {}", "Error:".red(), err.red());
+                                println!("\n  {} {}", "\u{2717}".red().bold(), err.red());
                             }
                         }
 
@@ -600,11 +655,10 @@ async fn consume_stream(
                             break;
                         }
 
-                        // Restart spinner only if we just finished a tool call
-                        // (LLM will think again to process the tool response).
-                        // Don't restart if we just printed text — the LLM is
+                        // Restart spinner after tool events (LLM is thinking about
+                        // the next step). Don't restart after text — the LLM is
                         // still streaming and will send more content soon.
-                        if in_tool_call {
+                        if !last_event_was_text {
                             spinner = ThinkingSpinner::start();
                         }
 
@@ -670,11 +724,12 @@ async fn consume_stream(
         }
     }
 
-    if result.has_output {
-        println!(); // Trailing newline after response
+    if !result.response_parts.is_empty() {
+        println!(); // Trailing newline after text response
     } else if result.pending_confirmation.is_none() {
-        // No output and no confirmation — likely a connection or empty response issue
-        tracing::warn!("Turn completed with no output");
+        // No text response — distinguish between no events at all vs
+        // tool calls executed but LLM didn't generate text
+        tracing::warn!("Turn completed with no text output");
     }
 
     // Store turn summary for post-turn memory write

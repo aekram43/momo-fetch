@@ -2,6 +2,7 @@ mod agent;
 mod cli;
 mod config;
 mod context;
+mod context_window;
 mod cost;
 mod harness;
 mod mcp;

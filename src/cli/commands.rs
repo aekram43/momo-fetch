@@ -296,6 +296,16 @@ impl Command {
                     let proj = harness.cost_tracker().project_summary(&project);
                     println!("Project ({}): {}", project, proj);
                 }
+                // Show context window usage
+                let tokens = harness.cost_tracker().last_prompt_tokens();
+                if tokens > 0 {
+                    let provider = harness.provider_mgr().current_provider();
+                    let model = harness.provider_mgr().current_model_name();
+                    let usage = crate::context_window::ContextUsage::new(
+                        tokens as i64, &provider, &model,
+                    );
+                    println!("Context: {}", usage.format_status());
+                }
                 Ok(true)
             }
             Self::CostToday => {

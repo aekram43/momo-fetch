@@ -76,6 +76,8 @@ pub struct CostTracker {
     max_cost_session: Option<f64>,
     /// Daily totals (date_str -> cost)
     daily_totals: Mutex<HashMap<String, f64>>,
+    /// Prompt tokens from the most recent API response (for context window tracking).
+    last_prompt_tokens: Mutex<i32>,
 }
 
 impl CostTracker {
@@ -99,6 +101,7 @@ impl CostTracker {
             max_cost_daily: None,
             max_cost_session: None,
             daily_totals: Mutex::new(daily_totals),
+            last_prompt_tokens: Mutex::new(0),
         }
     }
 
@@ -161,6 +164,12 @@ impl CostTracker {
         *self.turn_completion_tokens.lock().unwrap() = 0;
     }
 
+    /// Get the prompt token count from the most recent API response.
+    /// This represents the actual current context window usage.
+    pub fn last_prompt_tokens(&self) -> i32 {
+        *self.last_prompt_tokens.lock().unwrap()
+    }
+
     /// Accumulate usage from a stream event.
     /// Call this for each event that has usage_metadata.
     /// Returns the estimated cost if the event had usage data.
@@ -193,6 +202,9 @@ impl CostTracker {
         *self.session_total_cost.lock().unwrap() += cost;
         *self.session_prompt_tokens.lock().unwrap() += usage.prompt_token_count as i64;
         *self.session_completion_tokens.lock().unwrap() += usage.candidates_token_count as i64;
+
+        // Track the latest prompt token count for context window awareness
+        *self.last_prompt_tokens.lock().unwrap() = usage.prompt_token_count;
 
         Some(cost)
     }
