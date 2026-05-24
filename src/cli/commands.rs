@@ -32,6 +32,8 @@ pub enum Command {
     TeamStop,
     TeamMerge,
     Permission { mode: String },
+    Clear,
+    Compact,
     Quit,
     ShellEscape { command: String },
     Unknown(String),
@@ -206,6 +208,8 @@ impl Command {
             &"permission" | &"perm" => Some(Self::Permission {
                 mode: parts.get(1).unwrap_or(&"").to_string(),
             }),
+            &"clear" => Some(Self::Clear),
+            &"compact" => Some(Self::Compact),
             _ => Some(Self::Unknown(input.to_string())),
         }
     }
@@ -1061,6 +1065,37 @@ impl Command {
                 }
                 Ok(true)
             }
+            Self::Clear => {
+                match harness.clear_session().await {
+                    Ok(new_id) => {
+                        println!(
+                            "{} Context cleared. New session: {}",
+                            "\u{2713}".green(),
+                            &new_id[..8]
+                        );
+                    }
+                    Err(e) => {
+                        println!("{} Failed to clear context: {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
+            Self::Compact => {
+                match harness.compact_session().await {
+                    Ok((event_count, new_id)) => {
+                        println!(
+                            "{} Context compacted: {} events → 1 summary (session: {})",
+                            "\u{2713}".green(),
+                            event_count,
+                            &new_id[..8]
+                        );
+                    }
+                    Err(e) => {
+                        println!("{} Failed to compact context: {e}", "\u{2717}".red());
+                    }
+                }
+                Ok(true)
+            }
             Self::Unknown(cmd) => {
                 println!("Unknown command: {cmd}");
                 println!("Type /help for available commands.");
@@ -1077,6 +1112,8 @@ impl Command {
   /models              List available providers/models
   /sessions            List past sessions
   /resume <id>         Resume a session
+  /clear               Clear all context (start fresh session)
+  /compact             Compact context (summarize into new session)
   /cost                Show session + today + project cost
   /cost today          Show today's cost
   /cost week           Show this week's cost

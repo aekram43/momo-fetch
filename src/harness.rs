@@ -680,4 +680,69 @@ impl Harness {
             );
         Ok(())
     }
+
+    /// Clear all context by starting a fresh session (deleting the old one).
+    pub async fn clear_session(&mut self) -> anyhow::Result<String> {
+        let old_id = self.current_session_id.clone();
+        let new_id = self.new_session().await?;
+        // Best-effort delete of old session
+        let _ = self.session_mgr.delete_session(&old_id).await;
+        Ok(new_id)
+    }
+
+    /// Compact context: summarize the current session events into a single
+    /// summary event in a new session.
+    pub async fn compact_session(&mut self) -> anyhow::Result<(usize, String)> {
+        let old_id = self.current_session_id.clone();
+
+        // Extract text from current session events
+        let session = self.session_mgr.get_session(&old_id).await?;
+        let events = session.events().all();
+        let event_count = events.len();
+
+        let mut summary_parts: Vec<String> = Vec::new();
+        for event in &events {
+            if let Some(content) = event.content() {
+                for part in &content.parts {
+                    if let adk_rust::Part::Text { text } = part {
+                        let truncated = if text.len() > 500 {
+                            format!("{}...", &text[..500])
+                        } else {
+                            text.clone()
+                        };
+                        let role = &content.role;
+                        summary_parts.push(format!("[{role}] {truncated}"));
+                    }
+                }
+            }
+        }
+
+        let summary_text = if summary_parts.is_empty() {
+            "Conversation was compacted but contained no text.".to_string()
+        } else {
+            format!(
+                "Summary of previous conversation ({} events):\n{}",
+                event_count,
+                summary_parts.join("\n")
+            )
+        };
+
+        // Create new session and append summary as a single event
+        let new_id = self.new_session().await?;
+
+        let summary_event = adk_rust::Event::new("compact");
+        let mut summary_event = summary_event;
+        summary_event.author = "system".to_string();
+        summary_event.set_content(adk_rust::Content::new("system").with_text(&summary_text));
+
+        self.session_mgr
+            .service()
+            .append_event(&new_id, summary_event)
+            .await?;
+
+        // Best-effort delete of old session
+        let _ = self.session_mgr.delete_session(&old_id).await;
+
+        Ok((event_count, new_id))
+    }
 }
