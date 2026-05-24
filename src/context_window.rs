@@ -21,7 +21,7 @@ pub fn context_window_size(provider: &str, model: &str) -> Option<u64> {
         "groq" => Some(128_000),
         "ollama" => Some(128_000),
         "openrouter" => Some(200_000),
-        "zai" => Some(128_000),
+        "zai" => Some(200_000),
         "custom" => Some(128_000),
         _ => None,
     }
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_zai_context_window() {
-        assert_eq!(context_window_size("zai", "GLM-5"), Some(128_000));
+        assert_eq!(context_window_size("zai", "GLM-5"), Some(200_000));
     }
 
     #[test]

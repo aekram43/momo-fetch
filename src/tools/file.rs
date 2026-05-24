@@ -39,8 +39,8 @@ pub fn clear_sandbox() {
 
 /// Maximum file size that can be read without a range parameter (256 KB).
 const MAX_FILE_SIZE_NO_RANGE: usize = 256 * 1024;
-/// Maximum file size that can be read even with a range parameter (2 MB).
-const MAX_FILE_SIZE_ABSOLUTE: usize = 2 * 1024 * 1024;
+/// Maximum file size for full reads (2 MB). Ranged reads bypass this limit.
+const MAX_FILE_SIZE_FULL_READ: usize = 2 * 1024 * 1024;
 
 /// Read file contents with optional line range.
 /// Returns content with line numbers (cat -n format).
@@ -55,7 +55,8 @@ pub struct FileReadArgs {
 /// Reads a file and returns its content with line numbers.
 /// Supports optional line range filtering (e.g., "1-50").
 /// Returns an error if the file exceeds size limits (256 KB without range,
-/// 2 MB with range) with actionable guidance.
+/// 2 MB for full reads) with actionable guidance. Ranged reads bypass the
+/// 2 MB limit to allow reading specific sections of large files.
 #[tool]
 pub async fn file_read(args: FileReadArgs) -> Result<Value, AdkError> {
     let sandbox = get_sandbox()?;
@@ -83,12 +84,12 @@ pub async fn file_read(args: FileReadArgs) -> Result<Value, AdkError> {
             total_lines,
         )));
     }
-    if file_size > MAX_FILE_SIZE_ABSOLUTE {
+    if args.range.is_none() && file_size > MAX_FILE_SIZE_FULL_READ {
         return Err(AdkError::tool(format!(
-            "file_read: '{}' is {} KB — exceeds the 2 MB absolute limit. \
-             This file is too large for the context window. \
-             Consider using grep to search for specific content, \
-             or split the file into smaller parts first.",
+            "file_read: '{}' is {} KB — exceeds the 2 MB limit for full reads. \
+             Use the \"range\" parameter to read specific sections, e.g.: \
+             range=\"1-100\". \
+             Or use grep to search for specific content.",
             args.path,
             file_size / 1024,
         )));
