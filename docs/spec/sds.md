@@ -1431,6 +1431,7 @@ impl ContextBuilder {
 │   ├── settings.json      ← Project-level config overrides
 │   ├── mcp.json           ← MCP server definitions
 │   └── skills/            ← Installed skills (SKILL.md files)
+│   ├── commands/          ← Custom slash commands (name.md files)
 ├── .agentignore           ← Sandbox exclusion rules
 ├── .kms/                  ← Knowledge bases (optional)
 │   ├── conventions/
@@ -1693,6 +1694,31 @@ Commands that mutate state return confirmation output. Commands that fail return
 > /cost
 Session: $0.0234 (1,240 in + 890 out tokens)
 Today: $0.4512 (12 sessions)
+```
+
+### 5.2.1 Custom Command Resolution
+
+Custom commands are resolved before falling through to the `Unknown` handler. Resolution flow:
+
+1. User types `/<name> [args...]`
+2. Built-in command parser attempts to match `name`
+3. If `Unknown`, `try_custom_command()` checks `.harness/commands/<name>.md`
+4. If file exists, content is read and `$ARG` is replaced with `args...`
+5. The resolved string is sent as a user message through `run_turn_streaming`
+6. If no file exists, the `Unknown` handler prints an error
+
+Built-in commands are never intercepted by custom commands (checked via `BUILTIN_COMMANDS` constant).
+
+```rust
+// Resolution (in src/cli/repl.rs)
+fn try_custom_command(input: &str, working_dir: &Path) -> Option<String> {
+    let (name, arg) = parse_command(input);
+    if BUILTIN_COMMANDS.contains(&name) { return None; }
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') { return None; }
+    let file = working_dir.join(".harness/commands").join(format!("{name}.md"));
+    let content = fs::read_to_string(file)?;
+    Some(content.replace("$ARG", arg))
+}
 ```
 
 ### 5.3 Tool Context Extension

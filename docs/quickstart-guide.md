@@ -259,7 +259,26 @@ Inside the REPL:
 | `/agent default` | Switch back to default mode |
 | `/team start <name>` | Start a team from config file |
 | `/team status` | Check team progress |
+| `/clear` | Clear all context and start fresh |
+| `/compact` | Compact context (summarize into new session) |
 | `/quit` | Exit (or Ctrl+D) |
+
+### Custom Commands
+
+Create your own slash commands by placing `.md` files in `.harness/commands/`:
+
+```bash
+mkdir -p .harness/commands
+echo 'Review this code for bugs and issues: $ARG' > .harness/commands/review.md
+```
+
+Then in the REPL:
+
+```
+you> /review src/main.rs
+```
+
+The `$ARG` placeholder is replaced with everything typed after the command name. See `/help` for a list of both built-in and custom commands.
 
 ### Team Config Files
 

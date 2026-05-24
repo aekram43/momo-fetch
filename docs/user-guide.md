@@ -19,8 +19,9 @@ Everything you need to know to use MOMO Fetch effectively.
 11. [Cost Tracking](#11-cost-tracking)
 12. [Agent Teams](#12-agent-teams)
 13. [Configuration Reference](#13-configuration-reference)
-14. [Tips & Best Practices](#14-tips--best-practices)
-15. [FAQ](#15-faq)
+14. [Custom Slash Commands](#14-custom-slash-commands)
+15. [Tips & Best Practices](#15-tips--best-practices)
+16. [FAQ](#16-faq)
 
 ---
 
@@ -263,6 +264,17 @@ secrets/
 node_modules/
 target/
 ```
+
+### Managing Context
+
+When the context window fills up, use these commands to free space:
+
+| Command | What it does |
+|---------|-------------|
+| `/clear` | Drop all conversation history and start a fresh session |
+| `/compact` | Summarize the current context into a compacted new session |
+
+`/compact` preserves a summary of the conversation so the agent retains key context, while `/clear` starts completely fresh.
 
 ---
 
@@ -844,6 +856,7 @@ Location: `<project>/.harness/`
 | `mcp.json` | MCP server definitions |
 | `skills/` | Installed skills |
 | `agents/` | Agent personality files (`.md` and `.yml`) |
+| `commands/` | Custom slash command files (`.md`) |
 | `teams/` | Team config files (`.yml`) |
 
 ### Context Files (auto-discovered)
@@ -864,7 +877,48 @@ Files closer to the project root have higher priority (override parent directori
 
 ---
 
-## 14. Tips & Best Practices
+## 14. Custom Slash Commands
+
+Define your own slash commands by placing `.md` files in `.harness/commands/`. Each file becomes a `/command` you can invoke in the REPL.
+
+### Creating a Custom Command
+
+```bash
+mkdir -p .harness/commands
+```
+
+Create `.harness/commands/review.md`:
+
+```markdown
+Review the following code for bugs, security issues, and performance: $ARG
+```
+
+Create `.harness/commands/status.md` (no argument needed):
+
+```markdown
+Summarize the current project status, recent changes, and any open issues.
+```
+
+### Using Custom Commands
+
+```
+you> /review src/auth.rs
+you> /status
+```
+
+The `$ARG` placeholder is replaced with everything typed after the command name. If no `$ARG` exists, the content is sent as-is.
+
+### Rules
+
+- Command names must be alphanumeric with dashes or underscores
+- Custom commands cannot override built-in commands (`/help`, `/model`, etc.)
+- Files must end in `.md` and be placed in `.harness/commands/`
+- Use `/help` to see both built-in and custom commands
+- Changes are picked up immediately — no restart needed
+
+---
+
+## 15. Tips & Best Practices
 
 ### For Best Results
 
@@ -1128,7 +1182,7 @@ momo-fetch --mode memory-sidecar --project /path/to/project
 
 ---
 
-## 15. FAQ
+## 16. FAQ
 
 ### How do I start testing MOMO Fetch?
 

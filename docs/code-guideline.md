@@ -100,6 +100,9 @@ This is the central construction sequence. Order matters:
 3. Enters `rustyline` loop:
    - Reads input with `<model>>` prompt
    - If slash command (`/help`, `/model`, etc.) → `Command::parse()` + `Command::execute()`
+     - If `Unknown`, tries `try_custom_command()` to resolve `.harness/commands/<name>.md`
+     - If custom command found, resolved prompt goes through `run_turn_streaming()` (full LLM pipeline)
+     - If not found, falls through to `Unknown` handler ("Unknown command" error)
    - If `!` prefix → shell escape (runs directly via `sh -c`)
    - If ` ``` ` detected → multi-line code block input
    - If `\` at end → backslash continuation
@@ -374,10 +377,44 @@ Two system prompt methods:
 - Auto-migrates schema on startup
 - Each REPL session gets a UUID; events are auto-saved by adk-runner
 - `/sessions` lists past sessions, `/resume <id>` restores one
+- `/clear` deletes current session and creates a fresh one
+- `/compact` summarizes events into a new session (delete old + create new + append summary event)
 
 ---
 
-## 10. Cost Tracking (`src/cost.rs`)
+## 10. Custom Slash Commands (`src/cli/repl.rs`)
+
+Users define custom slash commands by placing `.md` files in `.harness/commands/`.
+
+### Resolution Flow
+
+Custom commands are resolved in the REPL loop (`repl.rs`) **before** `Command::execute()`:
+
+1. User types `/<name> [args...]`
+2. `Command::parse()` returns `Command::Unknown(input)`
+3. `try_custom_command(input, working_dir)` checks `.harness/commands/<name>.md`
+4. If file exists: reads content, replaces `$ARG` with trailing text, sends through `run_turn_streaming()`
+5. If not found: falls through to `Unknown` handler (prints error)
+
+Key functions in `repl.rs`:
+
+- `try_custom_command(input, working_dir) -> Option<String>` — resolves a custom command to a prompt. Skips built-in names via `BUILTIN_COMMANDS` constant. Validates name (alphanumeric + dash/underscore only). Returns `None` if no matching file.
+- `list_custom_commands(working_dir) -> Vec<(String, String)>` — scans `.harness/commands/*.md`, returns sorted (name, first-line-description) tuples. Used by `/help` to display custom commands.
+
+### Why not a Command enum variant?
+
+`Command::execute()` returns `Result<bool>` and does not have access to `shutting_down`/`turn_active` flags needed by `run_turn_streaming()`. Intercepting in the REPL loop lets custom commands go through the full streaming pipeline (memory enrichment, cost tracking, tool confirmations, auto-memory write) without duplicating logic.
+
+### Constraints
+
+- Custom commands cannot override built-in commands (`BUILTIN_COMMANDS` bypass)
+- Name validation prevents path traversal (only `[a-zA-Z0-9_-]` allowed)
+- Commands are discovered at invocation time — no restart needed
+- `$ARG` is replaced with empty string when no argument is provided
+
+---
+
+## 11. Cost Tracking (`src/cost.rs`)
 
 - Records token usage from each LLM response event's `usage_metadata`
 - Persists to `~/.config/momo-fetch/cost.json`
@@ -387,7 +424,7 @@ Two system prompt methods:
 
 ---
 
-## 11. MCP Integration (`src/mcp/mod.rs`)
+## 12. MCP Integration (`src/mcp/mod.rs`)
 
 ### Dual Transport Support
 
@@ -482,7 +519,7 @@ rmcp = { path = "patches/rmcp-1.6.0" }
 
 ---
 
-## 12. Skill System (`src/skill/mod.rs`)
+## 13. Skill System (`src/skill/mod.rs`)
 
 - Discovery: scans `.skills/`, `.claude/skills/`, `.harness/skills/`
 - Uses `adk_skill::SkillIndex` for SKILL.md parsing and `whenToUse` matching
@@ -493,7 +530,7 @@ rmcp = { path = "patches/rmcp-1.6.0" }
 
 ---
 
-## 13. Sub-Agent Orchestration (`src/tools/task.rs`)
+## 14. Sub-Agent Orchestration (`src/tools/task.rs`)
 
 - `Task` tool delegates subtasks to isolated sub-agents
 - Recursion depth tracked via thread-local `TaskContext` (max 3 levels)
@@ -503,7 +540,7 @@ rmcp = { path = "patches/rmcp-1.6.0" }
 
 ---
 
-## 14. Agent Teams (`src/team/mod.rs`)
+## 15. Agent Teams (`src/team/mod.rs`)
 
 - File-based mailbox for inter-agent messaging (`.harness/mailbox/`)
 - Workers spawned as separate `momo-fetch` processes in tmux panes
@@ -519,7 +556,7 @@ rmcp = { path = "patches/rmcp-1.6.0" }
 
 ---
 
-## 15. Agent Personalities (`src/agent/`)
+## 16. Agent Personalities (`src/agent/`)
 
 ### Agent Module Structure
 
@@ -571,7 +608,7 @@ Thread-local `OrchestratorContext` (same pattern as `TaskContext`) provides acce
 - Optional git worktrees for isolation
 ---
 
-## 16. Configuration (`src/config/mod.rs`)
+## 17. Configuration (`src/config/mod.rs`)
 
 ### Settings Hierarchy
 
@@ -597,7 +634,7 @@ pub struct HarnessConfig {
 
 ---
 
-## 17. Key Conventions
+## 18. Key Conventions
 
 ### Error Handling
 
@@ -630,7 +667,7 @@ tokio::fs::rename(&tmp, &path).await?;
   clear_sandbox();
   ```
 - Session tests use `InMemorySessionService`
-- Total: 191 tests across all modules
+- Total: 280 tests across all modules
 
 ### UTF-8 Safe String Truncation
 

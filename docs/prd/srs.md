@@ -444,6 +444,8 @@ The system SHALL provide an interactive REPL using `rustyline` with:
 | `/models` | List available models from current provider |
 | `/sessions` | List past sessions |
 | `/resume <id>` | Resume a previous session |
+| `/clear` | Clear all context and start a fresh session |
+| `/compact` | Summarize current context into a compacted new session |
 | `/cost` | Show current session token usage and cost |
 | `/permission [mode]` | Show or switch permission mode (strict/auto/yolo) |
 | `/mem <query>` | Search memory vault |
@@ -459,7 +461,29 @@ The system SHALL provide an interactive REPL using `rustyline` with:
 | `/team stop` | Stop agent team |
 | `/quit` | Exit REPL |
 
-#### 3.5.2 One-Shot Mode (FR-CLI-OneShot)
+#### 3.5.2 Custom Slash Commands (FR-CLI-Custom)
+
+##### FR-CC-01: User-defined slash commands
+
+The system SHALL support user-defined custom slash commands via `.md` files placed in `.harness/commands/`:
+
+- Each `.md` file defines a command named after the file (e.g., `review.md` becomes `/review`)
+- The file content is used as the prompt sent to the agent as a user message
+- The `$ARG` placeholder SHALL be replaced with any text following the command name
+- Command names SHALL only contain alphanumeric characters, dashes, and underscores
+- Custom commands SHALL NOT override built-in commands
+- Custom commands SHALL be listed in `/help` output under a "Custom commands" heading
+- Commands are discovered at invocation time — no restart required
+
+Example:
+
+```
+.harness/commands/review.md → /review src/main.rs
+Content: "Review this code for bugs: $ARG"
+Prompt sent: "Review this code for bugs: src/main.rs"
+```
+
+#### 3.5.3 One-Shot Mode (FR-CLI-OneShot)
 
 ##### FR-CO-01: Single prompt execution
 
@@ -1059,6 +1083,7 @@ pub struct FilesystemSandbox {
 | `.harness/settings.json` | Project-level | Project-specific overrides |
 | `.harness/mcp.json` | Project-level | MCP server definitions |
 | `.harness/skills/` | Project-level | Installed skills |
+| `.harness/commands/` | Project-level | User-defined custom slash commands |
 | `.agentignore` | Project-level | Sandbox exclusion rules |
 | `AGENTS.md` / `CLAUDE.md` | Project-level | Agent context injection |
 | `SOUL.md` | Project-level | Agent personality/identity injection |

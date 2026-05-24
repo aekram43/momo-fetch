@@ -188,6 +188,8 @@ Project (my-app): $1.2304 (3 sessions)
 |---------|-------------|
 | `/sessions` | List all past sessions (most recent first) |
 | `/resume <id>` | Resume a previous session |
+| `/clear` | Clear all context and start a fresh session |
+| `/compact` | Compact context — summarize into a new session |
 | `/permission` | Show current permission mode |
 | `/permission <mode>` | Switch mode: strict, auto, or yolo (`/perm` shortcut) |
 
@@ -349,6 +351,36 @@ claude-sonnet-4-20250514> /agent default
 ✓ Switched to default mode (no agent personality)
 ```
 
+### Custom Slash Commands
+
+Place `.md` files in `.harness/commands/` to create your own slash commands.
+
+```bash
+mkdir -p .harness/commands
+```
+
+Example — `.harness/commands/review.md`:
+
+```markdown
+Review the following code for bugs, security issues, and performance: $ARG
+```
+
+Then invoke in the REPL:
+
+```
+claude-sonnet-4-20250514> /review src/main.rs
+```
+
+`$ARG` is replaced with everything typed after the command name. If no `$ARG` placeholder exists, the content is sent as-is.
+
+| Rule | Detail |
+|------|--------|
+| Names | Alphanumeric, dash, underscore only |
+| Location | `.harness/commands/<name>.md` |
+| Placeholder | `$ARG` — replaced with trailing text |
+| Built-in bypass | Built-in commands (`/help`, `/model`, etc.) cannot be overridden |
+| Discovery | `/help` lists custom commands under a "Custom commands" heading |
+
 ---
 
 ## Permission Modes
@@ -502,5 +534,6 @@ Project instructions and agent personality files auto-discovered and injected in
 | MCP config | `<project>/.harness/mcp.json` |
 | Skills | `<project>/.harness/skills/`, `<project>/.skills/`, `<project>/.claude/skills/` |
 | Agent personalities | `<project>/.harness/agents/` |
+| Custom commands | `<project>/.harness/commands/` |
 | Team configs | `<project>/.harness/teams/` |
 | Knowledge bases | `<project>/.kms/` |
