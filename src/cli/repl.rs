@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -189,6 +190,33 @@ pub async fn run(harness: &mut Harness) -> anyhow::Result<()> {
 
                 // Check for slash commands
                 if let Some(cmd) = super::commands::Command::parse(trimmed) {
+                    // For Unknown commands, try to resolve as a custom command first
+                    if let super::commands::Command::Unknown(_) = cmd {
+                        let working_dir = harness.sandbox().root();
+                        if let Some(resolved_prompt) = try_custom_command(trimmed, working_dir) {
+                            if resolved_prompt.trim().is_empty() {
+                                println!(
+                                    "  {} Custom command resolved to empty prompt.",
+                                    "\u{26a0}".yellow()
+                                );
+                                continue;
+                            }
+                            run_turn_streaming(
+                                harness,
+                                &resolved_prompt,
+                                &shutting_down,
+                                &turn_active,
+                            )
+                            .await;
+                            if shutting_down.load(Ordering::Relaxed) {
+                                println!("Goodbye!");
+                                break;
+                            }
+                            continue;
+                        }
+                        // Not a custom command — fall through to Unknown handler
+                    }
+
                     match cmd.execute(harness).await {
                         Ok(true) => continue,
                         Ok(false) => {
@@ -802,5 +830,236 @@ fn summarize_response(response: &serde_json::Value) -> String {
         inner.clone()
     } else {
         s
+    }
+}
+
+// ─── Custom slash command resolution ───────────────────────────
+
+/// Built-in command names that should never be checked against `.harness/commands/`.
+const BUILTIN_COMMANDS: &[&str] = &[
+    "help", "quit", "exit", "model", "provider", "models",
+    "sessions", "resume", "cost", "mem", "kms", "skill",
+    "mcp", "key", "agent", "team", "permission", "perm",
+    "clear", "compact",
+];
+
+/// Try to resolve a slash command input as a user-defined custom command.
+///
+/// Looks for `.harness/commands/{name}.md` relative to `working_dir`.
+/// If found, reads the file and replaces `$ARG` with the trailing text.
+///
+/// Returns `Some(resolved_prompt)` if a matching file exists, `None` otherwise.
+pub(crate) fn try_custom_command(input: &str, working_dir: &Path) -> Option<String> {
+    let input = input.trim();
+    if !input.starts_with('/') {
+        return None;
+    }
+
+    let after_slash = &input[1..];
+    let (name, arg) = match after_slash.find(' ') {
+        Some(pos) => (&after_slash[..pos], after_slash[pos + 1..].trim()),
+        None => (after_slash, ""),
+    };
+
+    if name.is_empty() {
+        return None;
+    }
+
+    // Never intercept built-in commands
+    if BUILTIN_COMMANDS.contains(&name) {
+        return None;
+    }
+
+    // Only allow safe command names (alphanumeric, dash, underscore)
+    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+
+    let cmd_file = working_dir
+        .join(".harness")
+        .join("commands")
+        .join(format!("{name}.md"));
+
+    if !cmd_file.exists() {
+        return None;
+    }
+
+    let content = match std::fs::read_to_string(&cmd_file) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "{} Failed to read custom command '{name}': {e}",
+                "\u{2717}".red()
+            );
+            return None;
+        }
+    };
+
+    let resolved = if arg.is_empty() {
+        content.replace("$ARG", "")
+    } else {
+        content.replace("$ARG", arg)
+    };
+
+    Some(resolved)
+}
+
+/// List available custom commands in `.harness/commands/`.
+///
+/// Returns a sorted list of `(name, description)` tuples where the description
+/// is extracted from the first non-empty, non-comment line of the markdown file.
+pub(crate) fn list_custom_commands(working_dir: &Path) -> Vec<(String, String)> {
+    let commands_dir = working_dir.join(".harness").join("commands");
+    if !commands_dir.exists() {
+        return Vec::new();
+    }
+
+    let Ok(entries) = std::fs::read_dir(&commands_dir) else {
+        return Vec::new();
+    };
+
+    let mut commands: Vec<(String, String)> = entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension()?.to_str()? != "md" {
+                return None;
+            }
+            let name = path.file_stem()?.to_str()?.to_string();
+            let content = std::fs::read_to_string(&path).ok()?;
+            let description = content
+                .lines()
+                .find(|line| {
+                    let trimmed = line.trim();
+                    !trimmed.is_empty() && !trimmed.starts_with("<!--")
+                })
+                .unwrap_or("(custom command)")
+                .trim()
+                .to_string();
+            let desc = if description.len() > 60 {
+                let end = description.ceil_char_boundary(57);
+                format!("{}...", &description[..end])
+            } else {
+                description
+            };
+            Some((name, desc))
+        })
+        .collect();
+
+    commands.sort_by(|a, b| a.0.cmp(&b.0));
+    commands
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_try_custom_command_basic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let commands_dir = tmp.path().join(".harness").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(commands_dir.join("review.md"), "Review this code: $ARG").unwrap();
+
+        let result = try_custom_command("/review src/main.rs", tmp.path());
+        assert_eq!(
+            result,
+            Some("Review this code: src/main.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn test_try_custom_command_no_arg() {
+        let tmp = tempfile::tempdir().unwrap();
+        let commands_dir = tmp.path().join(".harness").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(commands_dir.join("review.md"), "Review this code: $ARG").unwrap();
+
+        let result = try_custom_command("/review", tmp.path());
+        assert_eq!(result, Some("Review this code: ".to_string()));
+    }
+
+    #[test]
+    fn test_try_custom_command_no_placeholder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let commands_dir = tmp.path().join(".harness").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(commands_dir.join("status.md"), "Summarize current project status").unwrap();
+
+        let result = try_custom_command("/status", tmp.path());
+        assert_eq!(
+            result,
+            Some("Summarize current project status".to_string())
+        );
+    }
+
+    #[test]
+    fn test_try_custom_command_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = try_custom_command("/nonexistent", tmp.path());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_try_custom_command_no_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = try_custom_command("/anything", tmp.path());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_try_custom_command_builtin_bypass() {
+        let tmp = tempfile::tempdir().unwrap();
+        let commands_dir = tmp.path().join(".harness").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(commands_dir.join("help.md"), "This should not be used").unwrap();
+
+        let result = try_custom_command("/help", tmp.path());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_try_custom_command_not_slash() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(try_custom_command("hello", tmp.path()), None);
+    }
+
+    #[test]
+    fn test_try_custom_command_invalid_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let commands_dir = tmp.path().join(".harness").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(commands_dir.join("bad cmd.md"), "content").unwrap();
+
+        assert_eq!(try_custom_command("/bad cmd", tmp.path()), None);
+        assert_eq!(try_custom_command("/bad/cmd", tmp.path()), None);
+    }
+
+    #[test]
+    fn test_list_custom_commands() {
+        let tmp = tempfile::tempdir().unwrap();
+        let commands_dir = tmp.path().join(".harness").join("commands");
+        fs::create_dir_all(&commands_dir).unwrap();
+        fs::write(commands_dir.join("review.md"), "Review code for bugs").unwrap();
+        fs::write(commands_dir.join("test.md"), "Write tests for: $ARG").unwrap();
+        fs::write(
+            commands_dir.join("deploy.md"),
+            "<!-- deploy command -->\nDeploy the project",
+        )
+        .unwrap();
+
+        let cmds = list_custom_commands(tmp.path());
+        assert_eq!(cmds.len(), 3);
+        assert_eq!(cmds[0].0, "deploy");
+        assert_eq!(cmds[1].0, "review");
+        assert_eq!(cmds[2].0, "test");
+    }
+
+    #[test]
+    fn test_list_custom_commands_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cmds = list_custom_commands(tmp.path());
+        assert!(cmds.is_empty());
     }
 }

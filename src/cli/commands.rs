@@ -221,6 +221,17 @@ impl Command {
         match self {
             Self::Help => {
                 println!("{}", Self::help_text());
+
+                // List custom commands from .harness/commands/
+                let custom_commands =
+                    super::repl::list_custom_commands(harness.sandbox().root());
+                if !custom_commands.is_empty() {
+                    println!("\n  Custom commands (from .harness/commands/):");
+                    for (name, desc) in &custom_commands {
+                        println!("  /{name:<19} {desc}");
+                    }
+                }
+
                 Ok(true)
             }
             Self::Quit => Ok(false),
