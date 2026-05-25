@@ -66,7 +66,8 @@ impl ProviderManager {
                 let client = OpenRouterClient::new(OpenRouterConfig::new(&key, &model))?;
                 ("openrouter".into(), model, Arc::new(client))
             } else if let Ok(key) = SecretStore::get("zai") {
-                let model = "GLM-5".to_string();
+                let model = std::env::var("LLM_MODEL")
+                    .unwrap_or_else(|_| "GLM-5".to_string());
                 let base_url = std::env::var("ZAI_LLM_URL")
                     .unwrap_or_else(|_| "https://api.z.ai/api/coding/paas/v4".to_string());
                 let config = OpenAICompatibleConfig::new(&key, &model)
