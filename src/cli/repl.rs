@@ -561,7 +561,11 @@ async fn run_turn_streaming(
             summary
         });
 
-        match harness.memory_sidecar().write_turn_memory_option_a(&turn_summary) {
+        match harness.memory_sidecar().write_turn_memory(
+            &turn_summary,
+            harness.provider_mgr(),
+            Some(&harness.mailbox_path()),
+        ) {
             Ok(memcell_ref) => {
                 tracing::debug!("Auto-wrote MemCell: {memcell_ref}");
             }

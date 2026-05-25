@@ -83,12 +83,17 @@ pub struct MemorySettings {
     pub sidecar_model: Option<String>,
     /// Sidecar provider (used when sidecar_model is set).
     pub sidecar_provider: Option<String>,
+    /// MemCell threshold to trigger auto-consolidate (clusters + profile).
+    /// Set to 0 to disable auto-consolidate.
+    #[serde(default = "default_consolidate_threshold")]
+    pub consolidate_threshold: usize,
 }
 
 fn default_true() -> bool { true }
 fn default_search_mode() -> String { "grep_llm".into() }
 fn default_max_results() -> usize { 5 }
 fn default_extract_threshold() -> usize { 10 }
+fn default_consolidate_threshold() -> usize { 30 }
 
 impl Default for MemorySettings {
     fn default() -> Self {
@@ -100,6 +105,7 @@ impl Default for MemorySettings {
             extract_threshold: default_extract_threshold(),
             sidecar_model: None,
             sidecar_provider: None,
+            consolidate_threshold: default_consolidate_threshold(),
         }
     }
 }

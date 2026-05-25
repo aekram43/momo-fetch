@@ -35,6 +35,7 @@ Options:
       --provider <NAME>       Override provider (anthropic, openai, deepseek, groq, ollama, openrouter, zai, custom)
       --project <PATH>        Working directory (default: current directory)
       --permission <MODE>     Permission mode: strict (default), auto, yolo
+      --mode <MODE>           Run mode: default (repl) or memory-sidecar
       --resume <SESSION_ID>   Resume a previous session
       --test-mcp              Test MCP server connections and exit
   -h, --help                  Show help
@@ -223,6 +224,47 @@ Memory Vault Status:
   Reflections: 1
 
 Vault path: /path/to/project/memory-vault
+```
+
+The vault auto-populates higher-level tables at configurable thresholds:
+- **Auto-extract** (every 10 MemCells): creates events, foresights, episodes
+- **Auto-consolidate** (every 30 MemCells): clusters related MemCells, updates profiles
+
+Configure thresholds in `.harness/settings.json`:
+```json
+{
+  "memory": {
+    "extract_threshold": 10,
+    "consolidate_threshold": 30
+  }
+}
+```
+
+#### Memory Sidecar Options
+
+Memory extraction has three modes, selected via config:
+
+| Option | Config | Behavior | Cost |
+|--------|--------|----------|------|
+| A (default) | `sidecar_model: null` | TF-IDF keyword extraction | $0 |
+| B | `sidecar_model: "deepseek-chat"` | Direct LLM call for extraction | ~$0.001/turn |
+| C | `--mode memory-sidecar` | Separate process via Mailbox IPC | Varies |
+
+Option B and C automatically fall back to Option A on any error.
+
+**Option B config:**
+```json
+{
+  "memory": {
+    "sidecar_model": "deepseek-chat",
+    "sidecar_provider": "deepseek"
+  }
+}
+```
+
+**Option C — run sidecar in a separate terminal:**
+```bash
+momo-fetch --mode memory-sidecar --project /path/to/project
 ```
 
 The agent interacts with the vault via tools (`mem_write`, `mem_search`, etc.) — you don't need to run vault commands manually.
@@ -531,6 +573,7 @@ Project instructions and agent personality files auto-discovered and injected in
 | Cost data | `~/Library/Application Support/momo-fetch/cost.json` |
 | REPL history | `~/.config/momo-fetch/history.txt` |
 | Memory vault | `<project>/memory-vault/` |
+| Sidecar mailbox | `<project>/.harness/mailbox/` |
 | MCP config | `<project>/.harness/mcp.json` |
 | Skills | `<project>/.harness/skills/`, `<project>/.skills/`, `<project>/.claude/skills/` |
 | Agent personalities | `<project>/.harness/agents/` |

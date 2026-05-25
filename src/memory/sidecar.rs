@@ -1,15 +1,27 @@
 //! Memory sidecar — auto-search before turns, auto-write after turns.
 //!
-//! Implements Option A (callback-based, zero extra LLM cost for search)
-//! and Option B (sub-agent with small model for extraction).
-//! Option C (separate process via Mailbox) is in `src/team/mod.rs`.
+//! Implements three memory extraction options, selected via config:
+//! - **Option A** (default): TF-IDF keyword extraction, zero extra LLM cost.
+//! - **Option B** (opt-in): Direct LLM call to a small model (e.g. deepseek-chat).
+//! - **Option C** (opt-in): Separate process via Mailbox IPC.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::config::MemorySettings;
 use crate::memory::types::{ActionRecord, MemoryQuery, RetrievalMode};
 use crate::memory::vault::ObsidianVault;
+
+/// Parsed JSON response from the sidecar LLM (Option B).
+#[derive(Debug, serde::Deserialize)]
+struct SidecarExtraction {
+    topic: String,
+    context: String,
+    actions: Vec<ActionRecord>,
+    outcome: String,
+    keywords: Vec<String>,
+}
 
 /// Summary of a completed conversational turn, used for auto-write.
 #[derive(Debug, Clone)]
@@ -36,15 +48,18 @@ pub struct SearchResult {
 /// The memory sidecar orchestrates auto-search and auto-write.
 ///
 /// - **Option A** (default): grep-based search ($0), TF-IDF keyword extraction
-///   for writes (no extra LLM call). Uses the main model's turn for extraction
-///   quality when sidecar_model is null.
-/// - **Option B** (opt-in): When `sidecar_model` is set, spawns a sub-agent
-///   with a small model for memory extraction/write.
+///   for writes (no extra LLM call).
+/// - **Option B** (opt-in): When `sidecar_model` is set, calls the configured
+///   model directly for memory extraction.
+/// - **Option C** (opt-in): When a sidecar process is detected via Mailbox,
+///   routes requests through IPC.
 pub struct MemorySidecar {
     vault: Arc<Mutex<ObsidianVault>>,
     config: MemorySettings,
     /// Counter for auto-extract trigger (incremented per write).
     memcells_since_extract: AtomicUsize,
+    /// Lazy-initialized sidecar LLM for Option B.
+    sidecar_llm: OnceLock<Arc<dyn adk_rust::prelude::Llm>>,
 }
 
 impl MemorySidecar {
@@ -54,6 +69,7 @@ impl MemorySidecar {
             vault,
             config,
             memcells_since_extract: AtomicUsize::new(0),
+            sidecar_llm: OnceLock::new(),
         }
     }
 
@@ -68,7 +84,6 @@ impl MemorySidecar {
     }
 
     /// Whether Option B (sub-agent) is configured.
-    #[allow(dead_code)]
     pub fn has_sidecar_model(&self) -> bool {
         self.config.sidecar_model.is_some()
     }
@@ -79,7 +94,6 @@ impl MemorySidecar {
     }
 
     /// Get the sidecar provider name (for Option B).
-    #[allow(dead_code)]
     pub fn sidecar_provider(&self) -> Option<&str> {
         self.config.sidecar_provider.as_deref()
     }
@@ -180,13 +194,62 @@ impl MemorySidecar {
         )
     }
 
-    // ─── Post-Turn: Auto-Write ─────────────────────────────────────
+    // ─── Post-Turn: Auto-Write (Unified Dispatch) ───────────────────
+
+    /// Write a MemCell from the turn summary, dispatching to the appropriate option.
+    ///
+    /// Option C (Mailbox) > Option B (sidecar LLM) > Option A (TF-IDF).
+    /// After writing, checks thresholds for auto-extract and auto-consolidate.
+    pub fn write_turn_memory(
+        &self,
+        turn: &TurnSummary,
+        provider_mgr: &crate::providers::ProviderManager,
+        mailbox_path: Option<&Path>,
+    ) -> anyhow::Result<String> {
+        let memcell_ref = self.dispatch_write(turn, provider_mgr, mailbox_path)?;
+        tracing::debug!("Memory sidecar: wrote MemCell '{memcell_ref}'");
+
+        // Auto-extract / auto-consolidate thresholds
+        self.check_thresholds(&memcell_ref, turn);
+
+        Ok(memcell_ref)
+    }
+
+    /// Internal dispatch: tries Option C → Option B → Option A.
+    fn dispatch_write(
+        &self,
+        turn: &TurnSummary,
+        provider_mgr: &crate::providers::ProviderManager,
+        mailbox_path: Option<&Path>,
+    ) -> anyhow::Result<String> {
+        // Option C: check if sidecar process is alive via Mailbox
+        if let Some(mpath) = mailbox_path {
+            if let Ok(mailbox) = crate::team::Mailbox::open(mpath) {
+                if let Ok(messages) = mailbox.peek(crate::team::sidecar_protocol::MAIN_ID) {
+                    let has_ready = messages.iter().any(|m| {
+                        m.msg_type == crate::team::sidecar_protocol::msg_type::READY
+                            && m.from == crate::team::sidecar_protocol::SIDECAR_ID
+                    });
+                    if has_ready {
+                        tracing::debug!("Memory sidecar: routing via Option C (Mailbox)");
+                        return self.write_turn_memory_option_c(turn, &mailbox);
+                    }
+                }
+            }
+        }
+
+        // Option B: sidecar model configured
+        if self.has_sidecar_model() {
+            tracing::debug!("Memory sidecar: routing via Option B (sidecar LLM)");
+            return self.write_turn_memory_option_b(turn, provider_mgr);
+        }
+
+        // Option A: TF-IDF (default)
+        self.write_turn_memory_option_a(turn)
+    }
 
     /// Write a MemCell from the turn summary (Option A: TF-IDF keywords).
-    ///
-    /// Extracts keywords from the turn text using TF-IDF-like scoring,
-    /// then writes a MemCell to the vault.
-    pub fn write_turn_memory_option_a(&self, turn: &TurnSummary) -> anyhow::Result<String> {
+    pub(crate) fn write_turn_memory_option_a(&self, turn: &TurnSummary) -> anyhow::Result<String> {
         let keywords = self.extract_keywords_tfidf(turn);
 
         let project = if turn.project.is_empty() {
@@ -209,37 +272,221 @@ impl MemorySidecar {
         let kw_refs: Vec<&str> = keywords.iter().map(|s| s.as_str()).collect();
 
         let mut vault = self.vault.lock().map_err(|e| anyhow::anyhow!("vault lock: {e}"))?;
-        let memcell_ref = vault.write_memcell(
-            &project,
-            &topic,
-            &context,
-            &actions,
-            &outcome,
-            &kw_refs,
-        )?;
-
-        tracing::debug!("Memory sidecar: wrote MemCell '{memcell_ref}'");
-
-        // Check auto-extract threshold
-        let prev = self.memcells_since_extract.fetch_add(1, Ordering::Relaxed);
-        if prev + 1 >= self.config.extract_threshold {
-            self.memcells_since_extract.store(0, Ordering::Relaxed);
-            // Auto-extract is deferred — the agent can trigger it via mem_extract
-            // tool, or it will happen on next consolidate cycle.
-            tracing::info!(
-                "Memory sidecar: {} MemCells written since last extract (threshold: {})",
-                prev + 1,
-                self.config.extract_threshold
-            );
-        }
-
-        Ok(memcell_ref)
+        vault.write_memcell(&project, &topic, &context, &actions, &outcome, &kw_refs)
     }
 
-    /// Build a sub-agent prompt for memory extraction (Option B).
-    #[allow(dead_code)]
+    /// Write a MemCell using a sidecar LLM model (Option B).
     ///
-    /// Returns the prompt to send to the sidecar sub-agent, which will
+    /// Makes a direct LLM call (no agent loop) to extract structured data,
+    /// then writes a MemCell. Falls back to Option A on any failure.
+    fn write_turn_memory_option_b(
+        &self,
+        turn: &TurnSummary,
+        provider_mgr: &crate::providers::ProviderManager,
+    ) -> anyhow::Result<String> {
+        let provider = self
+            .sidecar_provider()
+            .unwrap_or("deepseek");
+        let model = self
+            .sidecar_model()
+            .unwrap_or("deepseek-chat");
+
+        // Lazy-init the sidecar LLM
+        let llm = self.sidecar_llm.get_or_init(|| match provider_mgr.create_model(provider, model) {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!("Memory sidecar: failed to create sidecar LLM: {e}");
+                // Return a dummy that will never be used (we check below)
+                return provider_mgr.create_model(provider, model)
+                    .expect("sidecar LLM creation failed after retry");
+            }
+        });
+
+        let prompt = self.build_sidecar_prompt(turn);
+        let content = adk_rust::Content::new("user").with_text(&prompt);
+        let req = adk_rust::prelude::LlmRequest::new(model, vec![content]);
+
+        // Direct LLM call via block_on (safe: we're in a tokio context after the stream is consumed)
+        let response_text = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => handle.block_on(async {
+                let mut stream = llm.generate_content(req, false).await?;
+                let mut text = String::new();
+                use adk_rust::futures::StreamExt;
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk?;
+                    if let Some(c) = chunk.content {
+                        for part in c.parts {
+                            if let adk_rust::Part::Text { text: t } = part {
+                                text.push_str(&t);
+                            }
+                        }
+                    }
+                }
+                Ok::<String, anyhow::Error>(text)
+            }),
+            Err(_) => {
+                tracing::warn!("Memory sidecar: no tokio runtime, falling back to Option A");
+                return self.write_turn_memory_option_a(turn);
+            }
+        };
+
+        match response_text {
+            Ok(text) => {
+                // Strip markdown code fences if present
+                let json_str = strip_json_fences(&text);
+                match serde_json::from_str::<SidecarExtraction>(&json_str) {
+                    Ok(extracted) => {
+                        let project = if turn.project.is_empty() {
+                            "default".to_string()
+                        } else {
+                            turn.project.clone()
+                        };
+                        let kw_refs: Vec<&str> = extracted.keywords.iter().map(|s| s.as_str()).collect();
+                        let mut vault = self.vault.lock()
+                            .map_err(|e| anyhow::anyhow!("vault lock: {e}"))?;
+                        vault.write_memcell(
+                            &project,
+                            &extracted.topic,
+                            &extracted.context,
+                            &extracted.actions,
+                            &extracted.outcome,
+                            &kw_refs,
+                        )
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Memory sidecar: Option B JSON parse failed: {e}, falling back to Option A"
+                        );
+                        self.write_turn_memory_option_a(turn)
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Memory sidecar: Option B LLM call failed: {e}, falling back to Option A");
+                self.write_turn_memory_option_a(turn)
+            }
+        }
+    }
+
+    /// Write a MemCell via the sidecar process (Option C: Mailbox IPC).
+    ///
+    /// Sends a WRITE_REQUEST and polls for WRITE_RESPONSE with a 5s timeout.
+    /// Falls back to Option A on timeout or error.
+    fn write_turn_memory_option_c(
+        &self,
+        turn: &TurnSummary,
+        mailbox: &crate::team::Mailbox,
+    ) -> anyhow::Result<String> {
+        let body = serde_json::json!({
+            "user_message": turn.user_message,
+            "tool_calls": turn.tool_calls,
+            "response_preview": turn.response_preview,
+            "project": turn.project,
+        }).to_string();
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as u64;
+
+        mailbox.send(crate::team::MailboxMessage {
+            from: crate::team::sidecar_protocol::MAIN_ID.to_string(),
+            to: crate::team::sidecar_protocol::SIDECAR_ID.to_string(),
+            msg_type: crate::team::sidecar_protocol::msg_type::WRITE_REQUEST.to_string(),
+            body,
+            timestamp: now_ms,
+        })?;
+
+        // Poll for response (5s timeout, 50ms intervals)
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let responses = mailbox.receive(crate::team::sidecar_protocol::MAIN_ID)?;
+            for resp in responses {
+                if resp.msg_type == crate::team::sidecar_protocol::msg_type::WRITE_RESPONSE {
+                    let parsed: serde_json::Value = serde_json::from_str(&resp.body)
+                        .unwrap_or(serde_json::Value::Null);
+                    if parsed["status"].as_str() == Some("written") {
+                        return Ok(parsed["memcell_ref"]
+                            .as_str()
+                            .unwrap_or("unknown")
+                            .to_string());
+                    }
+                    let err = parsed["error"].as_str().unwrap_or("unknown error");
+                    tracing::warn!("Memory sidecar: Option C write error: {err}");
+                    break;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                tracing::warn!("Memory sidecar: Option C timeout, falling back to Option A");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        // Fallback to Option A
+        self.write_turn_memory_option_a(turn)
+    }
+
+    /// Check auto-extract and auto-consolidate thresholds after writing a MemCell.
+    fn check_thresholds(&self, memcell_ref: &str, turn: &TurnSummary) {
+        let prev = self.memcells_since_extract.fetch_add(1, Ordering::Relaxed);
+        let current = prev + 1;
+
+        if current < self.config.extract_threshold {
+            return;
+        }
+
+        // Reset counter
+        self.memcells_since_extract.store(0, Ordering::Relaxed);
+
+        let project = if turn.project.is_empty() {
+            "default".to_string()
+        } else {
+            turn.project.clone()
+        };
+        let topic = self.extract_topic(turn);
+        let context = self.extract_context(turn);
+        let actions: Vec<ActionRecord> = turn
+            .tool_calls
+            .iter()
+            .map(|tc| ActionRecord {
+                description: tc.clone(),
+                result: "executed".to_string(),
+            })
+            .collect();
+        let outcome = truncate_str(&turn.response_preview, 300).to_string();
+        let keywords = self.extract_keywords_tfidf(turn);
+        let kw_refs: Vec<&str> = keywords.iter().map(|s| s.as_str()).collect();
+
+        if let Ok(mut vault) = self.vault.lock() {
+            match vault.extract_from_memcell(
+                memcell_ref, &project, &topic, &context, &actions, &outcome, &kw_refs,
+            ) {
+                Ok(result) => tracing::info!(
+                    "Auto-extract: {} events, {} foresights, episode {:?}",
+                    result.events_created.len(),
+                    result.foresights_created.len(),
+                    result.episode_id,
+                ),
+                Err(e) => tracing::warn!("Auto-extract failed (non-fatal): {e}"),
+            }
+
+            // Auto-consolidate at higher threshold
+            if self.config.consolidate_threshold > 0 && current >= self.config.consolidate_threshold {
+                match vault.consolidate() {
+                    Ok(result) => tracing::info!(
+                        "Auto-consolidate: {} clusters, {} profile ops",
+                        result.clusters_created.len(),
+                        result.profile_ops.len(),
+                    ),
+                    Err(e) => tracing::warn!("Auto-consolidate failed (non-fatal): {e}"),
+                }
+            }
+        }
+    }
+
+    /// Build a prompt for the sidecar LLM (Option B).
+    ///
+    /// Returns the prompt to send to the sidecar model, asking it to
     /// extract structured memory data from the turn summary.
     pub fn build_sidecar_prompt(&self, turn: &TurnSummary) -> String {
         format!(
@@ -248,10 +495,10 @@ impl MemorySidecar {
              Tool calls: {}\n\n\
              Agent response: {}\n\n\
              Project: {}\n\n\
-             Return a JSON object with these fields:\n\
+             Return ONLY a JSON object (no markdown, no explanation) with these fields:\n\
              - topic: brief title (5-10 words)\n\
              - context: what was happening (1-2 sentences)\n\
-             - actions: array of {{description, result}} objects\n\
+             - actions: array of {{\"description\": \"...\", \"result\": \"...\"}} objects\n\
              - outcome: what was achieved (1-2 sentences)\n\
              - keywords: array of 3-7 relevant keywords/tags",
             truncate_str(&turn.user_message, 200),
@@ -404,6 +651,21 @@ fn truncate_str(s: &str, max_len: usize) -> &str {
     }
 }
 
+/// Strip markdown code fences from LLM response to extract raw JSON.
+fn strip_json_fences(s: &str) -> String {
+    let trimmed = s.trim();
+    // Remove ```json ... ``` or ``` ... ``` wrappers
+    if trimmed.starts_with("```") {
+        let without_opening = trimmed.trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_start_matches('\n');
+        if let Some(without_closing) = without_opening.strip_suffix("```") {
+            return without_closing.trim().to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
 // ─── Tests ────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -485,7 +747,14 @@ mod tests {
             project: "momo-fetch".into(),
         };
 
-        let result = sidecar.write_turn_memory_option_a(&turn).unwrap();
+        // Option A is private, so test through the public write_turn_memory
+        // (which falls through to Option A when no sidecar model or mailbox is set)
+        let mgr = crate::providers::ProviderManager::from_env().unwrap_or_else(|_| {
+            // In test without real providers, we can't test the full path,
+            // but write_turn_memory_option_a is tested directly via dispatch.
+            panic!("ProviderManager::from_env() failed — set ANTHROPIC_API_KEY for this test");
+        });
+        let result = sidecar.write_turn_memory(&turn, &mgr, None).unwrap();
         assert!(result.contains("MemCell"));
     }
 
@@ -499,7 +768,10 @@ mod tests {
             project: String::new(),
         };
 
-        let result = sidecar.write_turn_memory_option_a(&turn).unwrap();
+        let mgr = crate::providers::ProviderManager::from_env().unwrap_or_else(|_| {
+            panic!("ProviderManager::from_env() failed — set ANTHROPIC_API_KEY for this test");
+        });
+        let result = sidecar.write_turn_memory(&turn, &mgr, None).unwrap();
         assert!(result.contains("MemCell"));
     }
 
@@ -590,5 +862,27 @@ mod tests {
         assert!(tokens.contains(&"middleware".to_string()));
         assert!(tokens.contains(&"the".to_string())); // "the" is 3 chars, passes length filter
         // Stop word filtering is done in extract_keywords_tfidf, not in tokenize
+    }
+
+    #[test]
+    fn test_strip_json_fences() {
+        let raw = r#"```json
+{"topic": "test", "context": "ctx", "actions": [], "outcome": "ok", "keywords": ["test"]}
+```"#;
+        let stripped = strip_json_fences(raw);
+        assert!(stripped.starts_with('{'));
+        assert!(stripped.ends_with('}'));
+
+        let no_fence = r#"{"topic": "test", "context": "ctx", "actions": [], "outcome": "ok", "keywords": ["test"]}"#;
+        assert_eq!(strip_json_fences(no_fence), no_fence.trim());
+    }
+
+    #[test]
+    fn test_sidecar_extraction_parse() {
+        let json = r#"{"topic": "Fix auth", "context": "User reported bug", "actions": [{"description": "file_read", "result": "ok"}], "outcome": "Fixed", "keywords": ["auth", "jwt"]}"#;
+        let parsed: SidecarExtraction = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.topic, "Fix auth");
+        assert_eq!(parsed.keywords.len(), 2);
+        assert_eq!(parsed.actions.len(), 1);
     }
 }

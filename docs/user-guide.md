@@ -1025,9 +1025,10 @@ The agent has an **active memory system** that automatically searches and writes
     "auto_write": true,          // Post-turn MemCell write (bool)
     "search_mode": "grep_llm",   // Retrieval mode: grep_llm | tag_filter
     "max_results_per_turn": 5,   // Max memories injected per turn
-    "extract_threshold": 10,     // MemCells before auto-extract hint
+    "extract_threshold": 10,     // MemCells before auto-extract (events/foresights/episodes)
     "sidecar_model": null,       // null = TF-IDF (Option A, $0 extra cost)
     "sidecar_provider": null     // Provider for sidecar model
+    "consolidate_threshold": 30, // MemCells before auto-consolidate (clusters/profile), 0 = disabled
   }
 }
 ```
@@ -1059,7 +1060,8 @@ System prompt: includes "You have access to a persistent memory vault with N mem
 Post-turn:
   Turn completes
        │
-       ▼  write_turn_memory_option_a()
+       ▼  write_turn_memory()
+       (Option C -> Option B -> Option A, with fallback)
   MemCell written:
     topic:   "fix the auth middleware"
     context: "User asked: fix the auth middleware. Tools used: file_read(src/auth.rs)"
@@ -1144,6 +1146,9 @@ In all 4 modes, `mem_search` and `mem_write` tools remain available for manual u
 
 **Cheap cloud model for extraction (Option B):**
 
+When `sidecar_model` is set, the system makes a direct LLM call for memory extraction
+instead of using TF-IDF. Falls back to TF-IDF (Option A) on any error.
+
 ```json
 {
   "memory": {
@@ -1170,7 +1175,9 @@ In all 4 modes, `mem_search` and `mem_write` tools remain available for manual u
 
 #### Separate Process (Option C)
 
-Run the memory sidecar as an independent process communicating via file-based Mailbox:
+Run the memory sidecar as an independent process communicating via file-based Mailbox.
+The main process auto-detects the sidecar via a `ready` signal and routes requests through IPC.
+Falls back to in-process extraction if the sidecar is unavailable.
 
 ```bash
 # Terminal 1: Main agent
@@ -1178,6 +1185,23 @@ momo-fetch --project /path/to/project
 
 # Terminal 2: Memory sidecar (separate process)
 momo-fetch --mode memory-sidecar --project /path/to/project
+```
+
+#### Auto-Extract and Auto-Consolidate
+
+The system automatically processes raw MemCells into higher-level structures at configurable thresholds:
+
+- **Auto-extract** (`extract_threshold`, default: 10): Every N MemCells, extracts events, foresights, and episodes.
+- **Auto-consolidate** (`consolidate_threshold`, default: 30): Every N MemCells, clusters related MemCells and updates profiles.
+- Set `consolidate_threshold: 0` to disable auto-consolidate.
+
+```json
+{
+  "memory": {
+    "extract_threshold": 5,
+    "consolidate_threshold": 20
+  }
+}
 ```
 
 ---

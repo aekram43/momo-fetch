@@ -693,15 +693,17 @@ The system SHALL automatically write a MemCell after each completed conversation
 - Extract keywords using TF-IDF with stop-word filtering (Option A) or a sidecar model (Option B)
 - Write MemCell to vault with extracted topic, context, actions, outcome, and keywords
 - Configurable via `memory.auto_write` in settings (default: `true`)
-- Auto-extract trigger: log when `memcells_since_extract >= extract_threshold` (default: 10)
+- Auto-extract trigger: automatically extract events/foresights/episodes when `memcells_since_extract >= extract_threshold` (default: 10)
+- Auto-consolidate trigger: automatically cluster and update profile when `memcells_since_extract >= consolidate_threshold` (default: 30)
 
 #### FR-MA-03: Sidecar Model (Option B)
 
 The system SHALL support a small sidecar model for memory extraction when configured:
 
-- When `memory.sidecar_model` is set, generate an extraction prompt for the sidecar sub-agent
-- The sidecar sub-agent uses the specified model (e.g., `deepseek-chat`, `llama3.2`) via the specified `sidecar_provider`
-- The sub-agent returns structured JSON: `{ topic, context, actions, outcome, keywords }`
+- When `memory.sidecar_model` is set, make a direct LLM call for memory extraction
+- The sidecar model uses the specified model (e.g., `deepseek-chat`, `llama3.2`) via the specified `sidecar_provider`
+- Returns structured JSON: `{ topic, context, actions, outcome, keywords }` (with markdown fence stripping)
+- Falls back to TF-IDF keyword extraction (Option A) on any LLM or parse error
 - When `sidecar_model` is null (default), use TF-IDF keyword extraction (Option A, zero extra LLM cost)
 
 #### FR-MA-04: Separate Process Mode (Option C)
@@ -712,6 +714,7 @@ The system SHALL support running the memory sidecar as a completely separate pro
 - Communication via file-based Mailbox protocol in `.harness/mailbox/`
 - Well-known message types: `search_request`, `search_response`, `write_request`, `write_response`, `ready`, `shutdown`
 - Main process sends search/write requests; sidecar responds
+- Main process detects sidecar via `ready` signal in mailbox, with fallback to in-process extraction
 - Sidecar signals `ready` on startup and responds to `shutdown` for graceful termination
 - Polling interval: 100ms
 
@@ -734,9 +737,10 @@ When `auto_search` or `auto_write` is enabled, the system SHALL append a memory 
     "auto_write": true,            // Post-turn MemCell write
     "search_mode": "grep_llm",     // Retrieval mode: grep_llm | tag_filter
     "max_results_per_turn": 5,     // Max injected memories
-    "extract_threshold": 10,       // MemCells before auto-extract hint
+    "extract_threshold": 10,       // MemCells before auto-extract (events/foresights/episodes)
     "sidecar_model": null,         // null = Option A; "deepseek-chat" = Option B
     "sidecar_provider": null       // Provider for sidecar model
+    "consolidate_threshold": 30,   // MemCells before auto-consolidate (clusters/profile), 0 = disabled
   }
 }
 ```

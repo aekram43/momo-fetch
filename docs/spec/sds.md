@@ -363,18 +363,20 @@ User sends message
 │ MemorySidecar::write_turn_memory()              │
 │ IF auto_write == true:                          │
 │   Option A (default): TF-IDF keyword extract    │
-│   Option B (if sidecar_model set): sub-agent    │
+│   Option B (if sidecar_model set): LLM extract  │
+│   Option C (if sidecar process alive): Mailbox   │
 │   → vault.write_memcell()                       │
+│   (B/C fallback to A on error)                  │
 └───────────┬─────────────────────────────────────┘
             │
-            ▼  (every N memcells, default: 10)
+            ▼  (auto-extract: every extract_threshold memcells, default: 10)
 ┌─────────────────────────────────────────────────┐
-│ mem_extract (create events/foresights/episodes) │
+│ Auto-extract (create events/foresights/episodes)│
 └───────────┬─────────────────────────────────────┘
             │
-            ▼  (when threshold reached: 5+ MemCells)
+            ▼  (auto-consolidate: every consolidate_threshold memcells, default: 30)
 ┌─────────────────────────────────────────────────┐
-│ mem_consolidate (cluster detection + profile)   │
+│ Auto-consolidate (cluster detection + profile)  │
 └─────────────────────────────────────────────────┘
 ```
 

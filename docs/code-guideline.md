@@ -248,24 +248,32 @@ tags: [memcell, rust, testing]
 
 ### Memory Sidecar (`src/memory/sidecar.rs`)
 
-Auto-search before turns and auto-write after turns. Two options:
+Auto-search before turns and auto-write after turns. Three options, selected via config:
 
 - **Option A** (default, `$0 extra cost`): TF-IDF keyword extraction for writes, grep-based search
-- **Option B** (opt-in): When `sidecar_model` is set in `.harness/settings.json`, spawns a sub-agent with a small model for memory extraction
+- **Option B** (opt-in): When `sidecar_model` is set, direct LLM call for memory extraction with fallback to Option A
+- **Option C** (opt-in): Separate process via Mailbox IPC, auto-detected via `ready` signal
 
-Key struct: `MemorySidecar` — holds `vault: Arc<Mutex<ObsidianVault>>` + `config: MemorySettings`
+Key struct: `MemorySidecar` — holds `vault: Arc<Mutex<ObsidianVault>>` + `config: MemorySettings` + `sidecar_llm: OnceLock<Arc<dyn Llm>>`
 
 Key methods:
+- `write_turn_memory(summary, provider_mgr, mailbox_path)` — unified dispatch: Option C → B → A
+- `write_turn_memory_option_a(summary)` — post-turn TF-IDF MemCell write (no extra LLM call)
+- `write_turn_memory_option_b(summary, provider_mgr)` — direct LLM call, parse JSON, fallback to A
+- `write_turn_memory_option_c(summary, mailbox)` — Mailbox IPC, fallback to A on timeout
+- `check_thresholds(memcell_ref, turn)` — auto-extract + auto-consolidate at configurable thresholds
 - `enrich_input(user_input)` — pre-turn search, prepends relevant memories to user input
 - `build_system_prompt_addition()` — adds memory vault instructions to system prompt when auto features enabled
-- `write_turn_memory_option_a(summary)` — post-turn TF-IDF MemCell write (no extra LLM call)
-- `write_turn_memory_option_b(summary)` — post-turn sub-agent MemCell write (uses sidecar model)
 
 Config via `.harness/settings.json` → `memory` object:
 - `auto_search: bool` — enable pre-turn vault search
 - `auto_write: bool` — enable post-turn MemCell write
 - `sidecar_model: Option<String>` — null = Option A (TF-IDF), model name = Option B
+- `sidecar_provider: Option<String>` — provider for the sidecar model
 - `search_mode`, `max_results_per_turn`, `extract_threshold` — fine-tuning knobs
+- `consolidate_threshold: usize` — auto-consolidate every N MemCells (default: 30, 0 = disabled)
+
+Also: `src/providers.rs` — `create_model()` is public, used by sidecar to construct LLM instances.
 
 ### Retrieval Modes (`src/memory/retrieval.rs`)
 

@@ -44,7 +44,11 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
                         project: project_name,
                     };
 
-                    let _ = harness.memory_sidecar().write_turn_memory_option_a(&turn_summary);
+                    let _ = harness.memory_sidecar().write_turn_memory(
+                        &turn_summary,
+                        harness.provider_mgr(),
+                        Some(&harness.mailbox_path()),
+                    );
                 }
                 Ok(())
             } else {

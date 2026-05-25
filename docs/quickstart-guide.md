@@ -252,7 +252,7 @@ Inside the REPL:
 | `/model gpt-4o` | Switch model mid-session |
 | `/permission auto` | Switch permission mode (strict/auto/yolo) |
 | `/cost` | Show current session cost |
-| `/mem` | Show memory vault status |
+| `/mem` | Show memory vault status (MemCells, events, foresights, clusters) |
 | `/mcp list` | Show MCP servers (stdio + HTTP) and connection status |
 | `/agent list` | List agent personalities |
 | `/agent switch <name>` | Switch to a specialist personality |
@@ -305,7 +305,46 @@ mkdir -p .harness/teams
 # /team start auth-squad
 ```
 
-## 6. Next Steps
+## 6. Memory Vault (Optional)
+
+MOMO Fetch automatically builds a persistent memory vault in `<project>/memory-vault/`. It learns from every conversation turn and recalls relevant context in future sessions.
+
+### Default Behavior (no config needed)
+
+- **Auto-search**: Before each turn, relevant memories are injected into the conversation
+- **Auto-write**: After each turn, a MemCell is written with TF-IDF keyword extraction ($0 cost)
+- **Auto-extract**: Every 10 MemCells, events/foresights/episodes are automatically created
+- **Auto-consolidate**: Every 30 MemCells, related MemCells are clustered and profiles updated
+
+### Enhanced Memory with Sidecar LLM (Option B)
+
+For better extraction quality, configure a cheap model to analyze each turn:
+
+```json
+// .harness/settings.json
+{
+  "memory": {
+    "sidecar_model": "deepseek-chat",
+    "sidecar_provider": "deepseek"
+  }
+}
+```
+
+### Separate Memory Process (Option C)
+
+Run memory processing in an isolated process:
+
+```bash
+# Terminal 1: Main agent
+./target/debug/momo-fetch --project .
+
+# Terminal 2: Memory sidecar
+./target/debug/momo-fetch --mode memory-sidecar --project .
+```
+
+Check vault status in the REPL with `/mem`.
+
+## 7. Next Steps
 
 - [CLI Guide](cli-guide.md) — detailed command reference
 - [User Guide](user-guide.md) — all features explained

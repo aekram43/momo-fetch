@@ -598,6 +598,11 @@ impl Harness {
         &self.memory_sidecar
     }
 
+    /// Get the mailbox path for this project (used for Option C sidecar IPC).
+    pub fn mailbox_path(&self) -> std::path::PathBuf {
+        self.config.project_path.join(".harness").join("mailbox")
+    }
+
     /// Get a reference to the session manager.
     pub fn session_mgr(&self) -> &SessionManager {
         &self.session_mgr

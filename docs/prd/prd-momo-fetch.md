@@ -470,9 +470,9 @@ adk-rust (zavora-ai) มี features ที่ครอบคลุมมาก 
 ### Memory Vault (build ourselves — main differentiator)
 
 - **FR-15**: System MUST implement EverMemOS 6-level memory hierarchy as Obsidian wiki notes
-- **FR-16**: System MUST auto-extract events, foresights, and episodes after each conversation turn
+- **FR-16**: System MUST auto-extract events, foresights, and episodes at configurable `extract_threshold` (default: 10 MemCells)
 - **FR-17**: System MUST support 4 retrieval modes: `grep_llm`, `graph_walk`, `tag_filter`, `agentic`
-- **FR-18**: System MUST consolidate MemCells into clusters and update agent profile
+- **FR-18**: System MUST auto-consolidate MemCells into clusters and update agent profile at configurable `consolidate_threshold` (default: 30 MemCells)
 - **FR-19**: System MUST compact profile when items exceed threshold (37 → ~17)
 - **FR-20**: System MUST validate foresight predictions against current state
 

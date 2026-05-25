@@ -224,7 +224,7 @@ impl ProviderManager {
     }
 
     /// Create a model instance for any supported provider.
-    fn create_model(&self, provider: &str, model: &str) -> anyhow::Result<Arc<dyn Llm>> {
+    pub fn create_model(&self, provider: &str, model: &str) -> anyhow::Result<Arc<dyn Llm>> {
         use crate::config::secrets::SecretStore;
 
         match provider {
