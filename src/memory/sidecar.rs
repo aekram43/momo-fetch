@@ -306,23 +306,25 @@ impl MemorySidecar {
         let content = adk_rust::Content::new("user").with_text(&prompt);
         let req = adk_rust::prelude::LlmRequest::new(model, vec![content]);
 
-        // Direct LLM call via block_on (safe: we're in a tokio context after the stream is consumed)
+        // Direct LLM call via block_in_place + block_on (required because we're inside a tokio runtime)
         let response_text = match tokio::runtime::Handle::try_current() {
-            Ok(handle) => handle.block_on(async {
-                let mut stream = llm.generate_content(req, false).await?;
-                let mut text = String::new();
-                use adk_rust::futures::StreamExt;
-                while let Some(chunk) = stream.next().await {
-                    let chunk = chunk?;
-                    if let Some(c) = chunk.content {
-                        for part in c.parts {
-                            if let adk_rust::Part::Text { text: t } = part {
-                                text.push_str(&t);
+            Ok(handle) => tokio::task::block_in_place(|| {
+                handle.block_on(async {
+                    let mut stream = llm.generate_content(req, false).await?;
+                    let mut text = String::new();
+                    use adk_rust::futures::StreamExt;
+                    while let Some(chunk) = stream.next().await {
+                        let chunk = chunk?;
+                        if let Some(c) = chunk.content {
+                            for part in c.parts {
+                                if let adk_rust::Part::Text { text: t } = part {
+                                    text.push_str(&t);
+                                }
                             }
                         }
                     }
-                }
-                Ok::<String, anyhow::Error>(text)
+                    Ok::<String, anyhow::Error>(text)
+                })
             }),
             Err(_) => {
                 tracing::warn!("Memory sidecar: no tokio runtime, falling back to Option A");
