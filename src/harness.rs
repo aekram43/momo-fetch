@@ -26,7 +26,7 @@ pub struct Harness {
     sandbox: Arc<FilesystemSandbox>,
     context_builder: ContextBuilder,
     vault: Arc<Mutex<ObsidianVault>>,
-    memory_sidecar: MemorySidecar,
+    memory_sidecar: Arc<MemorySidecar>,
     session_mgr: SessionManager,
     mcp_service: McpService,
     skill_service: SkillService,
@@ -68,7 +68,7 @@ impl Harness {
         drop(vault_guard);
 
         // Initialize memory sidecar (auto-search + auto-write)
-        let memory_sidecar = MemorySidecar::new(vault.clone(), config.memory.clone());
+        let memory_sidecar = Arc::new(MemorySidecar::new(vault.clone(), config.memory.clone()));
         tracing::info!(
             "Memory sidecar: auto_search={}, auto_write={}, sidecar_model={}",
             memory_sidecar.auto_search_enabled(),
@@ -593,8 +593,8 @@ impl Harness {
         &self.vault
     }
 
-    /// Get a reference to the memory sidecar.
-    pub fn memory_sidecar(&self) -> &MemorySidecar {
+    /// Get a reference to the memory sidecar (Arc for sharing across threads).
+    pub fn memory_sidecar(&self) -> &Arc<MemorySidecar> {
         &self.memory_sidecar
     }
 

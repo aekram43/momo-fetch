@@ -539,7 +539,7 @@ async fn run_turn_streaming(
         }
     }
 
-    // Post-turn: auto-write memory (Option A or B)
+    // Post-turn: auto-write memory (Option A or B) — run in background to avoid blocking the prompt
     if harness.memory_sidecar().auto_write_enabled() {
         let project_name = harness
             .config()
@@ -561,18 +561,25 @@ async fn run_turn_streaming(
             summary
         });
 
-        match harness.memory_sidecar().write_turn_memory(
-            &turn_summary,
-            harness.provider_mgr(),
-            Some(&harness.mailbox_path()),
-        ) {
-            Ok(memcell_ref) => {
-                tracing::debug!("Auto-wrote MemCell: {memcell_ref}");
+        // Clone what we need for the background task
+        let sidecar = harness.memory_sidecar().clone_arc();
+        let provider_mgr = harness.provider_mgr().clone();
+        let mailbox_path = harness.mailbox_path();
+
+        std::thread::spawn(move || {
+            match sidecar.write_turn_memory(
+                &turn_summary,
+                &provider_mgr,
+                Some(&mailbox_path),
+            ) {
+                Ok(memcell_ref) => {
+                    tracing::debug!("Auto-wrote MemCell: {memcell_ref}");
+                }
+                Err(e) => {
+                    tracing::warn!("Auto-write MemCell failed: {e}");
+                }
             }
-            Err(e) => {
-                tracing::warn!("Auto-write MemCell failed: {e}");
-            }
-        }
+        });
     }
 
     turn_active.store(false, Ordering::Relaxed);

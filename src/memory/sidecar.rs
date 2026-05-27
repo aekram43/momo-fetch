@@ -73,6 +73,11 @@ impl MemorySidecar {
         }
     }
 
+    /// Wrap in Arc for sharing across threads (e.g., background post-turn write).
+    pub fn clone_arc(self: &Arc<Self>) -> Arc<Self> {
+        Arc::clone(self)
+    }
+
     /// Whether auto-search is enabled.
     pub fn auto_search_enabled(&self) -> bool {
         self.config.auto_search

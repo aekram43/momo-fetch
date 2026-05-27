@@ -24,6 +24,7 @@ pub struct ProviderConfig {
 ///
 /// Holds a current `Arc<dyn Llm>` that can be swapped at runtime
 /// via `/model` and `/provider` slash commands.
+#[derive(Clone)]
 pub struct ProviderManager {
     current: Arc<dyn Llm>,
     current_provider: String,
