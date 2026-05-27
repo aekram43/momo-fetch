@@ -311,29 +311,26 @@ impl MemorySidecar {
         let content = adk_rust::Content::new("user").with_text(&prompt);
         let req = adk_rust::prelude::LlmRequest::new(model, vec![content]);
 
-        // Direct LLM call via block_in_place + block_on (required because we're inside a tokio runtime)
+        // Direct LLM call — works both inside a tokio runtime and in a plain background thread.
         let response_text = match tokio::runtime::Handle::try_current() {
-            Ok(handle) => tokio::task::block_in_place(|| {
-                handle.block_on(async {
-                    let mut stream = llm.generate_content(req, false).await?;
-                    let mut text = String::new();
-                    use adk_rust::futures::StreamExt;
-                    while let Some(chunk) = stream.next().await {
-                        let chunk = chunk?;
-                        if let Some(c) = chunk.content {
-                            for part in c.parts {
-                                if let adk_rust::Part::Text { text: t } = part {
-                                    text.push_str(&t);
-                                }
-                            }
-                        }
-                    }
-                    Ok::<String, anyhow::Error>(text)
+            Ok(handle) => {
+                // Inside tokio runtime: use block_in_place to avoid blocking the async driver
+                tokio::task::block_in_place(|| {
+                    handle.block_on(self.call_sidecar_llm(llm, req))
                 })
-            }),
+            }
             Err(_) => {
-                tracing::warn!("Memory sidecar: no tokio runtime, falling back to Option A");
-                return self.write_turn_memory_option_a(turn);
+                // Plain thread (e.g., background post-turn write): create a minimal runtime
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                match rt {
+                    Ok(rt) => rt.block_on(self.call_sidecar_llm(llm, req)),
+                    Err(e) => {
+                        tracing::warn!("Memory sidecar: failed to create tokio runtime: {e}, falling back to Option A");
+                        return self.write_turn_memory_option_a(turn);
+                    }
+                }
             }
         };
 
@@ -489,6 +486,28 @@ impl MemorySidecar {
                 }
             }
         }
+    }
+
+    /// Call the sidecar LLM and collect the full text response.
+    async fn call_sidecar_llm(
+        &self,
+        llm: &Arc<dyn adk_rust::prelude::Llm>,
+        req: adk_rust::prelude::LlmRequest,
+    ) -> anyhow::Result<String> {
+        let mut stream = llm.generate_content(req, false).await?;
+        let mut text = String::new();
+        use adk_rust::futures::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            if let Some(c) = chunk.content {
+                for part in c.parts {
+                    if let adk_rust::Part::Text { text: t } = part {
+                        text.push_str(&t);
+                    }
+                }
+            }
+        }
+        Ok(text)
     }
 
     /// Build a prompt for the sidecar LLM (Option B).
