@@ -48,6 +48,7 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
                         &turn_summary,
                         harness.provider_mgr(),
                         Some(&harness.mailbox_path()),
+                        None,
                     );
                 }
                 Ok(())

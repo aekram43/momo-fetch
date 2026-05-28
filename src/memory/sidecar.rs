@@ -210,12 +210,22 @@ impl MemorySidecar {
         turn: &TurnSummary,
         provider_mgr: &crate::providers::ProviderManager,
         mailbox_path: Option<&Path>,
+        status: Option<&crate::cli::status::StatusSender>,
     ) -> anyhow::Result<String> {
+        let option_label = if self.has_sidecar_model() { "Option B" } else { "Option A" };
+        if let Some(s) = status {
+            s.started("mem", &format!("writing MemCell ({option_label})"));
+        }
+
         let memcell_ref = self.dispatch_write(turn, provider_mgr, mailbox_path)?;
         tracing::debug!("Memory sidecar: wrote MemCell '{memcell_ref}'");
 
+        if let Some(s) = status {
+            s.completed("mem", &format!("wrote MemCell '{memcell_ref}'"));
+        }
+
         // Auto-extract / auto-consolidate thresholds
-        self.check_thresholds(&memcell_ref, turn);
+        self.check_thresholds(&memcell_ref, turn, status);
 
         Ok(memcell_ref)
     }
@@ -431,7 +441,12 @@ impl MemorySidecar {
     }
 
     /// Check auto-extract and auto-consolidate thresholds after writing a MemCell.
-    fn check_thresholds(&self, memcell_ref: &str, turn: &TurnSummary) {
+    fn check_thresholds(
+        &self,
+        memcell_ref: &str,
+        turn: &TurnSummary,
+        status: Option<&crate::cli::status::StatusSender>,
+    ) {
         let prev = self.memcells_since_extract.fetch_add(1, Ordering::Relaxed);
         let current = prev + 1;
 
@@ -462,27 +477,62 @@ impl MemorySidecar {
         let kw_refs: Vec<&str> = keywords.iter().map(|s| s.as_str()).collect();
 
         if let Ok(mut vault) = self.vault.lock() {
+            if let Some(s) = status {
+                s.started("mem:extract", &format!("auto-extracting (threshold: {})", self.config.extract_threshold));
+            }
             match vault.extract_from_memcell(
                 memcell_ref, &project, &topic, &context, &actions, &outcome, &kw_refs,
             ) {
-                Ok(result) => tracing::info!(
-                    "Auto-extract: {} events, {} foresights, episode {:?}",
-                    result.events_created.len(),
-                    result.foresights_created.len(),
-                    result.episode_id,
-                ),
-                Err(e) => tracing::warn!("Auto-extract failed (non-fatal): {e}"),
+                Ok(result) => {
+                    tracing::info!(
+                        "Auto-extract: {} events, {} foresights, episode {:?}",
+                        result.events_created.len(),
+                        result.foresights_created.len(),
+                        result.episode_id,
+                    );
+                    if let Some(s) = status {
+                        s.completed("mem:extract", &format!(
+                            "{} events, {} foresights, episode {:?}",
+                            result.events_created.len(),
+                            result.foresights_created.len(),
+                            result.episode_id,
+                        ));
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Auto-extract failed (non-fatal): {e}");
+                    if let Some(s) = status {
+                        s.failed("mem:extract", &format!("extract failed: {e}"));
+                    }
+                }
             }
 
             // Auto-consolidate at higher threshold
             if self.config.consolidate_threshold > 0 && current >= self.config.consolidate_threshold {
+                if let Some(s) = status {
+                    s.started("mem:consolidate", &format!("auto-consolidating (threshold: {})", self.config.consolidate_threshold));
+                }
                 match vault.consolidate() {
-                    Ok(result) => tracing::info!(
-                        "Auto-consolidate: {} clusters, {} profile ops",
-                        result.clusters_created.len(),
-                        result.profile_ops.len(),
-                    ),
-                    Err(e) => tracing::warn!("Auto-consolidate failed (non-fatal): {e}"),
+                    Ok(result) => {
+                        tracing::info!(
+                            "Auto-consolidate: {} clusters, {} profile ops",
+                            result.clusters_created.len(),
+                            result.profile_ops.len(),
+                        );
+                        if let Some(s) = status {
+                            s.completed("mem:consolidate", &format!(
+                                "{} clusters, {} profile ops",
+                                result.clusters_created.len(),
+                                result.profile_ops.len(),
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Auto-consolidate failed (non-fatal): {e}");
+                        if let Some(s) = status {
+                            s.failed("mem:consolidate", &format!("consolidate failed: {e}"));
+                        }
+                    }
                 }
             }
         }
@@ -780,7 +830,7 @@ mod tests {
             // but write_turn_memory_option_a is tested directly via dispatch.
             panic!("ProviderManager::from_env() failed — set ANTHROPIC_API_KEY for this test");
         });
-        let result = sidecar.write_turn_memory(&turn, &mgr, None).unwrap();
+        let result = sidecar.write_turn_memory(&turn, &mgr, None, None).unwrap();
         assert!(result.contains("MemCell"));
     }
 
@@ -797,7 +847,7 @@ mod tests {
         let mgr = crate::providers::ProviderManager::from_env().unwrap_or_else(|_| {
             panic!("ProviderManager::from_env() failed — set ANTHROPIC_API_KEY for this test");
         });
-        let result = sidecar.write_turn_memory(&turn, &mgr, None).unwrap();
+        let result = sidecar.write_turn_memory(&turn, &mgr, None, None).unwrap();
         assert!(result.contains("MemCell"));
     }
 

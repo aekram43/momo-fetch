@@ -23,6 +23,14 @@ use crate::sandbox::FilesystemSandbox;
 
 thread_local! {
     static TASK_CTX: std::cell::RefCell<Option<TaskContext>> = std::cell::RefCell::new(None);
+    static STATUS_TX: std::cell::RefCell<Option<crate::cli::status::StatusSender>> = std::cell::RefCell::new(None);
+}
+
+/// Set the status sender for the current thread (called from REPL).
+pub fn set_status_sender(sender: crate::cli::status::StatusSender) {
+    STATUS_TX.with(|tx| {
+        *tx.borrow_mut() = Some(sender);
+    });
 }
 
 /// Maximum recursion depth for sub-agents.
@@ -200,7 +208,7 @@ pub async fn task(args: TaskArgs) -> Result<Value, AdkError> {
             .await
             .map_err(|e| AdkError::tool(format!("sub-agent execution failed: {e}")))?;
 
-        let response = collect_final_response(stream).await;
+        let response = collect_final_response(stream, &args.description).await;
 
         response
     })
@@ -260,9 +268,19 @@ fn build_sub_agent(
 ///
 /// Iterates through all events, accumulating text content and counting
 /// tool calls, until the stream ends or a final response is received.
-async fn collect_final_response(mut stream: EventStream) -> Result<Value, AdkError> {
+async fn collect_final_response(
+    mut stream: EventStream,
+    task_description: &str,
+) -> Result<Value, AdkError> {
     let mut tool_call_count: usize = 0;
     let mut text_parts: Vec<String> = Vec::new();
+
+    // Emit status events for sub-agent progress
+    STATUS_TX.with(|tx| {
+        if let Some(sender) = tx.borrow().as_ref() {
+            sender.started("task", &format!("running: {task_description}"));
+        }
+    });
 
     while let Some(event_result) = stream.next().await {
         match event_result {
@@ -273,6 +291,11 @@ async fn collect_final_response(mut stream: EventStream) -> Result<Value, AdkErr
                             Part::FunctionCall { name, .. } => {
                                 tool_call_count += 1;
                                 tracing::debug!("sub-agent tool call: {name}");
+                                STATUS_TX.with(|tx| {
+                                    if let Some(sender) = tx.borrow().as_ref() {
+                                        sender.progress("task", &format!("tool call {}: {name}", tool_call_count));
+                                    }
+                                });
                             }
                             Part::Text { text } => {
                                 text_parts.push(text.clone());
@@ -287,12 +310,24 @@ async fn collect_final_response(mut stream: EventStream) -> Result<Value, AdkErr
                 }
             }
             Err(e) => {
+                STATUS_TX.with(|tx| {
+                    if let Some(sender) = tx.borrow().as_ref() {
+                        sender.failed("task", &format!("stream error: {e}"));
+                    }
+                });
                 return Err(AdkError::tool(format!(
                     "sub-agent stream error: {e}"
                 )));
             }
         }
     }
+
+    // Emit completed status
+    STATUS_TX.with(|tx| {
+        if let Some(sender) = tx.borrow().as_ref() {
+            sender.completed("task", &format!("done ({tool_call_count} tool calls)"));
+        }
+    });
 
     let combined_text = text_parts.join("");
 

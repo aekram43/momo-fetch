@@ -565,12 +565,14 @@ async fn run_turn_streaming(
         let sidecar = harness.memory_sidecar().clone_arc();
         let provider_mgr = harness.provider_mgr().clone();
         let mailbox_path = harness.mailbox_path();
+        let status_sender = harness.status_channel().sender();
 
         std::thread::spawn(move || {
             match sidecar.write_turn_memory(
                 &turn_summary,
                 &provider_mgr,
                 Some(&mailbox_path),
+                Some(&status_sender),
             ) {
                 Ok(memcell_ref) => {
                     tracing::debug!("Auto-wrote MemCell: {memcell_ref}");
@@ -580,6 +582,21 @@ async fn run_turn_streaming(
                 }
             }
         });
+    }
+
+    // Drain and display pending status events from background workers
+    let events = harness.status_channel().drain_pending();
+    if !events.is_empty() {
+        use crate::cli::status::{format_inline, format_footer, StatusChannel};
+        let inline = format_inline(&events);
+        if !inline.is_empty() {
+            eprintln!();
+            eprintln!("{}", inline);
+        }
+        let active = StatusChannel::active_workers_from(&events);
+        if let Some(footer) = format_footer(&active) {
+            eprintln!("{}", footer);
+        }
     }
 
     turn_active.store(false, Ordering::Relaxed);

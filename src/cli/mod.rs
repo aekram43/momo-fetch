@@ -2,6 +2,7 @@ mod banner;
 mod commands;
 mod oneshot;
 mod repl;
+pub mod status;
 
 use std::sync::Arc;
 

@@ -27,6 +27,7 @@ pub struct Harness {
     context_builder: ContextBuilder,
     vault: Arc<Mutex<ObsidianVault>>,
     memory_sidecar: Arc<MemorySidecar>,
+    status_channel: crate::cli::status::StatusChannel,
     session_mgr: SessionManager,
     mcp_service: McpService,
     skill_service: SkillService,
@@ -69,6 +70,7 @@ impl Harness {
 
         // Initialize memory sidecar (auto-search + auto-write)
         let memory_sidecar = Arc::new(MemorySidecar::new(vault.clone(), config.memory.clone()));
+        let status_channel = crate::cli::status::StatusChannel::new();
         tracing::info!(
             "Memory sidecar: auto_search={}, auto_write={}, sidecar_model={}",
             memory_sidecar.auto_search_enabled(),
@@ -180,6 +182,7 @@ impl Harness {
             &skill_service,
             agent_def.as_ref(),
             &std::collections::HashSet::new(),
+            &status_channel,
         )?;
 
         // Initialize cost tracker session context
@@ -201,6 +204,7 @@ impl Harness {
             context_builder,
             vault,
             memory_sidecar,
+            status_channel,
             session_mgr,
             mcp_service,
             skill_service,
@@ -226,6 +230,7 @@ impl Harness {
         skill_service: &SkillService,
         agent_def: Option<&crate::agent::AgentDef>,
         approved_tools: &std::collections::HashSet<String>,
+        status_channel: &crate::cli::status::StatusChannel,
     ) -> anyhow::Result<Runner> {
         let tools = crate::tools::build_tool_registry_with_orchestrator(
             sandbox.clone(),
@@ -262,6 +267,9 @@ impl Harness {
             system_prompt: system_prompt.clone(),
             depth: 0,
         });
+
+        // Set status sender so the Task tool can emit progress events
+        crate::tools::task::set_status_sender(status_channel.sender());
 
         // Set orchestrator context if agent has orchestration capability
         if let Some(def) = agent_def {
@@ -355,6 +363,7 @@ impl Harness {
             &self.skill_service,
             agent_def,
             &approved,
+            &self.status_channel,
         )?;
         Ok(())
     }
@@ -542,6 +551,7 @@ impl Harness {
             &self.skill_service,
             agent_def,
             &approved,
+            &self.status_channel,
         )?;
 
         // Update task context with the new system prompt
@@ -596,6 +606,11 @@ impl Harness {
     /// Get a reference to the memory sidecar (Arc for sharing across threads).
     pub fn memory_sidecar(&self) -> &Arc<MemorySidecar> {
         &self.memory_sidecar
+    }
+
+    /// Get a reference to the status channel (for background worker events).
+    pub fn status_channel(&self) -> &crate::cli::status::StatusChannel {
+        &self.status_channel
     }
 
     /// Get the mailbox path for this project (used for Option C sidecar IPC).
