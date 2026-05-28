@@ -82,6 +82,7 @@ impl StatusChannel {
 
     /// Check if any workers are still active (Started without matching Completed/Failed).
     /// Consumes events — call this only if you also display them via drain_pending.
+    #[allow(dead_code)]
     pub fn active_workers_from(events: &[StatusEvent]) -> Vec<(String, String)> {
         let mut active: HashMap<String, String> = HashMap::new();
         for event in events {
@@ -186,6 +187,7 @@ pub fn format_inline(events: &[StatusEvent]) -> String {
 
 /// Format a status footer for active workers.
 /// Returns None if no active workers.
+#[allow(dead_code)]
 pub fn format_footer(active: &[(String, String)]) -> Option<String> {
     if active.is_empty() {
         return None;

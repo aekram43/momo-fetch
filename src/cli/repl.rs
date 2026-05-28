@@ -459,6 +459,21 @@ async fn run_turn_streaming(
                 let _ = std::io::stdout().flush();
             }
 
+            // Drain and display pending status events from background workers.
+            // Shown here (after model header, before response) so they scroll
+            // away naturally with the model's answer. Completed tasks show ✓,
+            // active tasks show ⏳.
+            {
+                let events = harness.status_channel().drain_pending();
+                if !events.is_empty() {
+                    use crate::cli::status::format_inline;
+                    let inline = format_inline(&events);
+                    if !inline.is_empty() {
+                        println!("{}", inline);
+                    }
+                }
+            }
+
             consume_stream(harness, stream, shutting_down).await
         }
         Err(e) => {
@@ -588,20 +603,10 @@ async fn run_turn_streaming(
         });
     }
 
-    // Drain and display pending status events from background workers
-    let events = harness.status_channel().drain_pending();
-    if !events.is_empty() {
-        use crate::cli::status::{format_inline, format_footer, StatusChannel};
-        let inline = format_inline(&events);
-        if !inline.is_empty() {
-            eprintln!();
-            eprintln!("{}", inline);
-        }
-        let active = StatusChannel::active_workers_from(&events);
-        if let Some(footer) = format_footer(&active) {
-            eprintln!("{}", footer);
-        }
-    }
+    // Note: Status events from background workers are NOT displayed here.
+    // They are drained and displayed at the START of the next turn,
+    // so they appear before the model's response and scroll away naturally.
+    // This avoids permanent clutter between turns.
 
     turn_active.store(false, Ordering::Relaxed);
 }
@@ -719,6 +724,17 @@ async fn consume_stream(
                         // the next step). Don't restart after text — the LLM is
                         // still streaming and will send more content soon.
                         if !last_event_was_text {
+                            // Show any status events from background workers
+                            // (e.g. memory write progress) in the spinner area
+                            let bg_events = harness.status_channel().drain_pending();
+                            if !bg_events.is_empty() {
+                                spinner.stop();
+                                use crate::cli::status::format_inline;
+                                let inline = format_inline(&bg_events);
+                                if !inline.is_empty() {
+                                    eprintln!("\r\u{1b}[K{}", inline);
+                                }
+                            }
                             spinner = ThinkingSpinner::start();
                         }
 
