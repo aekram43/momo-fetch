@@ -56,6 +56,7 @@ impl Harness {
 
         // Initialize provider
         let provider_mgr = ProviderManager::from_env()?;
+        provider_mgr.prefetch_context_windows();
 
         // Initialize sandbox
         let sandbox = Arc::new(FilesystemSandbox::new(
@@ -434,6 +435,7 @@ impl Harness {
                 &self.provider_mgr.current_provider().to_string(),
                 self.provider_mgr.current_model_name(),
             );
+        self.provider_mgr.prefetch_context_windows();
         Ok(())
     }
 
@@ -447,6 +449,7 @@ impl Harness {
                 &self.provider_mgr.current_provider().to_string(),
                 self.provider_mgr.current_model_name(),
             );
+        self.provider_mgr.prefetch_context_windows();
         Ok(())
     }
 
@@ -460,6 +463,7 @@ impl Harness {
                 &self.provider_mgr.current_provider().to_string(),
                 self.provider_mgr.current_model_name(),
             );
+        self.provider_mgr.prefetch_context_windows();
         Ok(())
     }
 

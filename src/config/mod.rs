@@ -1,5 +1,6 @@
 pub mod secrets;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,8 @@ pub struct HarnessConfig {
     pub memory: MemorySettings,
     /// Agent personality name (from .harness/agents/<name>.md). None = default mode.
     pub agent_name: Option<String>,
+    /// Per-model context window overrides from settings.json.
+    pub context_window_overrides: HashMap<String, u64>,
 }
 
 /// Settings file schema (both global and project-level).
@@ -40,6 +43,11 @@ pub struct SettingsFile {
     pub permission_mode: Option<String>,
     /// Memory auto-flow settings
     pub memory: Option<MemorySettings>,
+    /// Per-model context window overrides (token count).
+    /// Key is the model name, or "provider:model" for disambiguation.
+    /// Example: { "claude-sonnet-4-20250514": 200000, "openai:gpt-4o": 128000 }
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<HashMap<String, u64>>,
 }
 
 /// Memory auto-flow configuration.
@@ -187,6 +195,10 @@ impl HarnessConfig {
                 .or(global_settings.memory)
                 .unwrap_or_default(),
             agent_name: args.agent.clone(),
+            context_window_overrides: project_settings
+                .context_window
+                .or(global_settings.context_window)
+                .unwrap_or_default(),
         })
     }
 

@@ -35,6 +35,7 @@ pub enum StatusEvent {
 
 impl StatusEvent {
     /// Which worker emitted this event.
+    #[allow(dead_code)]
     pub fn worker(&self) -> &str {
         match self {
             StatusEvent::Started { worker, .. }

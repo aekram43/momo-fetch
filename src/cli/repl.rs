@@ -440,8 +440,10 @@ async fn run_turn_streaming(
                     if tokens > 0 {
                         let provider = harness.provider_mgr().current_provider();
                         let model = harness.provider_mgr().current_model_name();
-                        let usage = crate::context_window::ContextUsage::new(
+                        let usage = crate::context_window::ContextUsage::new_resolved(
                             tokens as i64, &provider, &model,
+                            Some(&harness.config().context_window_overrides),
+                            Some(harness.provider_mgr().context_window_cache().as_ref()),
                         );
                         format!(" \u{00b7} {}", usage.format_status())
                     } else {
@@ -530,8 +532,10 @@ async fn run_turn_streaming(
         if tokens > 0 {
             let provider = harness.provider_mgr().current_provider();
             let model = harness.provider_mgr().current_model_name();
-            let usage = crate::context_window::ContextUsage::new(
+            let usage = crate::context_window::ContextUsage::new_resolved(
                 tokens as i64, &provider, &model,
+                Some(&harness.config().context_window_overrides),
+                Some(harness.provider_mgr().context_window_cache().as_ref()),
             );
             if let Some(warning) = usage.format_warning() {
                 println!("\n{}", warning);

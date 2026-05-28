@@ -10,6 +10,8 @@ use adk_model::openai_compatible::{OpenAICompatible, OpenAICompatibleConfig};
 use adk_model::openrouter::{OpenRouterClient, OpenRouterConfig};
 use adk_rust::prelude::Llm;
 
+use crate::context_window::ContextWindowCache;
+
 /// Configuration for a custom (OpenAI-compatible) provider endpoint.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProviderConfig {
@@ -30,6 +32,8 @@ pub struct ProviderManager {
     current_provider: String,
     current_model: String,
     custom_endpoints: HashMap<String, ProviderConfig>,
+    /// Cache of dynamically fetched context window sizes from provider APIs.
+    context_window_cache: Arc<ContextWindowCache>,
 }
 
 impl ProviderManager {
@@ -102,6 +106,7 @@ impl ProviderManager {
             current_provider: provider,
             current_model: model,
             custom_endpoints: HashMap::new(),
+            context_window_cache: Arc::new(ContextWindowCache::new()),
         })
     }
 
@@ -149,6 +154,7 @@ impl ProviderManager {
             current_provider: provider,
             current_model: model,
             custom_endpoints: HashMap::new(),
+            context_window_cache: Arc::new(ContextWindowCache::new()),
         }
     }
 
@@ -160,6 +166,58 @@ impl ProviderManager {
     /// Get current model name.
     pub fn current_model_name(&self) -> &str {
         &self.current_model
+    }
+
+    /// Get the context window cache.
+    pub fn context_window_cache(&self) -> &Arc<ContextWindowCache> {
+        &self.context_window_cache
+    }
+
+    /// Fetch context window sizes from provider model info APIs (fire-and-forget).
+    ///
+    /// Currently only OpenRouter's `list_models()` exposes `context_length`.
+    /// Runs as a background task; never blocks the REPL.
+    pub fn prefetch_context_windows(&self) {
+        if self.current_provider != "openrouter" {
+            return;
+        }
+
+        if !self.context_window_cache.is_stale() {
+            return;
+        }
+
+        let cache = self.context_window_cache.clone();
+        let api_key = crate::config::secrets::SecretStore::get("openrouter").ok();
+
+        if let Some(key) = api_key {
+            tokio::spawn(async move {
+                let config = OpenRouterConfig::new(&key, "unused");
+                let client = match OpenRouterClient::new(config) {
+                    Ok(c) => c,
+                    Err(_) => return,
+                };
+                match client.list_models().await {
+                    Ok(models) => {
+                        let entries: Vec<(String, u64)> = models
+                            .into_iter()
+                            .filter_map(|m| {
+                                m.context_length.map(|cl| (m.id, cl as u64))
+                            })
+                            .collect();
+                        if !entries.is_empty() {
+                            tracing::info!(
+                                "Context window cache: populated {} models from OpenRouter",
+                                entries.len()
+                            );
+                            cache.populate(entries);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Context window cache: OpenRouter fetch failed: {}", e);
+                    }
+                }
+            });
+        }
     }
 
     /// List available providers based on configured API keys (env or keychain).

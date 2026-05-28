@@ -316,8 +316,10 @@ impl Command {
                 if tokens > 0 {
                     let provider = harness.provider_mgr().current_provider();
                     let model = harness.provider_mgr().current_model_name();
-                    let usage = crate::context_window::ContextUsage::new(
+                    let usage = crate::context_window::ContextUsage::new_resolved(
                         tokens as i64, &provider, &model,
+                        Some(&harness.config().context_window_overrides),
+                        Some(harness.provider_mgr().context_window_cache().as_ref()),
                     );
                     println!("Context: {}", usage.format_status());
                 }
