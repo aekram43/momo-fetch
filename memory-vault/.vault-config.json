@@ -3,7 +3,7 @@
   "vault_path": "./memory-vault",
   "created": "2026-05-06",
   "stats": {
-    "total_memcells": 21,
+    "total_memcells": 22,
     "total_events": 3,
     "total_foresights": 1,
     "total_episodes": 1,

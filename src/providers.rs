@@ -37,6 +37,46 @@ pub struct ProviderManager {
 }
 
 impl ProviderManager {
+    /// Create ProviderManager from settings file with fallback to env.
+    ///
+    /// Priority order:
+    /// 1. Settings file (default_provider + default_model)
+    /// 2. Environment variables or OS keychain
+    /// 3. Fallback → Ollama (localhost)
+    pub fn from_settings_or_env(settings_provider: Option<&str>, settings_model: Option<&str>) -> anyhow::Result<Self> {
+        // If settings specify both provider and model, use them
+        if let (Some(provider), Some(model)) = (settings_provider, settings_model) {
+            return Self::from_provider_and_model(provider, model);
+        }
+
+        // Otherwise, fall back to environment detection
+        Self::from_env()
+    }
+
+    /// Create ProviderManager from explicit provider and model names.
+    fn from_provider_and_model(provider: &str, model: &str) -> anyhow::Result<Self> {
+        // Create a temporary ProviderManager with empty custom_endpoints
+        let temp_manager = Self {
+            current: std::sync::Arc::new(adk_model::anthropic::AnthropicClient::new(
+                adk_model::anthropic::AnthropicConfig::new("temp_key", "temp_model")
+            ).unwrap()),
+            current_provider: "temp".to_string(),
+            current_model: "temp".to_string(),
+            custom_endpoints: HashMap::new(),
+            context_window_cache: Arc::new(ContextWindowCache::new()),
+        };
+
+        let llm = temp_manager.create_model(provider, model)?;
+
+        Ok(Self {
+            current: llm,
+            current_provider: provider.to_string(),
+            current_model: model.to_string(),
+            custom_endpoints: HashMap::new(),
+            context_window_cache: Arc::new(ContextWindowCache::new()),
+        })
+    }
+
     /// Auto-detect provider from environment variables or OS keychain.
     ///
     /// Priority order:

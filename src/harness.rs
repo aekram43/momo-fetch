@@ -54,8 +54,11 @@ impl Harness {
         // Initialize memory vault
         let vault = Arc::new(Mutex::new(ObsidianVault::open(&config.vault_path)?));
 
-        // Initialize provider
-        let provider_mgr = ProviderManager::from_env()?;
+        // Initialize provider from settings or environment
+        let provider_mgr = ProviderManager::from_settings_or_env(
+            Some(&config.provider.default_provider),
+            Some(&config.provider.default_model)
+        )?;
         provider_mgr.prefetch_context_windows();
 
         // Initialize sandbox
