@@ -1,0 +1,53 @@
+--- a/src/providers.rs
++++ b/src/providers.rs
+@@ -85,15 +85,27 @@ impl ProviderManager {
+                 let base_url = std::env::var("ZAI_URL")
+                     .or_else(|_| std::env::var("ZAI_LLM_URL"))
+                     .unwrap_or_else(|_| "https://api.z.ai/api/coding/paas/v4".to_string());
++
++                // Validate API key format before creating client
++                if key.contains('.') && key.split('.').count() == 2 {
++                    tracing::warn!("ZAI API key appears to be in format 'uid.secret', this may indicate an expired or incorrect key");
++                    tracing::warn!("Please verify your ZAI API key at https://z.ai");
++                }
++
+                 let config = OpenAICompatibleConfig::new(&key, &model)
+                     .with_base_url(&base_url)
+                     .with_provider_name("zai");
++
++                tracing::info!("Connecting to ZAI at: {}", base_url);
++                tracing::info!("Using model: {}", model);
++
+                 let client = OpenAICompatible::new(config)?;
+                 ("zai".into(), model, Arc::new(client))
+             } else if let (Ok(url), Ok(key)) = (
+                 std::env::var("LLM_URL"),
+                 std::env::var("LLM_APIKEY"),
+             ) {
++                tracing::info!("Using generic OpenAI-compatible provider at: {}", url);
++
+                 // Generic OpenAI-compatible endpoint via LLM_URL + LLM_APIKEY
+                 let model = std::env::var("LLM_MODEL")
+                     .unwrap_or_else(|_| "default".to_string());
+@@ -336,6 +348,11 @@ impl ProviderManager {
+                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+                 let base_url = std::env::var("ZAI_LLM_URL")
+                     .unwrap_or_else(|_| "https://api.z.ai/api/coding/paas/v4".to_string());
++
++                // Validate before connecting
++                if key.contains('.') && key.split('.').count() == 2 {
++                    tracing::warn!("ZAI API key format suggests it may be expired or incorrect");
++                }
++
+                 let config = OpenAICompatibleConfig::new(&key, model)
+                     .with_base_url(&base_url)
+                     .with_provider_name("zai");
+@@ -363,6 +380,8 @@ impl ProviderManager {
+                     let key = std::env::var(&config.api_key_env)
+                         .map_err(|_| anyhow::anyhow!("{} not set", config.api_key_env))?;
+                     let mut builder = OpenAICompatibleConfig::new(&key, model);
++
++                    tracing::info!("Creating custom OpenAI-compatible client for: {}", provider);
+                     if let Some(url) = &config.base_url {
+                         builder = builder.with_base_url(url);
+                     }

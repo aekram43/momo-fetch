@@ -1,15 +1,15 @@
 {
   "permission_mode": "auto",
-  "default_provider": "openrouter",
-  "default_model": "google/gemma-4-26b-a4b-it:free",
+  "default_provider": "anthropic",
+  "default_model": "claude-sonnet-4-20250514",
   "memory": {
     "auto_search": true,
     "auto_write": true,
     "search_mode": "grep_llm",
     "max_results_per_turn": 5,
     "extract_threshold": 10,
-    "sidecar_model": "google/gemma-4-26b-a4b-it:free",
-    "sidecar_provider": "openrouter",
+    "sidecar_model": null,
+    "sidecar_provider": null,
     "consolidate_threshold": 30
   },
   "context_window": {}
