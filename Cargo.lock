@@ -3193,7 +3193,7 @@ dependencies = [
 
 [[package]]
 name = "momo-fetch"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "adk-model",
  "adk-rust",
@@ -3201,11 +3201,14 @@ dependencies = [
  "adk-tool",
  "anyhow",
  "assert_cmd",
+ "async-stream",
+ "axum",
  "chrono",
  "clap",
  "colored",
  "dirs",
  "dotenvy",
+ "futures",
  "glob",
  "ignore",
  "keyring-core",
@@ -3223,6 +3226,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-test",
+ "tower 0.5.3",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "uuid",

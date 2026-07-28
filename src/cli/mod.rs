@@ -46,6 +46,20 @@ pub struct CliArgs {
     /// Test MCP server connections and exit
     #[arg(long = "test-mcp")]
     pub test_mcp: bool,
+
+    /// Start the API gateway server
+    #[arg(long = "gateway")]
+    pub gateway: bool,
+
+    /// Gateway port, overriding .harness/gateway.json. Use 0 to let the OS pick
+    /// a free port — the chosen one is printed as `MOMO_GATEWAY_LISTENING <url>`.
+    #[arg(long = "gateway-port")]
+    pub gateway_port: Option<u16>,
+
+    /// Gateway bind address (default: 127.0.0.1). Binding a non-loopback
+    /// address requires auth to be enabled in .harness/gateway.json.
+    #[arg(long = "gateway-bind")]
+    pub gateway_bind: Option<std::net::IpAddr>,
 }
 
 /// Main CLI entry point.
@@ -59,6 +73,15 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
     }
 
     let config = crate::config::HarnessConfig::from_cli_args(&args)?;
+
+    // Gateway mode: start HTTP API server
+    if args.gateway {
+        let overrides = crate::gateway::BindOverrides {
+            port: args.gateway_port,
+            bind: args.gateway_bind,
+        };
+        return crate::gateway::run(config, overrides).await;
+    }
     let mut harness = crate::harness::Harness::build(config).await?;
 
     // --test-mcp: connect all MCP servers, report status, exit

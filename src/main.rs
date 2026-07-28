@@ -4,6 +4,7 @@ mod config;
 mod context;
 mod context_window;
 mod cost;
+mod gateway;
 mod harness;
 mod mcp;
 mod memory;

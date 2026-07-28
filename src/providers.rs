@@ -325,6 +325,35 @@ impl ProviderManager {
         list
     }
 
+    /// List every known provider, including ones with no API key configured.
+    ///
+    /// Unlike [`list_available`](Self::list_available), which filters to
+    /// configured providers, this reports `available: false` for the rest so a
+    /// UI can show them greyed out and explain *why* they can't be selected,
+    /// rather than silently omitting them.
+    pub fn list_all(&self) -> Vec<ProviderInfo> {
+        use crate::config::secrets::SecretStore;
+
+        let mut list: Vec<ProviderInfo> = KNOWN_PROVIDERS
+            .iter()
+            .map(|provider| ProviderInfo {
+                provider: (*provider).to_string(),
+                default_model: default_model_for_provider(provider),
+                // Ollama runs locally and needs no key.
+                available: *provider == "ollama" || SecretStore::get(provider).is_ok(),
+            })
+            .collect();
+
+        for (name, config) in &self.custom_endpoints {
+            list.push(ProviderInfo {
+                provider: name.clone(),
+                default_model: config.model.clone(),
+                available: true,
+            });
+        }
+        list
+    }
+
     /// Create a model instance for any supported provider.
     pub fn create_model(&self, provider: &str, model: &str) -> anyhow::Result<Arc<dyn Llm>> {
         use crate::config::secrets::SecretStore;
@@ -422,6 +451,17 @@ pub struct ProviderInfo {
     #[allow(dead_code)]
     pub available: bool,
 }
+
+/// Providers with built-in support, in the order the UI should present them.
+const KNOWN_PROVIDERS: &[&str] = &[
+    "anthropic",
+    "openai",
+    "deepseek",
+    "groq",
+    "openrouter",
+    "zai",
+    "ollama",
+];
 
 /// Get the default model name for a given provider.
 fn default_model_for_provider(provider: &str) -> String {

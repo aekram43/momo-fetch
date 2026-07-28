@@ -428,6 +428,67 @@ impl Harness {
         self.runner.interrupt(&self.current_session_id)
     }
 
+    // ── Turn lifecycle (shared by the REPL and the gateway) ────
+    //
+    // Cost accounting used to live only in the REPL, which meant turns driven
+    // through the gateway recorded nothing and `/v1/cost` under-reported. These
+    // three calls are the single definition of the lifecycle; both front-ends
+    // use them so they cannot drift.
+
+    /// Reset per-turn accumulators. Call before every turn leg — including the
+    /// follow-up leg after a tool confirmation, which is a separate LLM turn.
+    pub fn begin_turn(&self) {
+        self.cost_tracker.reset_turn();
+    }
+
+    /// Record usage metadata carried by a stream event.
+    /// Returns the incremental cost in USD, if the event carried usage.
+    pub fn record_usage(&self, usage: &adk_rust::UsageMetadata) -> Option<f64> {
+        self.cost_tracker.record_event(usage)
+    }
+
+    /// Persist accumulated cost once the turn (all legs) is finished.
+    pub fn end_turn(&self) {
+        self.cost_tracker.finalize_turn();
+    }
+
+    /// Context-window usage for the most recently recorded prompt.
+    pub fn context_usage(&self) -> crate::context_window::ContextUsage {
+        let provider = self.provider_mgr.current_provider().to_string();
+        let model = self.provider_mgr.current_model_name().to_string();
+        crate::context_window::ContextUsage::new_resolved(
+            self.cost_tracker.last_prompt_tokens() as i64,
+            &provider,
+            &model,
+            Some(&self.config.context_window_overrides),
+            Some(self.provider_mgr.context_window_cache().as_ref()),
+        )
+    }
+
+    /// Tool names the user has approved for the lifetime of this process.
+    ///
+    /// Approval is sticky by tool *name* (see `run_confirmation_turn`), so this
+    /// is the set of tools that will no longer prompt for confirmation.
+    pub fn approved_tools(&self) -> Vec<String> {
+        let mut names = self
+            .approved_tools
+            .lock()
+            .map(|g| g.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    /// Revoke all sticky tool approvals and rebuild the runner so the next
+    /// matching tool call prompts again.
+    pub fn clear_approved_tools(&mut self) -> anyhow::Result<()> {
+        if let Ok(mut guard) = self.approved_tools.lock() {
+            guard.clear();
+        }
+        self.rebuild_runner()?;
+        Ok(())
+    }
+
     /// Switch model and rebuild runner.
     pub fn switch_model(&mut self, model: &str) -> anyhow::Result<()> {
         self.provider_mgr.switch_model(model)?;
