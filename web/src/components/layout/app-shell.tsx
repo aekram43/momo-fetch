@@ -9,6 +9,8 @@ import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Toaster } from "@/components/shared/toaster";
 import { TurnRail } from "@/components/shared/turn-rail";
+import { useDesktopMenu } from "@/hooks/use-desktop-menu";
+import { useDesktopBoot } from "@/hooks/use-desktop-boot";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { useTurnCues } from "@/hooks/use-turn-cues";
 import { useChatStore } from "@/stores/chat-store";
@@ -40,6 +42,8 @@ export function AppShell() {
   } = useUiStore();
   useShortcuts();
   useTurnCues();
+  useDesktopMenu();
+  const boot = useDesktopBoot();
 
   // F28 — apply stored panel/sound preferences after mount, never during module
   // evaluation, so the first client render matches the exported HTML.
@@ -47,6 +51,13 @@ export function AppShell() {
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  // Under Tauri, hold the UI until the gateway URL is known — rendering panels
+  // that immediately fetch the wrong origin just fills the screen with errors.
+  if (boot.status === "starting") return <BootScreen />;
+  if (boot.status === "failed") {
+    return <BootScreen error={boot.error} stderr={boot.stderr} />;
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -108,6 +119,37 @@ export function AppShell() {
           viewport must never be able to strand a turn (spec §6). */}
       <ApprovalDialog />
       <Toaster />
+    </div>
+  );
+}
+
+/**
+ * Shown while the desktop shell starts its gateway, and when that fails.
+ *
+ * The stderr tail is the whole point of the failure case: "could not start"
+ * without the reason sends the user to a log file they do not know the path of.
+ */
+function BootScreen({ error, stderr }: { error?: string; stderr?: string }) {
+  return (
+    <div className="flex h-full items-center justify-center p-8">
+      <div className="w-full max-w-lg">
+        <p className="font-mono text-xs uppercase tracking-[0.14em] text-faint">
+          {error ? "Could not start" : "Starting"}
+        </p>
+        <h1 className="mt-2 text-lg font-medium text-ink">
+          {error ?? "Bringing up the agent…"}
+        </h1>
+        {!error && (
+          <p className="mt-2 text-sm text-dim">
+            Starting the gateway and waiting for it to become ready.
+          </p>
+        )}
+        {stderr && (
+          <pre className="mt-4 max-h-64 overflow-auto rounded border border-rule bg-void px-3 py-2 font-mono text-[11px] leading-relaxed text-dim">
+            {stderr}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

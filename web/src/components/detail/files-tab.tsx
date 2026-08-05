@@ -3,9 +3,11 @@
 import { useState } from "react";
 
 import { Hint, PanelSection } from "@/components/shared/panel-section";
+import { isDesktop, openProject } from "@/lib/desktop";
 import { SkeletonRows } from "@/components/shared/skeleton";
 import { ApiError, readFile, readTree } from "@/lib/api-client";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
+import { useToastStore } from "@/stores/toast-store";
 import type { FileContent } from "@/lib/types";
 
 /**
@@ -24,6 +26,27 @@ export function FilesTab() {
   const { data: tree, error } = useGatewayResource(() => readTree(dir, 1), [dir]);
   const [preview, setPreview] = useState<FileContent | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [confirmRoot, setConfirmRoot] = useState(false);
+  const push = useToastStore((s) => s.push);
+
+  /**
+   * T4 — re-root the whole harness at another directory.
+   *
+   * Behind a confirm because it moves the sandbox, the memory vault and the
+   * session DB at once, and the gateway restarts under it. Desktop only: there
+   * is no browser equivalent of choosing a folder on the host.
+   */
+  async function reroot() {
+    const path = window.prompt("Project directory to open:");
+    if (!path) return;
+    const url = await openProject(path);
+    if (url) {
+      push({ tone: "info", message: "Reopening at the new project…" });
+    } else {
+      push({ tone: "error", message: "Could not open that directory." });
+    }
+    setConfirmRoot(false);
+  }
 
   async function open(path: string) {
     setPreview(null);
@@ -57,6 +80,43 @@ export function FilesTab() {
       }
     >
       <p className="mb-1.5 truncate font-mono text-[10px] text-faint">{dir}</p>
+
+      {isDesktop() && (
+        <div className="mb-2">
+          {confirmRoot ? (
+            <div className="rounded border border-signal/40 bg-signal/10 px-2 py-1.5">
+              <p className="text-[11px] leading-relaxed text-ink">
+                Opening another project moves the sandbox, memory vault and
+                sessions, and restarts the agent. Continue?
+              </p>
+              <div className="mt-1.5 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setConfirmRoot(false)}
+                  className="rounded border border-rule px-2 py-0.5 font-mono text-[10px] text-ink"
+                >
+                  cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void reroot()}
+                  className="rounded bg-signal px-2 py-0.5 font-mono text-[10px] font-semibold text-void"
+                >
+                  choose folder
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmRoot(true)}
+              className="font-mono text-[10px] text-dim transition-colors hover:text-ink"
+            >
+              open another project…
+            </button>
+          )}
+        </div>
+      )}
 
       {error ? (
         <Hint>Could not list that directory.</Hint>

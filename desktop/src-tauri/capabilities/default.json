@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions the desktop shell needs. Deliberately narrow: the shell's job is to host the web UI and supervise one child process, not to expose OS APIs to page scripts.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "dialog:allow-open",
+    "log:default"
+  ]
+}

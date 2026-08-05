@@ -13,20 +13,20 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**WP-6 · dev · 2026-08-05 · rust 305 passed · web 22 passed · tsc + eslint clean · 🎉 Phase 1 complete**
+**WP-7/8 · dev · 2026-08-05 · rust 305 · desktop 2 · web 22 · all clean · 🎉 Phase 1 + desktop shell done**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
 | **Frontend** (F1–F29) | **29** | **0** | ██████████████████ **100%** ✅ |
-| **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
+| **Desktop** (T1–T13) | 10 | 3 | ██████████████░░░░ 77% |
 | **Phase 1** (gateway + frontend) | **43** | **0** | ██████████████████ **100%** ✅ |
-| **ทั้งโปรเจกต์** | 43 | 13 | ██████████████░░░░ 77% |
+| **ทั้งโปรเจกต์** | 53 | 3 | █████████████████░ 95% |
 
-**🎉 Phase 1 เสร็จครบ 43/43** — gateway ครบ + frontend ครบ ทั้ง G1–G13, R1, B0–B4, F1–F29 เหลือแต่ Phase 2 (Tauri desktop)
+**🎉 แอป desktop รันได้จริงแล้ว** — `.app` เปิดขึ้นมา spawn gateway เอง โหลด UI ครบ ปิดแอปแล้ว gateway ตายตาม เหลือแต่ signing/updater ที่ต้องใช้ credential
 
-**Wave ถัดไป: WP-7 (Phase 2)** — T1 Tauri scaffold · T2 gateway supervisor · T3 URL injection · T4 open project · T5 single-instance
+**เหลือ: T11 auto-updater · T13 code signing** (ต้องใช้ credential ของคน) · T9 deep links (ยังไม่ทำ)
 
 **✅ งานค้างทั้ง 3 อย่าง เคลียร์หมดแล้ว**
 

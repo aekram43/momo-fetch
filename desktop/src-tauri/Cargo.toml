@@ -1,0 +1,37 @@
+[package]
+name = "momo-worker"
+version = "0.9.1"
+description = "Desktop shell for the momo-fetch agent harness"
+authors = ["aekmaxion"]
+license = "MIT"
+repository = "https://github.com/aekram43/momo-fetch"
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "momo_worker_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+thiserror = "2"
+# Blocking HTTP, used only for the /health readiness poll. reqwest would drag in
+# a second async runtime for one request on a startup thread.
+ureq = "2"
+tauri = { version = "2.11.3", features = ["tray-icon"] }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

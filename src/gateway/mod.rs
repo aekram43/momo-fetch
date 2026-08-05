@@ -128,6 +128,17 @@ pub struct GatewayState {
 pub struct BindOverrides {
     pub port: Option<u16>,
     pub bind: Option<IpAddr>,
+    /// Extra CORS origins granted for this run only.
+    ///
+    /// Exists for the desktop shell. A Tauri webview's origin is
+    /// `tauri://localhost` (macOS/iOS) or `http://tauri.localhost`
+    /// (Windows/Android), which is cross-origin to the `http://127.0.0.1:<port>`
+    /// gateway — so without an explicit grant the app cannot call its own
+    /// gateway and every panel fails to load.
+    ///
+    /// A flag rather than a wildcard, and never written to the user's config:
+    /// the shell knows exactly which origin it needs and grants only that.
+    pub allow_origins: Vec<String>,
 }
 
 /// Load gateway config from `.harness/gateway.json`.
@@ -145,6 +156,14 @@ pub fn load_gateway_config(project_path: &std::path::Path) -> GatewayConfig {
 pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Result<()> {
     let project_path = config.project_path.clone();
     let gateway_config = load_gateway_config(&project_path);
+
+    let mut gateway_config = gateway_config;
+    if !overrides.allow_origins.is_empty() {
+        gateway_config
+            .cors_origins
+            .extend(overrides.allow_origins.iter().cloned());
+    }
+    let gateway_config = gateway_config;
 
     let bind_ip = overrides
         .bind

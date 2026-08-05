@@ -18,15 +18,19 @@ const nextConfig: NextConfig = {
   // rely on this.
   trailingSlash: true,
 
-  // G9 mounts this bundle at /ui, and Next emits **absolute** asset URLs. Without
-  // a basePath the built HTML links `/_next/static/…`, which is not under /ui —
-  // the browser 404s every stylesheet and script and renders an unstyled page.
-  // (Fetching those same assets *with* a /ui prefix by hand succeeds, which makes
-  // this easy to mis-diagnose as a CSS problem.)
+  // Next emits **absolute** asset URLs, so the bundle has to know where it will
+  // be mounted — and the two consumers mount it in different places:
   //
-  // Must match the gateway's mount point. It is inlined into the client bundle at
-  // build time, so changing one without the other silently breaks asset loading.
-  basePath: "/ui",
+  //   gateway (G9)  serves it at /ui  → needs basePath "/ui"
+  //   Tauri (T1)    serves it at /    → needs basePath ""
+  //
+  // Get this wrong in either direction and every stylesheet and script 404s,
+  // rendering an unstyled page. It is easy to mis-diagnose as a CSS problem:
+  // fetching the same assets by hand *with* the right prefix returns 200.
+  //
+  // So it is a build-time switch. `npm run build` keeps the gateway default;
+  // `npm run build:desktop` sets MOMO_BASE_PATH="" for the Tauri bundle.
+  basePath: process.env.MOMO_BASE_PATH ?? "/ui",
 };
 
 export default nextConfig;

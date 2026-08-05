@@ -60,6 +60,14 @@ pub struct CliArgs {
     /// address requires auth to be enabled in .harness/gateway.json.
     #[arg(long = "gateway-bind")]
     pub gateway_bind: Option<std::net::IpAddr>,
+
+    /// Additionally allow this CORS origin (repeatable).
+    ///
+    /// For the desktop shell, whose webview origin (`tauri://localhost`) is
+    /// cross-origin to the loopback gateway. Applies to this run only and is
+    /// never written to `.harness/gateway.json`.
+    #[arg(long = "gateway-allow-origin", value_name = "ORIGIN")]
+    pub gateway_allow_origin: Vec<String>,
 }
 
 /// Main CLI entry point.
@@ -79,6 +87,7 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
         let overrides = crate::gateway::BindOverrides {
             port: args.gateway_port,
             bind: args.gateway_bind,
+            allow_origins: args.gateway_allow_origin.clone(),
         };
         return crate::gateway::run(config, overrides).await;
     }

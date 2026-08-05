@@ -55,6 +55,15 @@ export function SessionList() {
     };
   }, []);
 
+  // The native menu (T7) asks for a new session rather than reimplementing the
+  // create-then-reset dance.
+  useEffect(() => {
+    const onRequest = () => void create();
+    window.addEventListener("momo:new-session", onRequest);
+    return () => window.removeEventListener("momo:new-session", onRequest);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function open(id: string) {
     if (busy) return;
     setBusy(true);
