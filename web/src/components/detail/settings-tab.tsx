@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Hint, PanelSection } from "@/components/shared/panel-section";
+import { SkeletonRows } from "@/components/shared/skeleton";
 import {
   ApiError,
   clearApprovedTools,
@@ -10,6 +11,7 @@ import {
   setPermissionMode,
 } from "@/lib/api-client";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
+import { useUiStore } from "@/stores/ui-store";
 import type { PermissionMode } from "@/lib/types";
 
 const MODES: { value: PermissionMode; label: string; blurb: string }[] = [
@@ -33,6 +35,8 @@ export function SettingsTab() {
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [confirmYolo, setConfirmYolo] = useState(false);
+  const soundEnabled = useUiStore((s) => s.soundEnabled);
+  const toggleSound = useUiStore((s) => s.toggleSound);
 
   async function choose(mode: PermissionMode) {
     if (busy) return;
@@ -69,7 +73,7 @@ export function SettingsTab() {
       {error ? (
         <Hint>Could not load settings.</Hint>
       ) : !data ? (
-        <Hint>Loading…</Hint>
+        <SkeletonRows />
       ) : (
         <>
           <div className="mb-1.5 flex gap-1">
@@ -158,6 +162,16 @@ export function SettingsTab() {
               </>
             )}
           </div>
+          {/* F27 — off by default; a cue only helps if the user asked for it. */}
+          <label className="mt-3 flex cursor-pointer items-center gap-2 text-[11px] text-dim">
+            <input
+              type="checkbox"
+              checked={soundEnabled}
+              onChange={toggleSound}
+              className="accent-signal"
+            />
+            Sound on approval, completion and errors
+          </label>
         </>
       )}
       {conflict && (

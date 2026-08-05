@@ -1,19 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { highlight, isSupportedLang } from "@/lib/highlight";
+
 /**
- * Markdown for assistant output (F7).
+ * Markdown for assistant output (F7), with Shiki highlighting (F24).
  *
- * Highlighting is deliberately deferred. Spec §3.2 names Shiki, but it wants a
- * highlighter instance created once and reused, and loading grammars during a
- * token-by-token stream re-highlights the same block on every chunk. The blocks
- * below are styled and copyable now; wiring Shiki in behind a memo is a
- * self-contained follow-up (F24) that will not change this component's shape.
+ * `streaming` is the important prop: while a turn is in flight the trailing code
+ * block grows on every token, and highlighting it each time would re-run Shiki
+ * against a slightly longer string dozens of times per second. Blocks stay plain
+ * until the turn settles, then highlight once.
  */
-export function MessageContent({ content }: { content: string }) {
+export function MessageContent({
+  content,
+  streaming = false,
+}: {
+  content: string;
+  streaming?: boolean;
+}) {
   return (
     <div className="text-sm leading-relaxed text-ink">
       <ReactMarkdown
@@ -75,7 +82,11 @@ export function MessageContent({ content }: { content: string }) {
               );
             }
             const lang = /language-(\w+)/.exec(className ?? "")?.[1] ?? "";
-            return <CodeBlock lang={lang}>{String(children)}</CodeBlock>;
+            return (
+              <CodeBlock lang={lang} streaming={streaming}>
+                {String(children)}
+              </CodeBlock>
+            );
           },
           pre: ({ children }) => <>{children}</>,
         }}
@@ -86,11 +97,42 @@ export function MessageContent({ content }: { content: string }) {
   );
 }
 
-function CodeBlock({ lang, children }: { lang: string; children: string }) {
+function CodeBlock({
+  lang,
+  children,
+  streaming,
+}: {
+  lang: string;
+  children: string;
+  streaming: boolean;
+}) {
   const [copied, setCopied] = useState(false);
+  // Highlighted HTML is stored *with* the source it was produced from, so a
+  // stale result from a previous render can be told apart without a second
+  // state field — and every setState stays inside the async callback, which is
+  // what React 19's set-state-in-effect rule wants.
+  const [highlighted, setHighlighted] = useState<{
+    code: string;
+    html: string;
+  } | null>(null);
+
+  const code = children.replace(/\n$/, "");
+  const html = !streaming && highlighted?.code === code ? highlighted.html : null;
+
+  useEffect(() => {
+    // Skip entirely while streaming — see the component doc.
+    if (streaming || !isSupportedLang(lang)) return;
+    let cancelled = false;
+    void highlight(code, lang).then((result) => {
+      if (!cancelled && result) setHighlighted({ code, html: result });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [code, lang, streaming]);
 
   async function copy() {
-    await navigator.clipboard.writeText(children);
+    await navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
@@ -111,9 +153,17 @@ function CodeBlock({ lang, children }: { lang: string; children: string }) {
         </button>
       </div>
       <pre className="overflow-x-auto bg-void px-3 py-2">
-        <code className="font-mono text-xs leading-relaxed text-ink">
-          {children.replace(/\n$/, "")}
-        </code>
+        {html ? (
+          // Shiki escapes what it emits, so this is safe to inject.
+          <code
+            className="font-mono text-xs leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        ) : (
+          <code className="font-mono text-xs leading-relaxed text-ink">
+            {code}
+          </code>
+        )}
       </pre>
     </div>
   );

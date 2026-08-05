@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Hint, PanelSection } from "@/components/shared/panel-section";
+import { SkeletonRows } from "@/components/shared/skeleton";
 import { ApiError, readFile, readTree } from "@/lib/api-client";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
 import type { FileContent } from "@/lib/types";
@@ -60,7 +61,7 @@ export function FilesTab() {
       {error ? (
         <Hint>Could not list that directory.</Hint>
       ) : !tree ? (
-        <Hint>Loading…</Hint>
+        <SkeletonRows />
       ) : (
         <ul className="-mx-1 max-h-52 space-y-px overflow-y-auto">
           {tree.entries.map((e) => (

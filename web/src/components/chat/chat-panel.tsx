@@ -2,8 +2,10 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { FileAttach } from "@/components/chat/file-attach";
 import { MessageContent } from "@/components/chat/message-content";
 import { ToolCallCard } from "@/components/chat/tool-call-card";
+import { TypingIndicator } from "@/components/shared/skeleton";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import { useChatStore } from "@/stores/chat-store";
 
@@ -56,13 +58,21 @@ export function ChatPanel() {
                     {m.toolCalls.map((c) => (
                       <ToolCallCard key={c.id} call={c} />
                     ))}
-                    {m.content && <MessageContent content={m.content} />}
+                    {m.content && (
+                      <MessageContent
+                        content={m.content}
+                        streaming={Boolean(turnId) && m.id === messages.at(-1)?.id}
+                      />
+                    )}
                   </>
                 )}
               </article>
             ))}
             {turnId && !messages.at(-1)?.content && (
-              <p className="font-mono text-xs text-signal">working…</p>
+              <p className="flex items-center gap-2 font-mono text-xs text-signal">
+                <TypingIndicator />
+                working…
+              </p>
             )}
           </div>
         )}
@@ -146,6 +156,8 @@ function Composer({
   onSend: (text: string) => void;
   onStop: () => void;
 }) {
+  // Attached file contents are appended to the draft as fenced blocks (F25), so
+  // the user can see and edit exactly what will be sent.
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -171,6 +183,11 @@ function Composer({
         <span className="pb-1 font-mono text-sm text-faint" aria-hidden>
           ›
         </span>
+        <FileAttach
+          onAttach={(blocks) =>
+            setValue((v) => (v ? `${v}\n\n${blocks}` : blocks))
+          }
+        />
         <textarea
           ref={ref}
           rows={1}

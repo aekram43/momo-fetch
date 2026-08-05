@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Dot, Hint, PanelSection } from "@/components/shared/panel-section";
+import { SkeletonRows } from "@/components/shared/skeleton";
 import { ApiError, getProviders, switchProvider } from "@/lib/api-client";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
 
@@ -52,7 +53,7 @@ export function ModelSelector() {
       {error ? (
         <Hint>Could not load providers.</Hint>
       ) : !data ? (
-        <Hint>Loading…</Hint>
+        <SkeletonRows />
       ) : (
         <ul className="-mx-1 space-y-px">
           {data.providers.map((p) => (

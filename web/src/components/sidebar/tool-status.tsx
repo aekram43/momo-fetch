@@ -1,6 +1,7 @@
 "use client";
 
 import { Dot, Hint, PanelSection } from "@/components/shared/panel-section";
+import { SkeletonRows } from "@/components/shared/skeleton";
 import { getMcpServers } from "@/lib/api-client";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
 
@@ -29,7 +30,7 @@ export function ToolStatus() {
       {error ? (
         <Hint>Could not load MCP status.</Hint>
       ) : !data ? (
-        <Hint>Loading…</Hint>
+        <SkeletonRows />
       ) : data.servers.length === 0 ? (
         <Hint>
           No MCP servers configured. See{" "}

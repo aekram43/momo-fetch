@@ -1053,10 +1053,10 @@ Single source of truth for task state. Update this table, not the individual tas
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
-| **Frontend** (F1–F29) | 21 | 8 | █████████████░░░░░ 72% |
+| **Frontend** (F1–F29) | **29** | **0** | ██████████████████ **100%** ✅ |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 35 | 8 | ██████████████░░░░ 81% |
-| **Whole project** | 35 | 21 | ███████████░░░░░░░ 62% |
+| **Phase 1** (gateway + frontend) | **43** | **0** | ██████████████████ **100%** ✅ |
+| **Whole project** | 43 | 13 | ██████████████░░░░ 77% |
 
 **The gateway is complete.** Every G-task is built and wire-verified — streaming, approvals, concurrency, cost, sandboxed file access, static serving. Phase 1 is 33% done by task count; everything still open is frontend, which is the larger half of the work and has not been started.
 
@@ -1091,12 +1091,12 @@ Single source of truth for task state. Update this table, not the individual tas
 | **F1–F3, F5** scaffold, client, SSE parser, shell | *WP-3* | `web/`. Next **16** (spec said 15). Needs `basePath:'/ui'` to match G9. 22 parser tests |
 | **F4, F6–F11, F29** core chat | *WP-4* | Full turn works in the browser, incl. the approval round-trip. Cards retire on approval — `call_id` changes across the seam |
 | **F12–F20** management panels | *WP-5* | agents · models · MCP · memory · files · settings · cost · connection · shortcuts |
+| **F21–F28** polish | *WP-6* | toasts · skeletons · responsive drawers · Shiki · file attach · empty states · sounds · prefs |
 
 #### ⬜ Open
 
 | Task | Owner model | Package | Notes |
 |---|---|---|---|
-| **F21–F28** polish | Haiku 4.5 | **WP-6** | |
 | **T1–T5** Tauri core | **Opus 5** | **WP-7** | process supervision, cross-platform kill |
 | **T6–T9, T12** shell features | Sonnet 5 | **WP-8** | |
 | **T10, T11, T13** ship pipeline | Sonnet 5 + human | **WP-9** | T13 signing needs human credentials |

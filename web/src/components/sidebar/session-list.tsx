@@ -9,6 +9,7 @@ import {
   listSessions,
 } from "@/lib/api-client";
 import type { SessionInfo } from "@/lib/types";
+import { SkeletonRows } from "@/components/shared/skeleton";
 import { useChatStore } from "@/stores/chat-store";
 
 /**
@@ -105,7 +106,7 @@ export function SessionList() {
       </h2>
 
       {sessions === null ? (
-        <p className="text-xs text-faint">Loading…</p>
+        <SkeletonRows />
       ) : sessions.length === 0 ? (
         <p className="text-xs leading-relaxed text-faint">
           No sessions yet. Start one to begin.

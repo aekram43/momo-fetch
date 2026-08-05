@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Hint, PanelSection } from "@/components/shared/panel-section";
+import { SkeletonRows } from "@/components/shared/skeleton";
 import {
   ApiError,
   getAgents,
@@ -42,7 +43,7 @@ export function AgentPicker() {
       {error ? (
         <Hint>Could not load agents.</Hint>
       ) : !data ? (
-        <Hint>Loading…</Hint>
+        <SkeletonRows />
       ) : data.agents.length === 0 ? (
         <Hint>
           None configured. Add one to{" "}

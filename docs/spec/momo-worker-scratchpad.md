@@ -4,7 +4,7 @@
 > **Spec:** [`docs/spec/momo-worker.md`](./momo-worker.md) — read §0 (Code Audit) first; it is the load-bearing part.
 > **Dispatch:** spec **§12** is the work plan (packages, model routing, waves). §9 below is now just a pointer into it.
 > **Last updated:** 2026-08-05 · branch `dev` (0.9.1)
-> **Build state:** `cargo check --all-targets` clean (warnings only) · `cargo test --bin momo-fetch` → **303 passed**
+> **Build state:** `cargo check --all-targets` clean (warnings only) · rust **305 passed** · web **22 passed**, tsc + eslint clean
 
 ---
 
@@ -13,20 +13,20 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**WP-5 · dev · 2026-08-05 · rust 303 passed · web 22 passed · tsc + eslint clean**
+**WP-6 · dev · 2026-08-05 · rust 305 passed · web 22 passed · tsc + eslint clean · 🎉 Phase 1 complete**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
-| **Frontend** (F1–F29) | 21 | 8 | █████████████░░░░░ 72% |
+| **Frontend** (F1–F29) | **29** | **0** | ██████████████████ **100%** ✅ |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 35 | 8 | ██████████████░░░░ 81% |
-| **ทั้งโปรเจกต์** | 35 | 21 | ███████████░░░░░░░ 62% |
+| **Phase 1** (gateway + frontend) | **43** | **0** | ██████████████████ **100%** ✅ |
+| **ทั้งโปรเจกต์** | 43 | 13 | ██████████████░░░░ 77% |
 
-**✅ Phase 1 ใช้งานได้เกือบครบ** — แชท + approval + sessions + agents + models + MCP + memory + files + settings + cost + shortcuts ครบหมด เหลือแค่ polish (F21–F28)
+**🎉 Phase 1 เสร็จครบ 43/43** — gateway ครบ + frontend ครบ ทั้ง G1–G13, R1, B0–B4, F1–F29 เหลือแต่ Phase 2 (Tauri desktop)
 
-**Wave ถัดไป: WP-6** — F21 errors · F22 loading · F23 responsive · F24 Shiki · F25 file attach · F26 empty states · F27 sounds · F28 local storage
+**Wave ถัดไป: WP-7 (Phase 2)** — T1 Tauri scaffold · T2 gateway supervisor · T3 URL injection · T4 open project · T5 single-instance
 
 **✅ งานค้างทั้ง 3 อย่าง เคลียร์หมดแล้ว**
 
@@ -45,6 +45,26 @@
 ## 0. Wave progress log
 
 Newest first. One entry per work package, added on completion.
+
+### ✅ WP-6 — polish (F21–F28) · 2026-08-05 · **Phase 1 complete**
+
+Wave 4. Toasts, skeletons, responsive drawers, Shiki, file attach, empty states, sounds, preferences. Verified at 1600×1000, 900×800 and 420×780; no console errors.
+
+**🔴 Mobile was broken and only a screenshot caught it.** The first pass reused the desktop booleans for narrow viewports, so `sidebarOpen` *and* `detailOpen` both defaulted true and both rendered as fixed overlays — two panels stacked on top of each other with the chat and composer completely buried underneath. Every automated probe passed: the composer was in the DOM, had non-zero size, and was queryable. It was simply invisible.
+
+Fixed by giving mobile its own model: `mobileDrawer: "sessions" | "detail" | null`, always starting `null`, and opening one closes the other. Panels are *columns* on desktop where two can coexist; they are *drawers* on mobile where one cannot. Re-verified with `elementFromPoint` on the composer's centre — not just "is it in the DOM" but "is it the thing you would actually touch" — plus a count of visible panels after opening a drawer (exactly 1).
+
+**F24 Shiki, deferred from WP-4, is now in.** The deferral reason shaped the implementation: one lazily-created singleton highlighter (the *promise* is the singleton, so concurrent callers during a stream share one init), a build-time language allow-list since a static export cannot fetch grammars at runtime, and — the important part — **highlighting is skipped entirely while `streaming` is true**. A growing code block would otherwise re-run Shiki against a slightly longer string on every token.
+
+**F28 stores view state only — never server state.** Panel visibility and the sound toggle are this browser's business. The active session, agent, provider and permission mode are not: the harness holds one global set (§2.3, C4), so a remembered value is a belief that can be wrong the moment another tab or the REPL changes it. Those come from `/health` and the `role` event. Never the bearer token either. Preferences are applied in a post-mount `hydrate()` rather than at module scope, so the first client render matches the exported HTML.
+
+**F27 sounds are off by default** and synthesised with WebAudio rather than shipped as files — three tones pitched by urgency (approval rises, done falls, error is low). The `AudioContext` is created lazily because constructing one before a user gesture is blocked by autoplay policy and warns on every load. `prefers-reduced-motion` also silences them: someone who asked the OS to calm down did not ask for beeps.
+
+**F21 never auto-retries.** A retry action is only offered where the caller knows the request is an idempotent GET. Re-sending a turn double-bills and can re-run tools that already executed.
+
+**React 19 lint, third occurrence:** the Shiki effect tripped `set-state-in-effect` too. The fix that works and reads well is storing the derived value *with* the input it came from (`{code, html}`) and comparing, rather than adding a second "is stale" flag — every `setState` then lives inside the async callback.
+
+---
 
 ### ✅ Backlog clearance — security-review gate, cost parity, event_count · 2026-08-05
 
