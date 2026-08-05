@@ -18,6 +18,7 @@ Everything you need to know to use MOMO Fetch effectively.
 10. [Secrets & Security](#10-secrets--security)
 11. [Cost Tracking](#11-cost-tracking)
 12. [Agent Teams](#12-agent-teams)
+17. [Gateway & Cloudflare Tunnel](#17-gateway--cloudflare-tunnel)
 13. [Configuration Reference](#13-configuration-reference)
 14. [Custom Slash Commands](#14-custom-slash-commands)
 15. [Tips & Best Practices](#15-tips--best-practices)
@@ -1341,3 +1342,797 @@ momo-fetch --project ~/workspace/other-app
 Global settings (shared across all projects) live at `~/.config/momo-fetch/settings.json`.
 
 Priority: CLI flags > project `.harness/settings.json` > global `~/.config/momo-fetch/settings.json`
+
+---
+
+## 17. Gateway & Cloudflare Tunnel
+
+The gateway exposes MOMO Fetch's agent capabilities as an HTTP API, compatible with the OpenAI Chat Completions format. Combined with Cloudflare Tunnel, you can securely expose the agent to the internet without opening any firewall ports.
+
+### Architecture
+
+```
+Clients (Discord bot, Web UI, SDK, curl)
+         ↓ HTTPS
+  Cloudflare Tunnel (trycloudflare.com or custom domain)
+         ↓ HTTP
+  ┌──────────────────────────────────┐
+  │   MOMO Gateway (axum :3000)       │
+  │  ┌──────────────────────────────┐ │
+  │  │ Auth / Rate Limit            │ │
+  │  ├──────────────────────────────┤ │
+  │  │ /v1/chat/completions        │ │  ← OpenAI-compatible
+  │  │ /v1/chat/completions/stream  │ │  ← SSE streaming
+  │  │ /v1/sessions                 │ │  ← session management
+  │  │ /v1/models                   │ │
+  │  │ /v1/cost                     │ │
+  │  │ /health                     │ │
+  │  └──────────────────────────────┘ │
+  │              ↓                    │
+  │    harness.rs (agent core)        │
+  │    tools, memory, MCP, vault      │
+  └──────────────────────────────────┘
+```
+
+### Starting the Gateway
+
+```bash
+# Start gateway on default port 3000
+momo-fetch --gateway
+
+# Start with custom project and permission mode
+momo-fetch --gateway --project ~/my-app --permission auto
+
+# Start with a specific provider/model
+momo-fetch --gateway --provider anthropic --model claude-sonnet-4-20250514
+```
+
+The gateway starts the full harness (tools, memory vault, MCP servers, skills) and wraps it in an HTTP API.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v1/chat/completions` | Chat (OpenAI-compatible, non-streaming) |
+| `POST` | `/v1/chat/completions/stream` | Chat (SSE streaming) |
+| `GET` | `/v1/sessions` | List all sessions |
+| `POST` | `/v1/sessions` | Create a new session |
+| `GET` | `/v1/sessions/:id` | Get session details + messages |
+| `DELETE` | `/v1/sessions/:id` | Delete a session |
+| `POST` | `/v1/sessions/:id/compact` | Compact (summarize) a session |
+| `GET` | `/v1/models` | List current model info |
+| `GET` | `/v1/cost` | Cost tracking for current session |
+| `GET` | `/health` | Health check |
+
+### Chat Completions (Non-Streaming)
+
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-momo-xxx" \
+  -d '{
+    "model": "momo-fetch",
+    "messages": [
+      {"role": "user", "content": "scan the project and summarize it"}
+    ]
+  }'
+```
+
+Response (OpenAI-compatible):
+
+```json
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "anthropic/claude-sonnet-4-20250514",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": "Here's a summary of your project..."
+    },
+    "finish_reason": "stop"
+  }],
+  "usage": {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  }
+}
+```
+
+### Chat Completions (SSE Streaming)
+
+```bash
+curl http://localhost:3000/v1/chat/completions/stream \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-momo-xxx" \
+  -d '{
+    "model": "momo-fetch",
+    "messages": [
+      {"role": "user", "content": "explain the architecture"}
+    ]
+  }'
+```
+
+Response (Server-Sent Events):
+
+```
+data: {"id":"chatcmpl-abc","object":"chat.completion.chunk","created":1700000000,"model":"anthropic/claude-sonnet-4-20250514","choices":[{"index":0,"delta":{"role":"assistant","content":null},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-abc","object":"chat.completion.chunk","created":1700000000,"model":"anthropic/claude-sonnet-4-20250514","choices":[{"index":0,"delta":{"role":null,"content":"This"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-abc","object":"chat.completion.chunk","created":1700000000,"model":"anthropic/claude-sonnet-4-20250514","choices":[{"index":0,"delta":{"role":null,"content":" project"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-abc","object":"chat.completion.chunk","created":1700000000,"model":"anthropic/claude-sonnet-4-20250514","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+### Session Management
+
+Each request creates a new session automatically. To continue a conversation, pass the `session_id` in the request body:
+
+```bash
+# First message
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "hello"}]
+  }'
+# Response includes session_id in the "id" field: "chatcmpl-<session_id>"
+
+# Follow-up (use the session_id from the first response)
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "abc123",
+    "messages": [{"role": "user", "content": "now explain the architecture"}]
+  }'
+```
+
+You can also manage sessions explicitly:
+
+```bash
+# List sessions
+curl http://localhost:3000/v1/sessions
+
+# Create a new session
+curl -X POST http://localhost:3000/v1/sessions
+
+# Get session messages
+curl http://localhost:3000/v1/sessions/abc123
+
+# Compact (summarize) a session to free context
+curl -X POST http://localhost:3000/v1/sessions/abc123/compact
+
+# Delete a session
+curl -X DELETE http://localhost:3000/v1/sessions/abc123
+```
+
+### Configuration
+
+Create `.harness/gateway.json` in your project to configure the gateway:
+
+```jsonc
+{
+  // Port to listen on (default: 3000)
+  "port": 3000,
+
+  // CORS origins (default: ["*"] = allow all)
+  "cors_origins": ["https://my-app.com", "https://discord-bot.example.com"],
+
+  // Authentication
+  "auth": {
+    // Enable API key auth (default: false)
+    "enabled": true,
+
+    // API key definitions
+    "keys": {
+      "sk-momo-discord-bot": {
+        "name": "Discord Bot",
+        "rate_limit": 60,      // max 60 requests/minute
+        "daily_quota": 10000  // max 10,000 requests/day
+      },
+      "sk-momo-web-ui": {
+        "name": "Web UI",
+        "rate_limit": 120,
+        "daily_quota": 50000
+      },
+      "sk-momo-internal": {
+        "name": "Internal Services",
+        "rate_limit": 0,       // 0 = unlimited
+        "daily_quota": 0
+      }
+    }
+  }
+}
+```
+
+#### Config Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `port` | `u16` | `3000` | HTTP listen port |
+| `cors_origins` | `string[]` | `["*"]` | Allowed CORS origins. `"*"` = allow all |
+| `auth.enabled` | `bool` | `false` | Enable Bearer token authentication |
+| `auth.keys` | `map` | `{}` | API key → metadata mapping |
+| `auth.keys.*.name` | `string` | `""` | Human-readable key name |
+| `auth.keys.*.rate_limit` | `u32` | `0` | Max requests/minute (0 = unlimited) |
+| `auth.keys.*.daily_quota` | `u32` | `0` | Max requests/day (0 = unlimited) |
+
+#### Auth Behavior
+
+- When `auth.enabled` is `false` (default), all requests are accepted without authentication.
+- When `auth.enabled` is `true`, every request must include an `Authorization: Bearer <key>` header.
+- If the key is missing or invalid, the gateway returns `401 Unauthorized`.
+- If a rate limit or daily quota is exceeded, the gateway returns `429 Too Many Requests`.
+
+### Setting Up Cloudflare Tunnel
+
+Cloudflare Tunnel exposes your local gateway to the internet via Cloudflare's edge network. No public IP, no open ports needed. Cloudflare handles TLS, DDoS protection, and routing automatically.
+
+There are **3 options** depending on your situation:
+
+| Option | Account needed? | Domain needed? | URL | Persistent? | Best for |
+|--------|:---:|:---:|------|:---:|----------|
+| **A. Quick Tunnel** | No | No | `*.trycloudflare.com` (random) | No | Testing, demos, quick share |
+| **B. Named Tunnel** | Yes | Yes | `api.yourdomain.com` | Yes | Production, persistent public URL |
+| **C. Named Tunnel (No Config)** | Yes | No | `*.cfargotunnel.com` | Yes | Persistent but no custom domain |
+
+---
+
+#### Install cloudflared
+
+```bash
+# macOS
+brew install cloudflared
+
+# Linux (Debian/Ubuntu)
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+sudo dpkg -i cloudflared.deb
+
+# Linux (RHEL/CentOS/Fedora)
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.rpm -o cloudflared.rpm
+sudo rpm -i cloudflared.rpm
+
+# Arch Linux
+pacman -S cloudflared
+
+# Or download any platform from https://github.com/cloudflare/cloudflared/releases
+
+# Verify
+cloudflared --version
+```
+
+---
+
+#### Option A: Quick Tunnel (No Account, No Domain)
+
+The fastest way. Zero setup — just run one command and get a public URL instantly.
+
+**Prerequisites:** None (no Cloudflare account, no domain)
+
+```bash
+# Terminal 1: Start the gateway
+momo-fetch --gateway --project ~/my-app
+# 🚀 MOMO Gateway listening on http://127.0.0.1:3000
+
+# Terminal 2: Start a quick tunnel
+cloudflared tunnel --url http://localhost:3000
+```
+
+Output:
+
+```
+2024-01-15T10:00:00Z INF Starting tunnel tunnelID=xxx
+2024-01-15T10:00:01Z INF +----------------------------+
+2024-01-15T10:00:01Z INF |  Your quick tunnel has been created! Visit it at:
+2024-01-15T10:00:01Z INF |  https://random-words-abc123.trycloudflare.com
+2024-01-15T10:00:01Z INF +----------------------------+
+```
+
+Your gateway is now publicly accessible:
+
+```bash
+curl https://random-words-abc123.trycloudflare.com/health
+# {"status":"ok","version":"0.8.0"}
+
+curl https://random-words-abc123.trycloudflare.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-momo-xxx" \
+  -d '{
+    "messages": [{"role": "user", "content": "hello from the internet!"}]
+  }'
+```
+
+**Pros:** Zero config, works immediately
+**Cons:** URL changes every restart, no custom domain, rate limited by Cloudflare
+
+> **⚠️ Quick tunnels are ephemeral.** The URL changes every time you restart `cloudflared`. Use Option B or C for persistent URLs.
+
+---
+
+#### Option B: Named Tunnel with Custom Domain (Production)
+
+Permanent URL with your own domain. Requires a Cloudflare account and a domain managed by Cloudflare.
+
+**Prerequisites:**
+- Cloudflare account (free plan works)
+- A domain added to your Cloudflare dashboard (Free DNS)
+- `cloudflared` installed
+
+##### If you already have a Cloudflare account and cloudflared installed:
+
+```bash
+# Check if you're already logged in
+cloudflared tunnel list
+# If this shows your tunnels, skip to "If you already have a tunnel"
+
+# If it says "error", you need to login first
+cloudflared tunnel login
+# → Opens browser → select your account and domain → done
+```
+
+##### Step-by-step setup:
+
+**Step 1: Login to Cloudflare**
+
+```bash
+cloudflared tunnel login
+# Opens your browser → select your Cloudflare account → choose the zone (domain) to authorize
+# Certificate saved to ~/.cloudflared/cert.pem
+```
+
+> 💡 **Already logged in?** If you ran `cloudflared tunnel login` before (or used Cloudflare WARP / Zero Trust), you may already have `~/.cloudflared/cert.pem`. Run `cloudflared tunnel list` to check — if it works, skip to Step 2.
+
+**Step 2: Create a tunnel**
+
+```bash
+cloudflared tunnel create momo-gateway
+# Output:
+# Tunnel credentials written to ~/.cloudflared/<tunnel-id>.json
+# Created tunnel momo-gateway with id <tunnel-id>
+```
+
+> 💡 **Already have a tunnel?** If you already created a tunnel before, run `cloudflared tunnel list` to see it. You can reuse an existing tunnel — just add a new ingress rule in the config (Step 4).
+
+**Step 3: Route DNS to the tunnel**
+
+```bash
+# This creates a CNAME record automatically in your Cloudflare DNS
+cloudflared tunnel route dns momo-gateway api.yourdomain.com
+# Output: Route created for api.yourdomain.com -> tunnel <tunnel-id>
+```
+
+> If you want multiple subdomains (e.g., `api.domain.com` and `webhook.domain.com`), run this command for each one, then configure multiple ingress rules in Step 4.
+
+**Step 4: Create config file**
+
+Create `~/.cloudflared/config.yml`:
+
+```yaml
+# ~/.cloudflared/config.yml
+tunnel: <tunnel-id>                       # from Step 2 (e.g., a1b2c3d4-5e6f-...)
+credentials-file: ~/.cloudflared/<tunnel-id>.json
+
+ingress:
+  # Route your domain to the gateway
+  - hostname: api.yourdomain.com
+    service: http://localhost:3000
+
+  # Optional: route another hostname (e.g., health check endpoint without auth)
+  # - hostname: status.yourdomain.com
+  #   service: http://localhost:3000
+
+  # Catch-all: return 404 for unmatched hostnames (required)
+  - service: http_status:404
+```
+
+**Step 5: Run the tunnel**
+
+```bash
+# Terminal 1: Gateway
+momo-fetch --gateway --project ~/my-app
+
+# Terminal 2: Tunnel
+cloudflared tunnel run momo-gateway
+# Output:
+# INF Connection registered tunnel=<tunnel-id> connIndex=0
+# INF Started tunnel tunnelID=<tunnel-id> name=momo-gateway
+```
+
+Verify:
+
+```bash
+curl https://api.yourdomain.com/health
+# {"status":"ok","version":"0.8.0"}
+```
+
+Your gateway is now permanently at `https://api.yourdomain.com`. 🎉
+
+---
+
+#### Option C: Named Tunnel without Custom Domain
+
+Same as Option B but skips DNS routing. You get a stable `*.cfargotunnel.com` URL instead of a custom domain. Useful if you don't have a domain but want a persistent URL.
+
+**Prerequisites:** Cloudflare account only (no domain needed)
+
+**Step 1: Login**
+
+```bash
+cloudflared tunnel login
+# Opens browser → select your account (any zone, even a free one)
+```
+
+**Step 2: Create a tunnel**
+
+```bash
+cloudflared tunnel create momo-gateway
+```
+
+**Step 3: Create config (no hostname needed)**
+
+Create `~/.cloudflared/config.yml`:
+
+```yaml
+# ~/.cloudflared/config.yml
+tunnel: <tunnel-id>
+credentials-file: ~/.cloudflared/<tunnel-id>.json
+
+ingress:
+  # No hostname = catches all traffic on the tunnel's default .cfargotunnel.com URL
+  - service: http://localhost:3000
+  - service: http_status:404
+```
+
+**Step 4: Run**
+
+```bash
+cloudflared tunnel run momo-gateway
+```
+
+Get your tunnel's public URL:
+
+```bash
+cloudflared tunnel info momo-gateway
+# Look for the URL in the output
+```
+
+Or find it in your [Cloudflare Dashboard → Zero Trust → Networks → Tunnels](https://one.dash.cloudflare.com/?to=/:account/tunnels).
+
+---
+
+#### Choosing the Right Option
+
+```
+Need a quick test right now?
+  → Option A (Quick Tunnel)
+     No setup, no account, works in 10 seconds
+     URL changes on restart
+
+Want a permanent URL?
+  → Have a domain?
+      → Yes → Option B (Named + Custom Domain)
+                api.yourdomain.com
+                Most professional, production-ready
+
+      → No → Option C (Named without Domain)
+               *.cfargotunnel.com
+               Persistent URL, no domain needed
+```
+
+---
+
+#### Running Tunnel as a Background Service
+
+##### macOS (launchd)
+
+```bash
+# Find the full path to cloudflared
+which cloudflared
+# e.g., /opt/homebrew/bin/cloudflared
+
+# Create the plist
+cat > ~/Library/LaunchAgents/com.cloudflare.cloudflared.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cloudflare.cloudflared</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/cloudflared</string>
+        <string>tunnel</string>
+        <string>run</string>
+        <string>momo-gateway</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+EOF
+
+# Load it (starts immediately)
+launchctl load ~/Library/LaunchAgents/com.cloudflare.cloudflared.plist
+
+# Check status
+launchctl list | grep cloudflared
+
+# Stop it later
+launchctl unload ~/Library/LaunchAgents/com.cloudflare.cloudflared.plist
+```
+
+##### Linux (systemd)
+
+```bash
+# cloudflared installs the service automatically on Debian/RPM
+# Just enable it:
+sudo cloudflared service install
+sudo systemctl enable cloudflared
+sudo systemctl start cloudflared
+
+# Check status
+sudo systemctl status cloudflared
+
+# View logs
+sudo journalctl -u cloudflared -f
+```
+
+##### Run Gateway + Tunnel Together (script)
+
+Save as `start-gateway.sh`:
+
+```bash
+#!/bin/bash
+set -e
+
+PROJECT_DIR="${1:-.}"
+GATEWAY_PORT="${2:-3000}"
+
+# Start gateway in background
+momo-fetch --gateway --project "$PROJECT_DIR" &
+GATEWAY_PID=$!
+
+# Wait for gateway to be ready
+echo "Waiting for gateway on port $GATEWAY_PORT..."
+for i in $(seq 1 30); do
+  curl -s http://localhost:$GATEWAY_PORT/health > /dev/null 2>&1 && break
+  sleep 1
+done
+
+if ! curl -s http://localhost:$GATEWAY_PORT/health > /dev/null 2>&1; then
+  echo "Gateway failed to start"
+  kill $GATEWAY_PID 2>/dev/null
+  exit 1
+fi
+
+echo "Gateway ready (PID: $GATEWAY_PID)"
+
+# Start tunnel in foreground
+exec cloudflared tunnel run momo-gateway
+```
+
+```bash
+chmod +x start-gateway.sh
+./start-gateway.sh ~/my-app 3000
+```
+
+---
+
+#### Cloudflare Dashboard Management
+
+You can also manage tunnels from the [Cloudflare Dashboard](https://one.dash.cloudflare.com/?to=/:account/tunnels):
+
+1. Go to **Zero Trust → Networks → Tunnels**
+2. Click **Create a tunnel**
+3. Choose **Cloudflared** → name it → install connector
+4. Configure **Public Hostname** → `api.yourdomain.com` → `http://localhost:3000`
+5. Save
+
+This is equivalent to Option B but done through the web UI. The dashboard is also where you can:
+- Monitor tunnel health and connection status
+- View request logs and analytics
+- Add Access policies (Cloudflare Zero Trust) for extra security
+- Configure multiple public hostnames per tunnel
+
+#### Using Cloudflare Zero Trust Access (Optional Extra Security)
+
+For additional security on top of API key auth, you can add Cloudflare Access policies:
+
+1. Go to **Zero Trust → Access → Applications**
+2. Create an application protecting `api.yourdomain.com`
+3. Add a policy (e.g., allow specific emails, IP ranges, or service tokens)
+4. Now users must pass both Cloudflare Access AND your gateway's Bearer token auth
+
+This gives you defense-in-depth: Cloudflare blocks unauthorized users at the edge, and your gateway validates API keys for authorized ones.
+
+---
+
+### Integrating with Discord
+
+The gateway's OpenAI-compatible API makes it easy to build a Discord bot that talks to your agent.
+
+#### Minimal Discord Bot Example (Node.js)
+
+```javascript
+// discord-bot.mjs
+import Discord from 'discord.js';
+
+const client = new Discord.Client({
+  intents: [Discord.GatewayIntentBits.Guilds, Discord.GatewayIntentBits.MessageContent],
+});
+
+const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3000';
+const API_KEY = process.env.GATEWAY_API_KEY || '';
+
+client.on('messageCreate', async (message) => {
+  // Ignore bot messages
+  if (message.author.bot) return;
+
+  // Only respond when mentioned or in DM
+  if (message.guild && !message.mentions.has(client.user)) return;
+
+  // Strip the mention prefix
+  const content = message.content.replace(/<@\d+>\s*/, '').trim();
+  if (!content) return;
+
+  // Show typing indicator
+  await message.channel.sendTyping();
+
+  try {
+    const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content }],
+        session_id: message.author.id,  // per-user session
+      }),
+    });
+
+    const data = await res.json();
+    const reply = data.choices?.[0]?.message?.content || 'No response';
+
+    // Discord has a 2000 char limit — split if needed
+    if (reply.length <= 2000) {
+      await message.reply(reply);
+    } else {
+      // Send as a text file attachment
+      const { Buffer } = await import('node:buffer');
+      const buf = Buffer.from(reply, 'utf-8');
+      await message.reply({
+        content: 'Response too long, attached as file:',
+        files: [new Discord.AttachmentBuilder(buf, { name: 'response.txt' })],
+      });
+    }
+  } catch (err) {
+    await message.reply(`Error: ${err.message}`);
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);
+```
+
+```bash
+# Run the bot
+GATEWAY_URL=https://api.yourdomain.com \
+GATEWAY_API_KEY=sk-momo-discord-bot \
+DISCORD_TOKEN=your-discord-bot-token \
+  node discord-bot.mjs
+```
+
+#### Streaming Response to Discord
+
+For a typing-effect experience, use the streaming endpoint:
+
+```javascript
+const res = await fetch(`${GATEWAY_URL}/v1/chat/completions/stream`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${API_KEY}`,
+  },
+  body: JSON.stringify({
+    messages: [{ role: 'user', content }],
+    session_id: message.author.id,
+  }),
+});
+
+// Send initial message and edit it as chunks arrive
+const botMessage = await message.reply('...');
+let fullText = '';
+
+const reader = res.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+
+  const chunk = decoder.decode(value);
+  for (const line of chunk.split('\n')) {
+    if (!line.startsWith('data: ')) continue;
+    const data = line.slice(6);
+    if (data === '[DONE]') break;
+
+    try {
+      const parsed = JSON.parse(data);
+      const content = parsed.choices?.[0]?.delta?.content;
+      if (content) {
+        fullText += content;
+        // Edit message with accumulated text (Discord rate limit: ~5 edits/5s)
+        if (fullText.length % 50 < content.length) {
+          await botMessage.edit(fullText + '▌');
+        }
+      }
+    } catch {}
+  }
+}
+
+await botMessage.edit(fullText); // final edit, remove cursor
+```
+
+### Connecting from Any OpenAI-Compatible Client
+
+Since the gateway speaks the OpenAI Chat Completions protocol, you can use any OpenAI SDK:
+
+```python
+# Python (openai SDK)
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://api.yourdomain.com/v1",
+    api_key="sk-momo-discord-bot",
+)
+
+response = client.chat.completions.create(
+    model="momo-fetch",
+    messages=[{"role": "user", "content": "scan my project"}],
+)
+print(response.choices[0].message.content)
+```
+
+```javascript
+// TypeScript (openai SDK)
+import OpenAI from 'openai';
+
+const client = new OpenAI({
+  baseURL: 'https://api.yourdomain.com/v1',
+  apiKey: 'sk-momo-discord-bot',
+});
+
+const response = await client.chat.completions.create({
+  model: 'momo-fetch',
+  messages: [{ role: 'user', content: 'scan my project' }],
+});
+console.log(response.choices[0].message.content);
+```
+
+### Security Considerations
+
+- **Always enable `auth.enabled: true`** when exposing the gateway publicly.
+- **Use separate API keys** for each client (Discord bot, web UI, internal services) with appropriate rate limits.
+- **Cloudflare Tunnel** provides DDoS protection and TLS termination automatically.
+- **The gateway binds to `127.0.0.1`** by default — it's only accessible via the tunnel, not directly from the network.
+- **Sandbox enforcement** still applies — the agent cannot access files outside the project directory.
+- **Destructive command protection** remains active regardless of gateway mode.
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `Connection refused` on gateway URL | Ensure `momo-fetch --gateway` is running and the port matches |
+| `401 Unauthorized` | Check `Authorization: Bearer <key>` header and `gateway.json` config |
+| `429 Too Many Requests` | Increase `rate_limit` or `daily_quota` for the key in `gateway.json` |
+| Tunnel URL changed | Quick tunnels are ephemeral — use a named tunnel for persistence |
+| `cloudflared: command not found` | Install via `brew install cloudflared` or download from GitHub releases |
+| CORS errors from browser | Add your origin to `cors_origins` in `gateway.json` |
+| Slow first response | The harness initializes MCP servers and memory vault on startup — wait for ready message |
