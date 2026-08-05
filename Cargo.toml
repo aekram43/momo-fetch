@@ -1,6 +1,6 @@
 [package]
 name = "momo-fetch"
-version = "0.8.0"
+version = "0.9.1"
 edition = "2024"
 rust-version = "1.85.0"
 description = "Rust-native AI agent workspace with EverMemOS memory vault"

@@ -3193,7 +3193,7 @@ dependencies = [
 
 [[package]]
 name = "momo-fetch"
-version = "0.8.0"
+version = "0.9.1"
 dependencies = [
  "adk-model",
  "adk-rust",
