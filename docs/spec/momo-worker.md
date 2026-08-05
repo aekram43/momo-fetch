@@ -1041,16 +1041,22 @@ This section is the dispatch document. §1–§11 say *what* to build; this says
 
 Single source of truth for task state. Update this table, not the individual task sections.
 
-**As of `a218c19` · 2026-08-05 · pushed to `origin/dev` · `cargo test` 297 passed**
+**As of `3229774` · 2026-08-05 · pushed to `origin/dev` · `cargo test` 303 passed**
+
+> The same numbers are mirrored at the top of [`momo-worker-scratchpad.md`](./momo-worker-scratchpad.md) for a quick look. Update both together.
 
 | | Done | Open | Progress |
-|---|---|---|---|
-| **Gateway** (G1–G13 + R1) | 16 | 1 | █████████████████░ 94% |
+|---|---:|---:|---|
+| **Gateway** (G1–G13 + R1) | 13 | 1 | █████████████████░ 92% |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
 | **Frontend** (F1–F29) | 0 | 29 | ░░░░░░░░░░░░░░░░░░ 0% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
+| **Phase 1** (gateway + frontend) | 13 | 30 | █████░░░░░░░░░░░░░ 30% |
+| **Whole project** | 13 | 43 | ████░░░░░░░░░░░░░░ 23% |
 
-**Phase 1 is roughly 45% done.** All of it is backend: the gateway's hard parts — streaming, approvals, concurrency, cost — are built and now wire-verified. Not one line of UI exists yet, and the frontend is the larger half of the remaining work.
+**Phase 1 is 30% done by task count, and all of it is backend.** The gateway's hard parts — streaming, approvals, concurrency, cost, sandboxed file access — are built and wire-verified; only **G9** remains, and it is blocked on `web/out/` existing. Not one line of UI exists yet, and the frontend is the larger half of the remaining work.
+
+**Three things are outstanding and easy to lose track of:** the `security-review` gate on WP-2 has not been run, cost parity cannot be measured on a free model, and `GET /v1/sessions` reports `event_count: 0` for every session.
 
 #### ✅ Done
 

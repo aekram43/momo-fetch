@@ -8,6 +8,38 @@
 
 ---
 
+## 📊 Status at a glance
+
+> **Keep this block current. It is the first thing anyone reads.**
+> Update it at the end of every work package, together with §0 below.
+
+**`3229774` · dev · 2026-08-05 · `cargo test` 303 passed · check clean**
+
+| ส่วน | เสร็จ | เหลือ | |
+|---|---:|---:|---|
+| **Gateway** (G1–G13 + R1) | 13 | 1 | █████████████████░ 92% |
+| **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
+| **Frontend** (F1–F29) | 0 | 29 | ░░░░░░░░░░░░░░░░░░ 0% |
+| **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
+| **Phase 1** (gateway + frontend) | 13 | 30 | █████░░░░░░░░░░░░░ 30% |
+| **ทั้งโปรเจกต์** | 13 | 43 | ████░░░░░░░░░░░░░░ 23% |
+
+**Backend แทบเสร็จ frontend ยังไม่เริ่ม.** ของยากทั้งหมด — streaming, approval, concurrency, cost, sandbox — สร้างและพิสูจน์บน wire แล้ว เหลือ gateway แค่ **G9** ตัวเดียวซึ่งบล็อกอยู่ที่ยังไม่มี `web/out/` งานที่เหลือส่วนใหญ่คือ UI ซึ่งเป็นครึ่งที่ใหญ่กว่า
+
+**Wave ถัดไป: WP-3** — F1 scaffold · F2 API client + types · F3 SSE parser · F5 app shell
+
+**⚠️ ค้างอยู่ 3 อย่าง**
+
+| | เรื่อง | ผลกระทบ |
+|---|---|---|
+| 🔴 | **`security-review` ยังไม่รันบน WP-2 (G6)** — spec §12.7 ระบุเป็น blocking gate | G6 ยังไม่ควรถือว่า ship ได้ ที่เทสไปเป็นการเทสของผู้เขียนเอง |
+| 🟡 | **cost parity (G10 acceptance) ยังพิสูจน์ไม่ได้** | ต้องใช้ paid model ถึงจะวัดได้ — free model ราคา 0 ทั้งสองฝั่ง เทียบแล้วไม่มีความหมาย |
+| 🟡 | **`GET /v1/sessions` คืน `event_count: 0` ทุก session** | bug เดิมใน list projection (`/v1/sessions/{id}` ถูกต้อง) จะกวน F10 ถ้าจะโชว์จำนวน event |
+
+**Human item เดียวที่เหลือ:** code-signing (T13 → T11) อยู่ ~สัปดาห์ 5 ไม่บล็อกอะไรตอนนี้ — build unsigned จาก T10 ใช้งานได้ปกติ
+
+---
+
 ## 0. Wave progress log
 
 Newest first. One entry per work package, added on completion.
