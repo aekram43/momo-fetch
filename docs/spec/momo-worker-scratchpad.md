@@ -13,20 +13,20 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**`19888b4`+WP-3 · dev · 2026-08-05 · rust 303 passed · web 22 passed · tsc clean**
+**WP-4 · dev · 2026-08-05 · rust 303 passed · web 22 passed · tsc + eslint clean**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
-| **Frontend** (F1–F29) | 4 | 25 | ██░░░░░░░░░░░░░░░░ 14% |
+| **Frontend** (F1–F29) | 12 | 17 | ███████░░░░░░░░░░░ 41% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 18 | 25 | ███████░░░░░░░░░░░ 42% |
-| **ทั้งโปรเจกต์** | 18 | 38 | ██████░░░░░░░░░░░░ 32% |
+| **Phase 1** (gateway + frontend) | 26 | 17 | ███████████░░░░░░░ 60% |
+| **ทั้งโปรเจกต์** | 26 | 30 | ████████░░░░░░░░░░ 46% |
 
-**✅ Gateway เสร็จครบ · frontend มี shell แล้ว.** วงจรครบรอบ: `npm run build` → `web/out/` → gateway เสิร์ฟที่ `/ui` → หน้าเว็บเรียก `/health` กลับมาที่ origin เดิมได้ ขึ้น `connected` พร้อมชื่อ model จริง ที่เหลือคือ chat panel, tool cards และ approval dialog
+**✅ แชทใช้งานได้จริงแล้วบนเบราว์เซอร์** — พิมพ์ → stream → tool call → approval dialog → approve → ผลลัพธ์ ครบวงจร ขับผ่าน Playwright ยืนยันแล้ว ที่เหลือคือ panel จัดการ (agents/models/MCP/memory/files/settings)
 
-**Wave ถัดไป: WP-4** — F4 chat store · F6 chat panel · F7 markdown · F8 tool cards · **F9 approval dialog** · F10/F11 sessions · F29 409 handling
+**Wave ถัดไป: WP-5** — F12 agents · F13 models · F14 MCP status · F15 memory · F16 files · F17 settings · F18 cost · F19 connection · F20 shortcuts
 
 **⚠️ ค้างอยู่ 3 อย่าง**
 

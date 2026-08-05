@@ -1,9 +1,12 @@
 "use client";
 
+import { ApprovalDialog } from "@/components/chat/approval-dialog";
+import { ChatPanel } from "@/components/chat/chat-panel";
 import { DetailPanel } from "@/components/detail/detail-panel";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TurnRail } from "@/components/shared/turn-rail";
+import { useChatStore } from "@/stores/chat-store";
 import { useUiStore } from "@/stores/ui-store";
 
 /**
@@ -37,7 +40,7 @@ export function AppShell() {
 
         <main className="flex min-w-0 flex-1">
           <TurnRail phase={turnPhase} />
-          <ChatPlaceholder />
+          <ChatPanel />
         </main>
 
         {detailOpen && (
@@ -48,46 +51,10 @@ export function AppShell() {
       </div>
 
       <StatusBar />
-    </div>
-  );
-}
 
-/**
- * Stands in for F6/F7. It states what is not built rather than faking a
- * conversation — a shell with mock messages hides exactly the integration
- * problems this scaffold exists to expose.
- */
-function ChatPlaceholder() {
-  return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex flex-1 items-center justify-center px-6">
-        <div className="max-w-sm text-center">
-          <p className="font-mono text-xs uppercase tracking-[0.14em] text-faint">
-            Shell only
-          </p>
-          <h1 className="mt-2 text-lg font-medium text-ink">
-            The conversation lands here
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-dim">
-            The gateway is complete and streaming. What is missing is the chat
-            panel, tool-call cards and the approval dialog — F6 through F9.
-          </p>
-        </div>
-      </div>
-
-      <div className="border-t border-rule px-4 py-3">
-        <div className="flex items-center gap-2 rounded border border-rule bg-raised px-3 py-2">
-          <span className="font-mono text-sm text-faint" aria-hidden>
-            ›
-          </span>
-          <input
-            disabled
-            placeholder="Composer arrives with F6"
-            aria-label="Message input (not yet implemented)"
-            className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-faint disabled:cursor-not-allowed"
-          />
-        </div>
-      </div>
+      {/* Modal at every breakpoint, outside every collapsible panel — a narrow
+          viewport must never be able to strand a turn (spec §6). */}
+      <ApprovalDialog />
     </div>
   );
 }
@@ -95,14 +62,19 @@ function ChatPlaceholder() {
 /** Bottom rail: the three facts that change what a keystroke will do. */
 function StatusBar() {
   const turnPhase = useUiStore((s) => s.turnPhase);
+  const sessionId = useChatStore((s) => s.sessionId);
+  const context = useChatStore((s) => s.context);
+  const cost = useChatStore((s) => s.sessionCost);
 
   return (
     <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-rule bg-panel px-3 font-mono text-[11px] text-faint">
-      <span>permission —</span>
-      <span>session —</span>
-      <span>context —</span>
-      <span className="ml-auto">
-        {turnPhase === "idle" ? "idle" : turnPhase}
+      <span>session {sessionId ? sessionId.slice(0, 8) : "—"}</span>
+      <span>
+        context {context ? `${context.percent.toFixed(0)}%` : "—"}
+      </span>
+      <span>${cost.toFixed(4)}</span>
+      <span className={`ml-auto ${turnPhase !== "idle" ? "text-signal" : ""}`}>
+        {turnPhase === "awaiting-approval" ? "awaiting approval" : turnPhase}
       </span>
     </footer>
   );
