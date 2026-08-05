@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+/*
+ * MoMo Worker — instrument panel, not terminal cosplay.
+ *
+ * The product's core is not chat; it is that an agent executes shell commands
+ * and reads your filesystem, and asks permission stickily. The visual system is
+ * built to make *agency and consequence* legible.
+ *
+ * Two rules carry the design:
+ *
+ *   1. Amber is a state, never decoration. It means the machine is working or
+ *      wants something from you. If amber is on screen, you have something to
+ *      attend to. Nothing is amber for style.
+ *   2. Monospace is machine speech — tool names, paths, session ids, token
+ *      counts, anything the harness produced. Sans is the interface talking to
+ *      you. The two never swap.
+ */
+
+@theme {
+  /* Base — cold blue-slate, deliberately not pure black. Pure black plus one
+     bright accent is the house style of every AI-generated dark UI; the blue
+     cast reads as instrument housing instead. */
+  --color-void: #0f1216;
+  --color-panel: #161b22;
+  --color-raised: #1c232c;
+  --color-rule: #232b36;
+
+  /* Text */
+  --color-ink: #c9d4e0;
+  --color-dim: #6b7a8c;
+  --color-faint: #414c5a;
+
+  /* State signals. Amber is load-bearing; the other two are verdicts. */
+  --color-signal: #ffb454;
+  --color-consent: #5bc490;
+  --color-halt: #e5484d;
+
+  --font-sans: var(--font-plex), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* Tabular figures throughout: token counts and costs sit in columns that must
+     not jitter as they tick. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keyboard focus stays visible. This UI authorises shell execution — never hide
+   the focus ring on the controls that do it. */
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-signal) 30%, transparent);
+  color: #fff;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-rule) transparent;
+}
+
+@keyframes pulse-signal {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Used only while an approval is parked — the one animation in the shell. */
+.awaiting {
+  animation: pulse-signal 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,114 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import { getHealth } from "@/lib/api-client";
+import type { Health } from "@/lib/types";
+
+/**
+ * Top rail: what the gateway currently *is*, and whether we can reach it.
+ *
+ * Everything here is read from the live gateway rather than from local belief.
+ * Spec §2.3: the harness holds one global session and one provider, so the UI
+ * must display the gateway's actual state, not what this tab last asked for.
+ */
+export function Header({ onToggleSidebar, onToggleDetail }: {
+  onToggleSidebar: () => void;
+  onToggleDetail: () => void;
+}) {
+  const [health, setHealth] = useState<Health | null>(null);
+  const [reachable, setReachable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const h = await getHealth();
+        if (!cancelled) {
+          setHealth(h);
+          setReachable(true);
+        }
+      } catch {
+        if (!cancelled) setReachable(false);
+      }
+    };
+    poll();
+    const id = setInterval(poll, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  return (
+    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-rule bg-panel px-3">
+      <PanelButton label="Toggle sessions panel" onClick={onToggleSidebar}>
+        ▤
+      </PanelButton>
+
+      <span className="font-mono text-[13px] font-medium tracking-tight text-ink">
+        momo<span className="text-signal">·</span>worker
+      </span>
+
+      <div className="mx-1 h-4 w-px bg-rule" />
+
+      {/* Model and provider are machine facts — monospace. */}
+      <span className="truncate font-mono text-xs text-dim">
+        {health?.model ?? "—"}
+      </span>
+
+      <div className="ml-auto flex items-center gap-3">
+        {health?.turn_active && (
+          <span className="font-mono text-xs text-signal">turn active</span>
+        )}
+        <ConnectionDot reachable={reachable} />
+        <PanelButton label="Toggle detail panel" onClick={onToggleDetail}>
+          ▥
+        </PanelButton>
+      </div>
+    </header>
+  );
+}
+
+function PanelButton({
+  children,
+  label,
+  onClick,
+}: {
+  children: React.ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="rounded px-1.5 py-0.5 text-dim transition-colors hover:bg-raised hover:text-ink"
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Connection state.
+ *
+ * Never colour alone (spec §6): the dot is always paired with a word, because
+ * green-vs-red is the exact distinction a colour-blind user loses.
+ */
+function ConnectionDot({ reachable }: { reachable: boolean | null }) {
+  const [color, text] =
+    reachable === null
+      ? ["bg-faint", "connecting"]
+      : reachable
+        ? ["bg-consent", "connected"]
+        : ["bg-halt", "offline"];
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={`size-1.5 rounded-full ${color}`} aria-hidden />
+      <span className="font-mono text-xs text-dim">{text}</span>
+    </span>
+  );
+}

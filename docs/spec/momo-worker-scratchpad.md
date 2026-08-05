@@ -13,20 +13,20 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**`3229774`+G9 · dev · 2026-08-05 · `cargo test` 303 passed · check clean**
+**`19888b4`+WP-3 · dev · 2026-08-05 · rust 303 passed · web 22 passed · tsc clean**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
-| **Frontend** (F1–F29) | 0 | 29 | ░░░░░░░░░░░░░░░░░░ 0% |
+| **Frontend** (F1–F29) | 4 | 25 | ██░░░░░░░░░░░░░░░░ 14% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 14 | 29 | ██████░░░░░░░░░░░░ 33% |
-| **ทั้งโปรเจกต์** | 14 | 42 | █████░░░░░░░░░░░░░ 25% |
+| **Phase 1** (gateway + frontend) | 18 | 25 | ███████░░░░░░░░░░░ 42% |
+| **ทั้งโปรเจกต์** | 18 | 38 | ██████░░░░░░░░░░░░ 32% |
 
-**✅ Gateway เสร็จครบแล้ว — งานที่เหลือทั้งหมดคือ frontend + desktop.** ของยากทั้งหมด — streaming, approval, concurrency, cost, sandbox, static serving — สร้างและพิสูจน์บน wire แล้ว ยังไม่มี UI สักบรรทัด ซึ่งเป็นครึ่งที่ใหญ่กว่าของงานที่เหลือ
+**✅ Gateway เสร็จครบ · frontend มี shell แล้ว.** วงจรครบรอบ: `npm run build` → `web/out/` → gateway เสิร์ฟที่ `/ui` → หน้าเว็บเรียก `/health` กลับมาที่ origin เดิมได้ ขึ้น `connected` พร้อมชื่อ model จริง ที่เหลือคือ chat panel, tool cards และ approval dialog
 
-**Wave ถัดไป: WP-3** — F1 scaffold · F2 API client + types · F3 SSE parser · F5 app shell
+**Wave ถัดไป: WP-4** — F4 chat store · F6 chat panel · F7 markdown · F8 tool cards · **F9 approval dialog** · F10/F11 sessions · F29 409 handling
 
 **⚠️ ค้างอยู่ 3 อย่าง**
 
