@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use adk_tool::mcp::manager::{McpServerConfig, McpServerManager, ServerStatus};
 use adk_tool::mcp::AutoDeclineElicitationHandler;
-use adk_tool::toolset::MergedToolset;
+use adk_tool::toolset::{MergedToolset, PrefixedToolset};
 use adk_tool::Toolset;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -286,7 +286,7 @@ pub struct McpService {
     manager: Arc<McpServerManager>,
     configs: HashMap<String, McpServerConfig>,
     http_configs: HashMap<String, HttpMcpServerConfig>,
-    http_toolsets: Vec<Arc<dyn Toolset>>,
+    http_toolsets: Vec<(String, Arc<dyn Toolset>)>,
     config_path: PathBuf,
 }
 
@@ -357,8 +357,8 @@ impl McpService {
             match connect_http_server(&id, &config).await {
                 Ok(toolset) => {
                     tracing::info!("MCP HTTP: connected to '{id}'");
-                    self.http_toolsets.push(toolset);
-                    results.insert(id, Ok(()));
+                    results.insert(id.clone(), Ok(()));
+                    self.http_toolsets.push((id, toolset));
                 }
                 Err(e) => {
                     tracing::warn!("MCP HTTP: failed to connect '{id}': {e}");
@@ -383,11 +383,17 @@ impl McpService {
         let mut toolsets: Vec<Arc<dyn Toolset>> = Vec::new();
 
         if has_stdio {
-            toolsets.push(self.manager.clone());
+            // Prefix stdio server tools to avoid collisions with built-in tools.
+            // McpServerManager already resolves inter-server collisions;
+            // we wrap it to prevent collisions with the agent's static tools.
+            let prefixed = PrefixedToolset::new(self.manager.clone(), "mcp");
+            toolsets.push(Arc::new(prefixed));
         }
 
-        for http_ts in &self.http_toolsets {
-            toolsets.push(http_ts.clone());
+        for (server_id, http_ts) in &self.http_toolsets {
+            // Prefix HTTP server tools with server id to avoid collisions with built-in tools
+            let prefixed = PrefixedToolset::new(http_ts.clone(), server_id);
+            toolsets.push(Arc::new(prefixed));
         }
 
         Some(Arc::new(MergedToolset::new("momo-fetch-mcp", toolsets)))
@@ -443,7 +449,7 @@ impl McpService {
         // Try HTTP
         if self.http_configs.contains_key(id) {
             self.http_configs.remove(id);
-            self.http_toolsets.retain(|ts| ts.name() != id);
+            self.http_toolsets.retain(|(sid, _)| sid != id);
         }
         self.save_config()?;
         Ok(())
@@ -511,7 +517,7 @@ impl McpService {
     /// Get set of connected HTTP server IDs (by matching toolset name against config keys).
     pub fn connected_http_ids(&self) -> HashMap<String, bool> {
         let connected_names: std::collections::HashSet<&str> =
-            self.http_toolsets.iter().map(|ts| ts.name()).collect();
+            self.http_toolsets.iter().map(|(sid, _)| sid.as_str()).collect();
         self.http_configs
             .keys()
             .map(|id| (id.clone(), connected_names.contains(id.as_str())))
