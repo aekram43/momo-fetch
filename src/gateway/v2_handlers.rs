@@ -822,16 +822,9 @@ pub async fn v2_settings_clear_approvals(State(state): State<GatewayState>) -> R
 
 // ─── R1: not-yet-implemented endpoints ─────────────────────────
 //
-// These routes are registered ahead of their implementations on purpose.
-//
-// Every remaining gateway task (G4 memory/MCP, G5 memory, G6 files, G8 session
-// messages) would otherwise have to edit `mod.rs` to add its own route, so all
-// of them would collide in the same file. Registering the surface up front lets
-// each task land in its own handler module, and lets the frontend (F2/F3) build
-// and run against real HTTP — a well-formed 501 in the standard error shape is
-// something a client can code against; a 404 from an unregistered path is not.
-//
-// Replace the stub, not the route, when implementing. See spec §12.3.
+// Routes are registered ahead of their implementations on purpose, so the
+// remaining gateway tasks don't all collide in `mod.rs` and the frontend can
+// build against real HTTP. Replace the stub, not the route. See spec §12.3.
 async fn not_implemented(task: &str, endpoint: &str) -> Response {
     v2_error(
         StatusCode::NOT_IMPLEMENTED,
@@ -839,21 +832,6 @@ async fn not_implemented(task: &str, endpoint: &str) -> Response {
         format!("{endpoint} is not implemented yet ({task})."),
         Some(serde_json::json!({ "task": task, "endpoint": endpoint })),
     )
-}
-
-/// **G4** — MCP server status. Not implemented.
-pub async fn v2_mcp_servers() -> Response {
-    not_implemented("G4", "GET /v2/mcp/servers").await
-}
-
-/// **G5** — memory vault search. Not implemented.
-pub async fn v2_memory_search() -> Response {
-    not_implemented("G5", "GET /v2/memory/search").await
-}
-
-/// **G5** — memory vault statistics. Not implemented.
-pub async fn v2_memory_stats() -> Response {
-    not_implemented("G5", "GET /v2/memory/stats").await
 }
 
 /// **G6** — sandboxed file read. Not implemented.
@@ -866,9 +844,352 @@ pub async fn v2_files_tree() -> Response {
     not_implemented("G6", "GET /v2/files/tree").await
 }
 
-/// **G8** — session messages including tool calls. Not implemented.
-pub async fn v2_session_messages() -> Response {
-    not_implemented("G8", "GET /v2/sessions/{id}/messages").await
+// ─── G4: MCP server status ─────────────────────────────────────
+
+/// Map a stdio server status to a human-readable failure reason.
+///
+/// Only genuine failures get an `error`. `stopped` and `disabled` are user
+/// intent — surfacing them as errors would make F14 show a red state for a
+/// server the user deliberately turned off.
+fn stdio_status_error(status: &str) -> Option<String> {
+    match status {
+        "crashed" => Some("server process exited unexpectedly".to_string()),
+        "failedtostart" => Some("server failed to start".to_string()),
+        _ => None,
+    }
+}
+
+/// Clamp a caller-supplied search limit into the supported range.
+///
+/// Clamped rather than rejected: a UI asking for more than we serve is not a
+/// client error, and 400-ing it would be a worse experience than capping.
+fn clamp_search_limit(requested: Option<usize>) -> usize {
+    requested.unwrap_or(10).clamp(1, 100)
+}
+
+/// `GET /v2/mcp/servers` — status of every configured MCP server.
+///
+/// **On `tool_count`.** stdio servers all share one `McpServerManager` behind a
+/// single `"mcp"` prefix, so there is no per-server attribution and the field is
+/// `null` for them. Reporting `0` would be a lie the UI cannot distinguish from
+/// "connected but exposes nothing" — F14 must render `null` as "—".
+pub async fn v2_mcp_servers(State(state): State<GatewayState>) -> Response {
+    let harness = state.harness.read().await;
+    let mcp = harness.mcp_service();
+
+    let statuses = mcp.all_statuses().await;
+    let running = mcp.running_count().await;
+    let http_connected = mcp.connected_http_ids();
+
+    let mut servers: Vec<serde_json::Value> = Vec::new();
+
+    // stdio servers — status comes from the manager.
+    for id in mcp.configs().keys() {
+        let status = statuses
+            .get(id)
+            .map(|s| format!("{s:?}").to_lowercase())
+            .unwrap_or_else(|| "unknown".to_string());
+        let error = stdio_status_error(&status);
+        servers.push(serde_json::json!({
+            "id": id,
+            "status": status,
+            "transport": "stdio",
+            "tool_count": serde_json::Value::Null,
+            "error": error,
+        }));
+    }
+
+    // HTTP servers — the manager doesn't track these; connection state does.
+    for (id, connected) in &http_connected {
+        servers.push(serde_json::json!({
+            "id": id,
+            "status": if *connected { "running" } else { "stopped" },
+            "transport": "http",
+            "tool_count": serde_json::Value::Null,
+            "error": if *connected {
+                serde_json::Value::Null
+            } else {
+                serde_json::Value::String("not connected".into())
+            },
+        }));
+    }
+
+    servers.sort_by(|a, b| a["id"].as_str().unwrap_or("").cmp(b["id"].as_str().unwrap_or("")));
+
+    // `running_count()` only knows about the stdio manager, so it under-reports
+    // whenever HTTP servers are connected — the UI would show "1 running" next
+    // to four green dots. Count what we actually report instead, and keep the
+    // manager's number alongside it rather than silently discarding it.
+    let running_total = servers
+        .iter()
+        .filter(|s| s["status"] == "running")
+        .count();
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "servers": servers,
+            "running": running_total,
+            "running_stdio": running,
+            "total_tools": serde_json::Value::Null,
+        })),
+    )
+        .into_response()
+}
+
+// ─── G5: memory vault search ───────────────────────────────────
+
+/// Query parameters for `GET /v2/memory/search`.
+#[derive(serde::Deserialize)]
+pub struct MemorySearchQuery {
+    pub q: Option<String>,
+    pub limit: Option<usize>,
+}
+
+/// `GET /v2/memory/search?q=&limit=` — search the memory vault.
+///
+/// Uses [`ObsidianVault::search`] rather than `MemorySidecar::search_for_context`,
+/// which is enrichment-shaped (input → prompt injection) and applies its own
+/// relevance gate — see spec C11.
+///
+/// **Locking.** The vault sits behind a `std::sync::Mutex`. Results are cloned
+/// into owned values and the guard is dropped *before* the response is built, so
+/// nothing is ever held across an `await` (spec §2.2).
+pub async fn v2_memory_search(
+    State(state): State<GatewayState>,
+    axum::extract::Query(params): axum::extract::Query<MemorySearchQuery>,
+) -> Response {
+    let query = params.q.unwrap_or_default();
+    let query = query.trim();
+    if query.is_empty() {
+        return v2_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Query parameter 'q' is required and must not be empty.",
+            None,
+        );
+    }
+    let limit = clamp_search_limit(params.limit);
+
+    let harness = state.harness.read().await;
+    let vault = harness.vault().clone();
+    drop(harness);
+
+    let mem_query = crate::memory::types::MemoryQuery {
+        query: query.to_string(),
+        mode: crate::memory::types::RetrievalMode::GrepLlm,
+        levels: None,
+        project: None,
+        tags: None,
+        limit,
+    };
+
+    // Scoped so the std Mutex guard is released before we touch the response.
+    let results = {
+        let guard = match vault.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        match guard.search(&mem_query) {
+            Ok(hits) => hits,
+            Err(e) => {
+                return v2_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal",
+                    format!("memory search failed: {e}"),
+                    None,
+                );
+            }
+        }
+    };
+
+    let results: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|r| {
+            serde_json::json!({
+                "title": r.ref_id,
+                "level": r.level,
+                "path": r.path.to_string_lossy(),
+                "score": r.relevance_score,
+                "preview": r.snippet,
+            })
+        })
+        .collect();
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "results": results, "count": results.len(), "limit": limit })),
+    )
+        .into_response()
+}
+
+/// `GET /v2/memory/stats` — vault counters and sidecar toggles.
+pub async fn v2_memory_stats(State(state): State<GatewayState>) -> Response {
+    let harness = state.harness.read().await;
+    let vault = harness.vault().clone();
+    let auto_search = harness.memory_sidecar().auto_search_enabled();
+    let auto_write = harness.memory_sidecar().auto_write_enabled();
+    drop(harness);
+
+    // Same discipline as search: copy out, then drop the guard.
+    let (stats, counters) = {
+        let guard = match vault.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        (guard.stats().clone(), guard.counters().clone())
+    };
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "total_memcells": stats.total_memcells,
+            "total_events": stats.total_events,
+            "total_foresights": stats.total_foresights,
+            "total_episodes": stats.total_episodes,
+            "pending_foresights": stats.pending_foresights,
+            "total_clusters": stats.total_clusters,
+            "total_reflections": stats.total_reflections,
+            "profile_items": stats.profile_items,
+            "counters": {
+                "next_event": counters.event + 1,
+                "next_foresight": counters.foresight + 1,
+                "next_episode": counters.episode + 1,
+            },
+            "auto_search_enabled": auto_search,
+            "auto_write_enabled": auto_write,
+        })),
+    )
+        .into_response()
+}
+
+// ─── G8: session messages with tool calls ──────────────────────
+
+/// `GET /v2/sessions/{id}/messages` — session history including tool calls.
+///
+/// `GET /v1/sessions/{id}` already returns a `messages` array but drops every
+/// non-text part (spec C5). This walks the same `session.events().all()` and
+/// additionally maps `FunctionCall`/`FunctionResponse`, pairing them by call id
+/// so the UI can rebuild tool-call cards on reload exactly as the live stream
+/// rendered them.
+pub async fn v2_session_messages(
+    State(state): State<GatewayState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Response {
+    let harness = state.harness.read().await;
+    let session = match harness.session_mgr().get_session(&session_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            return v2_error(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                format!("Session not found: {e}"),
+                None,
+            );
+        }
+    };
+
+    let events = session.events().all();
+
+    // call_id → index into `messages` of the tool_call that is awaiting its
+    // result. Responses can arrive in a later event than their call.
+    let mut pending: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::new();
+    let mut messages: Vec<serde_json::Value> = Vec::new();
+
+    for event in &events {
+        let Some(content) = event.content() else { continue };
+
+        let mut text = String::new();
+        let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+
+        for part in &content.parts {
+            match part {
+                Part::Text { text: t } => text.push_str(t),
+                Part::FunctionCall { name, args, id, .. } => {
+                    let call_id = id.clone().unwrap_or_else(|| format!("call-{name}"));
+                    tool_calls.push(serde_json::json!({
+                        "id": call_id,
+                        "name": name,
+                        "args": args,
+                        "status": "pending",
+                        "result_preview": serde_json::Value::Null,
+                        "truncated": false,
+                    }));
+                    pending.insert(call_id, (messages.len(), tool_calls.len() - 1));
+                }
+                Part::FunctionResponse { function_response, id } => {
+                    let call_id = id
+                        .clone()
+                        .unwrap_or_else(|| format!("call-{}", function_response.name));
+                    let (preview, truncated) = preview_of(&function_response.response);
+                    // Attach to the originating call if we have seen it; a
+                    // response with no matching call still gets surfaced rather
+                    // than silently dropped.
+                    if let Some((mi, ti)) = pending.remove(&call_id) {
+                        if let Some(tc) = messages
+                            .get_mut(mi)
+                            .and_then(|m| m.get_mut("tool_calls"))
+                            .and_then(|v| v.get_mut(ti))
+                        {
+                            tc["status"] = serde_json::json!("done");
+                            tc["result_preview"] = serde_json::json!(preview);
+                            tc["truncated"] = serde_json::json!(truncated);
+                        }
+                    } else {
+                        tool_calls.push(serde_json::json!({
+                            "id": call_id,
+                            "name": function_response.name,
+                            "args": serde_json::Value::Null,
+                            "status": "done",
+                            "result_preview": preview,
+                            "truncated": truncated,
+                        }));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if text.is_empty() && tool_calls.is_empty() {
+            continue;
+        }
+
+        messages.push(serde_json::json!({
+            "role": content.role,
+            "content": text,
+            "timestamp": event.timestamp,
+            "tool_calls": tool_calls,
+        }));
+    }
+
+    // Anything still unpaired never received a `FunctionResponse`. On a *live*
+    // stream that means "still running"; on a finished session being replayed it
+    // does not — nothing is pending in history.
+    //
+    // The common cause is an approval: the pre-approval `FunctionCall` is
+    // abandoned when `run_confirmation_turn` starts a fresh turn, and the
+    // post-approval call carries a **different** id (spec §5). Leaving these as
+    // `pending` would make F11 render a card that spins forever on every reload.
+    for (_, (mi, ti)) in pending {
+        if let Some(tc) = messages
+            .get_mut(mi)
+            .and_then(|m| m.get_mut("tool_calls"))
+            .and_then(|v| v.get_mut(ti))
+        {
+            tc["status"] = serde_json::json!("unresolved");
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "session_id": session_id,
+            "event_count": events.len(),
+            "messages": messages,
+        })),
+    )
+        .into_response()
 }
 
 fn current_selection(harness: &Harness) -> Response {
@@ -908,6 +1229,31 @@ mod tests {
         assert!(is_error_response(&serde_json::json!({"error": "boom"})));
         assert!(!is_error_response(&serde_json::json!({"error": null})));
         assert!(!is_error_response(&serde_json::json!({"ok": true})));
+    }
+
+    // ─── G4 ────────────────────────────────────────────────────
+
+    #[test]
+    fn only_real_failures_report_an_mcp_error() {
+        assert!(stdio_status_error("crashed").is_some());
+        assert!(stdio_status_error("failedtostart").is_some());
+        // User intent, not failure — F14 must not paint these red.
+        assert!(stdio_status_error("stopped").is_none());
+        assert!(stdio_status_error("disabled").is_none());
+        assert!(stdio_status_error("running").is_none());
+        assert!(stdio_status_error("restarting").is_none());
+    }
+
+    // ─── G5 ────────────────────────────────────────────────────
+
+    #[test]
+    fn search_limit_is_clamped_not_rejected() {
+        assert_eq!(clamp_search_limit(None), 10);
+        assert_eq!(clamp_search_limit(Some(3)), 3);
+        // Spec G5 acceptance: `limit=1000` is clamped, not honoured.
+        assert_eq!(clamp_search_limit(Some(1000)), 100);
+        // Zero would produce an empty result set for a valid-looking request.
+        assert_eq!(clamp_search_limit(Some(0)), 1);
     }
 
     #[test]

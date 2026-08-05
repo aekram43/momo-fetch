@@ -1045,12 +1045,12 @@ Single source of truth for task state. Update this table, not the individual tas
 
 | | Done | Open | Progress |
 |---|---|---|---|
-| **Gateway** (G1–G13 + R1) | 12 | 5 | ██████████████░░░░ 71% |
+| **Gateway** (G1–G13 + R1) | 15 | 2 | ████████████████░░ 88% |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
 | **Frontend** (F1–F29) | 0 | 29 | ░░░░░░░░░░░░░░░░░░ 0% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
 
-**Phase 1 is roughly one-third done.** All of it is backend: the gateway's hard parts — streaming, approvals, concurrency, cost — are built and now wire-verified. Not one line of UI exists yet, and the frontend is the larger half of the remaining work.
+**Phase 1 is roughly 40% done.** All of it is backend: the gateway's hard parts — streaming, approvals, concurrency, cost — are built and now wire-verified. Not one line of UI exists yet, and the frontend is the larger half of the remaining work.
 
 #### ✅ Done
 
@@ -1073,14 +1073,14 @@ Single source of truth for task state. Update this table, not the individual tas
 | **B3** sandbox "not initialized" | `57fb7a4` | thread-affinity race — see note below |
 | **B4** keyring never registered | `57fb7a4` | missing store now degrades to `NotFound`, so the API says *"Set ZAI_API_KEY"* |
 | — MCP tool-name prefixing | `9d71ddc` | pre-existing work; gives HTTP servers per-server attribution (affects G4) |
+| **G4** MCP status | *WP-1* | `GET /v2/mcp/servers`. Also fixed `running` under-reporting HTTP servers |
+| **G5** memory search | *WP-1* | `GET /v2/memory/{search,stats}`. Guard dropped before serialising; `limit` clamped 1..=100 |
+| **G8** session messages | *WP-1* | `GET /v2/sessions/{id}/messages`, tool calls paired by id; unpaired → `unresolved` |
 
 #### ⬜ Open
 
 | Task | Owner model | Package | Notes |
 |---|---|---|---|
-| **G4** MCP status | Sonnet 5 | **WP-1** | `tool_count` nullable — see the §4.7 revision in the scratchpad |
-| **G5** memory search | Sonnet 5 | **WP-1** | `std::sync::Mutex` — no `await` while held |
-| **G8** session messages | Sonnet 5 | **WP-1** | extend the existing walk, pair by call id |
 | **G6** file read/tree | **Opus 5** | **WP-2** | security boundary; `security-review` is a blocking gate |
 | **G9** static serving | Haiku 4.5 | **WP-6** | needs `web/out/` to exist first |
 | **F1–F3** scaffold, client, SSE parser | Sonnet 5 (+Haiku for types) | **WP-3** | codes to §5/§7, not to what's implemented |

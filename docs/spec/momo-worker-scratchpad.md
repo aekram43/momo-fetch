@@ -3,8 +3,36 @@
 > **Purpose:** Working state for the MoMo Worker build so another agent can continue without re-deriving anything.
 > **Spec:** [`docs/spec/momo-worker.md`](./momo-worker.md) — read §0 (Code Audit) first; it is the load-bearing part.
 > **Dispatch:** spec **§12** is the work plan (packages, model routing, waves). §9 below is now just a pointer into it.
-> **Last updated:** 2026-08-05 · branch `dev` · head `546ef04` (0.9.1)
-> **Build state (verified 2026-08-05):** `cargo check --all-targets` clean (warnings only) · `cargo test --bin momo-fetch` → **297 passed**
+> **Last updated:** 2026-08-05 · branch `dev` (0.9.1)
+> **Build state:** `cargo check --all-targets` clean (warnings only) · `cargo test --bin momo-fetch` → **299 passed**
+
+---
+
+## 0. Wave progress log
+
+Newest first. One entry per work package, added on completion.
+
+### ✅ WP-1 — Gateway read endpoints (G4, G5, G8) · 2026-08-05
+
+Wave 1, lane 1. All three landed, verified live against a running gateway.
+
+| Task | Endpoint | Verified |
+|---|---|---|
+| **G4** | `GET /v2/mcp/servers` | 4 servers listed (3 http + 1 stdio) with transport and status |
+| **G5** | `GET /v2/memory/search`, `/v2/memory/stats` | search hits a real vault (22 memcells); `limit=1000` → clamped to 100; empty `q` → 400 |
+| **G8** | `GET /v2/sessions/{id}/messages` | 21 events → 5 tool calls, paired by call id, previews populated; missing session → 404 |
+
+Deadlock canary still green: `GET /v2/agents` → 200 in 0.36 ms.
+
+**Two problems found and fixed while building — both would have shipped a lying UI:**
+
+1. **`running` under-reported.** `McpService::running_count()` only knows about the stdio manager, so with 3 HTTP servers connected it returned `1` while the `servers` array showed 4 × `running` — F14 would have printed "1 running" beside four green dots. `running` is now derived from the reported array; the manager's figure is kept as `running_stdio` rather than discarded.
+
+2. **`pending` tool calls that never resolve.** The pre-approval `FunctionCall` is abandoned when `run_confirmation_turn` starts a fresh turn, and the post-approval call gets a **different id** (see §5, "`call_id` does not survive an approval"). On replay that left a card marked `pending` forever — F11 would spin on it on every reload. Unpaired calls are now marked **`unresolved`**, which is the honest state for history: nothing is pending in a finished session. Confirmed on the real approval-test session — exactly one `unresolved`, the rest `done`.
+
+**Also noticed, not fixed (out of WP-1 scope):** `GET /v1/sessions` reports `event_count: 0` for every session, while `GET /v1/sessions/{id}` on the same id correctly reports 21. Pre-existing bug in the list handler's projection, not in G8. Worth a task if F10 wants to show event counts in the session list.
+
+**Notes for whoever does F14:** `tool_count` is `null` for *both* transports right now. The scratchpad §4.7 revision says HTTP servers are attributable in principle — they are, but `Toolset::tools()` needs an `Arc<dyn ReadonlyContext>` and is async, which is not worth plumbing into a status endpoint. The response shape is unchanged and the UI contract stands: render `null` as **"—", never "0"**.
 
 ---
 
