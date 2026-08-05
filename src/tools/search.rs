@@ -7,30 +7,35 @@ use serde_json::{Value, json};
 
 use crate::sandbox::FilesystemSandbox;
 
-// ─── Thread-local sandbox context ──────────────────────────────
+// ─── Process-global sandbox context ────────────────────────────
+//
+// Process-global rather than `thread_local!` — see the note in `file.rs`.
 
-thread_local! {
-    static SEARCH_SANDBOX_CTX: std::cell::RefCell<Option<Arc<FilesystemSandbox>>> = std::cell::RefCell::new(None);
-}
+static SEARCH_SANDBOX_CTX: std::sync::RwLock<Option<Arc<FilesystemSandbox>>> =
+    std::sync::RwLock::new(None);
 
-/// Set the sandbox for the current thread (called before tool execution).
+/// Set the sandbox for the process (called when building the tool registry).
 pub fn set_sandbox(sandbox: Arc<FilesystemSandbox>) {
-    SEARCH_SANDBOX_CTX.with(|ctx| *ctx.borrow_mut() = Some(sandbox));
+    if let Ok(mut ctx) = SEARCH_SANDBOX_CTX.write() {
+        *ctx = Some(sandbox);
+    }
 }
 
-/// Get the sandbox for the current thread.
+/// Get the sandbox. Returns an owned `Arc`, so no guard is held by the caller.
 fn get_sandbox() -> Result<Arc<FilesystemSandbox>, AdkError> {
-    SEARCH_SANDBOX_CTX.with(|ctx| {
-        ctx.borrow()
-            .clone()
-            .ok_or_else(|| AdkError::tool("search tool sandbox not initialized"))
-    })
+    SEARCH_SANDBOX_CTX
+        .read()
+        .ok()
+        .and_then(|ctx| ctx.clone())
+        .ok_or_else(|| AdkError::tool("search tool sandbox not initialized"))
 }
 
-/// Clear the sandbox for the current thread.
+/// Clear the sandbox.
 #[allow(dead_code)]
 pub fn clear_sandbox() {
-    SEARCH_SANDBOX_CTX.with(|ctx| *ctx.borrow_mut() = None);
+    if let Ok(mut ctx) = SEARCH_SANDBOX_CTX.write() {
+        *ctx = None;
+    }
 }
 
 // ─── Grep ──────────────────────────────────────────────────────
@@ -229,6 +234,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         // Create test files
@@ -259,6 +265,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         tokio::fs::create_dir_all(tmp.path().join("src")).await.unwrap();
@@ -287,6 +294,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         tokio::fs::write(tmp.path().join("code.rs"), "pub fn hello() {}\n")
@@ -316,6 +324,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         tokio::fs::write(tmp.path().join("test.txt"), "Hello World\n")
@@ -340,6 +349,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         tokio::fs::write(tmp.path().join("test.txt"), "Hello world\n")
@@ -364,6 +374,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         tokio::fs::write(tmp.path().join("main.rs"), "fn main() {}")
@@ -394,6 +405,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         tokio::fs::create_dir_all(tmp.path().join("src")).await.unwrap();
@@ -422,6 +434,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         tokio::fs::write(tmp.path().join("test.txt"), "hello")

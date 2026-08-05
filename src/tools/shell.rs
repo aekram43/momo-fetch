@@ -7,30 +7,38 @@ use serde_json::{Value, json};
 
 use crate::sandbox::FilesystemSandbox;
 
-// ─── Thread-local sandbox context ──────────────────────────────
+// ─── Process-global sandbox context ────────────────────────────
+//
+// Process-global rather than `thread_local!` — see the note in `file.rs`.
+// A thread-local left `shell_exec` failing intermittently with
+// "sandbox not initialized" whenever the tool ran on a tokio worker thread
+// other than the one that built the registry.
 
-thread_local! {
-    static SHELL_SANDBOX_CTX: std::cell::RefCell<Option<Arc<FilesystemSandbox>>> = std::cell::RefCell::new(None);
-}
+static SHELL_SANDBOX_CTX: std::sync::RwLock<Option<Arc<FilesystemSandbox>>> =
+    std::sync::RwLock::new(None);
 
-/// Set the sandbox for the current thread (called before tool execution).
+/// Set the sandbox for the process (called when building the tool registry).
 pub fn set_sandbox(sandbox: Arc<FilesystemSandbox>) {
-    SHELL_SANDBOX_CTX.with(|ctx| *ctx.borrow_mut() = Some(sandbox));
+    if let Ok(mut ctx) = SHELL_SANDBOX_CTX.write() {
+        *ctx = Some(sandbox);
+    }
 }
 
-/// Get the sandbox for the current thread.
+/// Get the sandbox. Returns an owned `Arc`, so no guard is held by the caller.
 fn get_sandbox() -> Result<Arc<FilesystemSandbox>, AdkError> {
-    SHELL_SANDBOX_CTX.with(|ctx| {
-        ctx.borrow()
-            .clone()
-            .ok_or_else(|| AdkError::tool("shell tool sandbox not initialized"))
-    })
+    SHELL_SANDBOX_CTX
+        .read()
+        .ok()
+        .and_then(|ctx| ctx.clone())
+        .ok_or_else(|| AdkError::tool("shell tool sandbox not initialized"))
 }
 
-/// Clear the sandbox for the current thread.
+/// Clear the sandbox.
 #[allow(dead_code)]
 pub fn clear_sandbox() {
-    SHELL_SANDBOX_CTX.with(|ctx| *ctx.borrow_mut() = None);
+    if let Ok(mut ctx) = SHELL_SANDBOX_CTX.write() {
+        *ctx = None;
+    }
 }
 
 // ─── ShellExec ─────────────────────────────────────────────────
@@ -123,6 +131,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -145,6 +154,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -166,6 +176,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -186,6 +197,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Strict).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -208,6 +220,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Strict).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -228,6 +241,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Strict).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -248,6 +262,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Strict).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -268,6 +283,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Strict).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -288,6 +304,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Strict).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         // These should NOT be flagged as destructive
@@ -314,6 +331,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {
@@ -336,6 +354,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = shell_exec(ShellExecArgs {

@@ -58,16 +58,35 @@ impl SecretStore {
     pub fn get(provider: &str) -> Result<String, SecretError> {
         let env_var = env_var_for_provider(provider);
 
-        // Check environment first (highest priority for runtime overrides)
+        // Check environment first (highest priority for runtime overrides).
+        // Note: `dotenvy::dotenv()` runs at startup (src/cli/mod.rs), so keys
+        // in a repo-root `.env` land here too.
         if let Ok(key) = std::env::var(&env_var) {
             return Ok(key);
         }
 
-        // Try OS keychain
-        let entry =
-            keyring_core::Entry::new(SERVICE_NAME, provider).map_err(|e| {
-                SecretError::KeyringError(format!("Failed to create keychain entry: {e}"))
-            })?;
+        // Try OS keychain.
+        //
+        // `keyring-core` needs a concrete store registered before any entry can
+        // be created. When none is (the current state of this binary), every
+        // `Entry::new` fails with "No default store has been set" — which is a
+        // *configuration* fact, not a lookup failure. Reporting it as
+        // `NotFound` keeps availability checks honest (`available: false`) and
+        // points the user at the env var that actually works, instead of
+        // surfacing an opaque keychain error through the API.
+        let entry = match keyring_core::Entry::new(SERVICE_NAME, provider) {
+            Ok(entry) => entry,
+            Err(e) => {
+                tracing::debug!(
+                    "keychain unavailable for '{provider}' ({e}); \
+                     set {env_var} in the environment or .env instead"
+                );
+                return Err(SecretError::NotFound {
+                    provider: provider.to_string(),
+                    env_var,
+                });
+            }
+        };
 
         match entry.get_password() {
             Ok(key) => Ok(key),

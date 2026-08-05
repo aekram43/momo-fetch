@@ -1,8 +1,10 @@
 # MoMo Worker — Web UI & Desktop App Spec
 
-> **Status:** Draft v2 — reconciled against code at `7c4b704` (0.8.0)
+> **Status:** v3 — reconciled against code at `546ef04` (0.9.1). Sprint-1 gateway slab **landed**.
 > **Inspired by:** OpenWorker.com (3-panel layout, approval flow, artifacts)
 > **Architecture:** Next.js frontend ↔ existing Gateway (axum) ↔ Harness (Rust)
+> **Execution plan:** [§12](#12-execution-plan--model-assignment) is the dispatch document — read it before picking up work.
+> **Handoff state:** [`momo-worker-scratchpad.md`](./momo-worker-scratchpad.md) (§4 "hard-won knowledge" is still current; its §2/§7 claim the work is uncommitted — that is stale, it landed in `546ef04`).
 
 ---
 
@@ -25,6 +27,14 @@
 9. [Security Considerations](#9-security-considerations)
 10. [Testing Strategy](#10-testing-strategy)
 11. [Open Questions](#11-open-questions)
+12. [Execution Plan & Model Assignment](#12-execution-plan--model-assignment)
+    - 12.1 Status Ledger
+    - 12.2 Model Routing Rubric
+    - 12.3 Contention Map — why naive parallelism breaks
+    - 12.4 Work Packages
+    - 12.5 Wave Schedule
+    - 12.6 Handoff Contract
+    - 12.7 Quality Gates
 
 ---
 
@@ -66,26 +76,35 @@ Provide a graphical interface for momo-fetch so users who aren't comfortable wit
 
 ### What We Already Have
 
+Updated at `546ef04`. ✅ = shipped, ⚠️ = present but limited, ❌ = not built.
+
 | Component | Status | Location |
 |-----------|--------|----------|
 | Gateway HTTP server | ✅ Running | `src/gateway/mod.rs` |
 | Chat completions (non-stream) | ✅ | `POST /v1/chat/completions` |
-| Chat completions (SSE stream) | ⚠️ Text only; drops `FunctionCall`/`FunctionResponse` | `src/gateway/handlers.rs:106` |
+| Chat completions (SSE stream) | ⚠️ Text only, by design — superseded by `/v2/chat/stream` | `src/gateway/handlers.rs:106` |
 | Sessions CRUD | ✅ | `/v1/sessions/*` |
-| Session messages | ⚠️ Text parts only | `src/gateway/handlers.rs:266` |
-| Models list | ⚠️ Returns *current* model, not the catalogue | `GET /v1/models` |
-| Cost tracking | ⚠️ Endpoint exists; **not recorded for gateway turns** | `GET /v1/cost`, `src/cost.rs` |
-| Auth + rate limit | ✅ (applies to every route incl. `/health`) | `src/gateway/auth.rs` |
-| Health check | ✅ | `GET /health` |
-| Agent registry | ❌ No gateway endpoint | `src/agent/mod.rs:151` (`get`/`list`) |
-| Provider/model switching | ❌ No gateway endpoint | `src/providers.rs:158-179`, `264` (`list_available`) |
-| Tool call visibility | ❌ SSE sends text only | `src/gateway/handlers.rs` |
-| Tool approval flow | ❌ REPL-only, sticky per tool name | `src/cli/repl.rs:517`, `src/harness.rs:405` |
-| Interrupt / cancel turn | ❌ No gateway endpoint | `src/harness.rs:427` |
-| MCP server status | ❌ No gateway endpoint | `src/mcp/mod.rs:247` (`all_statuses`) |
-| Memory vault search | ❌ No gateway endpoint | `src/memory/vault.rs:321` |
-| File read/preview | ❌ No gateway endpoint | `src/sandbox/mod.rs:123,205` |
+| Session messages | ⚠️ Text parts only — G8 extends | `src/gateway/handlers.rs:266` |
+| Models list | ⚠️ Returns *current* model — catalogue is on `/v2/providers` | `GET /v1/models` |
+| Cost tracking | ✅ **G10** — shared turn lifecycle, REPL + gateway both wired | `src/harness.rs:440-456`, `GET /v1/cost` |
+| Auth + rate limit | ✅ router split; `/health` exempt | `src/gateway/auth.rs`, `mod.rs:213` |
+| Health check + readiness | ✅ **G12** — auth-exempt, reports `turn_active` | `GET /health` |
+| Rich SSE stream + approvals | ✅ **G1** — typed events, 4-phase approval stitch, disconnect cleanup | `src/gateway/v2_handlers.rs:58,160` |
+| Turn guard (process-wide) | ✅ RAII lease, 409 `turn_in_progress`, 7 unit tests | `src/gateway/turn.rs` |
+| Agent registry | ✅ **G2** | `GET/POST /v2/agents*` |
+| Provider/model switching | ✅ **G3** — incl. `list_all()` so unconfigured report `available:false` | `/v2/providers`, `/v2/switch*`, `src/providers.rs:334,456` |
+| Permission mode & settings | ✅ **G7** — incl. `DELETE /v2/settings/approved-tools` | `/v2/settings*` |
+| Interrupt / cancel turn | ✅ **G13** | `POST /v2/chat/interrupt` |
+| Bind/port flags | ✅ **G11** — `--gateway-port 0`, `MOMO_GATEWAY_LISTENING` line | `src/cli/mod.rs`, `src/gateway/mod.rs` |
+| MCP server status | ❌ **G4** open — no gateway endpoint | `src/mcp/mod.rs:247` (`all_statuses`, async) |
+| Memory vault search | ❌ **G5** open | `src/memory/vault.rs:321` |
+| File read/preview | ❌ **G6** open — security-sensitive | `src/sandbox/mod.rs:123,205` |
+| Static UI serving | ❌ **G9** open | — |
+| Frontend (`web/`) | ❌ Nothing exists. F1–F29 open | — |
+| Tauri shell | ❌ Nothing exists. T1–T13 open | — |
 | Skills | ❌ Not in this spec (deferred) | `src/skill/` |
+
+**Known gap carried forward:** no LLM turn completes on the current dev machine (no provider credits + a non-tool-capable default model). The approval round-trip and cost parity are therefore **spec-verified but not wire-verified** — see [§12.5 Wave 0](#125-wave-schedule).
 
 ---
 
@@ -736,6 +755,20 @@ Every frame is `event: <type>` + `data: <json>`. Clients **must** ignore unknown
 
 **Ordering guarantees:** `role` is always first and `done` always last. `tool_call_result` always follows its `tool_call_start`. `approval_required` for a call always precedes that call's `tool_call_result`. `usage`/`context_usage` arrive before `done`. Nothing else is ordered.
 
+**⚠️ `call_id` does not survive an approval** *(observed 2026-08-05, not a bug — a consequence of C1)*. The pre-approval `tool_call_start` and the post-approval one carry **different `id`s**, because the follow-up is genuinely a new turn with a new function call, not a resumption:
+
+```
+tool_call_start   {"id":"call-ab7c9a43…","name":"shell_exec"}   ← leg 1
+approval_required {"call_id":"call-ab7c9a43…"}
+approval_resolved {"call_id":"call-ab7c9a43…"}
+tool_call_start   {"id":"call-b05ba433…","name":"shell_exec"}   ← leg 2, NEW id
+tool_call_result  {"id":"call-b05ba433…","status":"done"}
+```
+
+**Consequence for F8/F9:** a UI that keys tool-call cards purely on `id` renders **two cards for one user-approved action** — one stuck forever in "awaiting approval", one that completes. Correlate the post-approval call to the pending card by **tool name + ordering** within the turn, and retire the pre-approval card when `approval_resolved{approved:true}` arrives. `usage` also arrives once per leg, so per-turn cost is the **sum** of the `usage` events, not the last one.
+
+Also confirmed on the wire: the stream carries bare `:` **keep-alive comment frames** mid-turn. The F3 parser must skip them — this is observed behaviour, not a hypothetical.
+
 ### Sequence: Normal Turn (No Approval)
 
 ```
@@ -991,10 +1024,272 @@ Resolved or narrowed by the code audit:
 
 Still genuinely open:
 
-9. **Sticky approval semantics.** Do we ship the honest "approve for the session" dialog, or invest in per-call approval in the harness (new `RunConfig` handling, `approved_tools` keyed by call)? Recommendation: **ship honest copy in Phase 1**, file per-call approval as a follow-up — it's a harness change, not a UI change.
+9. **Sticky approval semantics.** — *Decided (v3): ship the honest "approve for the rest of this session" dialog in Phase 1.* Per-call approval is deferred as a follow-up; it is a harness change (`RunConfig` handling, `approved_tools` keyed by call), not a UI change, and gating F9 on it would block the whole of WP-4. Binding requirement on F9 in [§12.4](#124-work-packages).
 10. **Denial is not remembered.** `run_confirmation_turn(name, false)` records nothing, so the model can re-request the same tool immediately and the user gets prompted repeatedly. Add a `denied_tools` set, or leave it? Recommendation: add it alongside per-call approval in the same follow-up.
 11. **Per-server MCP tool counts.** Report `null`, or add attribution in `src/mcp/`? Phase 1 reports `null` (G4).
 12. **Turn history after reconnect.** With `fetch`-based streaming there is no automatic resume. If the connection drops mid-turn, the turn keeps running server-side but the UI loses the tail. Options: buffer the last N events per turn and add `GET /v2/chat/replay?turn_id=`, or accept the loss and refetch via G8 when the turn ends. Recommendation: accept for Phase 1, revisit if it bites.
+
+---
+
+## 12. Execution Plan & Model Assignment
+
+This section is the dispatch document. §1–§11 say *what* to build; this says *who builds what, in what order, and what proves it done*.
+
+### 12.1 Status Ledger
+
+Single source of truth for task state. Update this table, not the individual task sections.
+
+| Task | State | Owner model | Package | Notes |
+|---|---|---|---|---|
+| G1 rich SSE stream | ✅ landed | — | — | 4-phase approval stitch; wire-verification pending (Wave 0) |
+| G2 agents | ✅ landed | — | — | |
+| G3 providers/models | ✅ landed | — | — | |
+| G7 settings | ✅ landed | — | — | incl. `DELETE /v2/settings/approved-tools` |
+| G10 cost/context | ✅ landed | — | — | shared lifecycle in `src/harness.rs:440-456`; parity untested |
+| G11 port/bind flags | ✅ landed | — | — | |
+| G12 health exemption | ✅ landed | — | — | |
+| G13 interrupt | ✅ landed | — | — | |
+| — turn guard | ✅ landed | — | — | `src/gateway/turn.rs`, 7 tests |
+| **G0** wire verification | ✅ **unblocked & passed** 2026-08-05 | — | **WP-0** | approval round-trip, tool mapping, stickiness, deadlock canary all verified on `nvidia/nemotron-3-ultra-550b-a55b:free`. Only cost parity remains, gated on B2 |
+| **R1** route pre-registration | ✅ **done** | — | **WP-0** | 6 routes registered, `501 not_implemented` in the §8 shape. **Parallel dispatch is unblocked** |
+| **B0** fix broken default model | ✅ **done** | — | **WP-0** | `.harness/settings.json` → `nvidia/nemotron-3-ultra-550b-a55b:free` for both `default_model` and `memory.sidecar_model` |
+| **B1** ollama availability false positive | ✅ **done** | — | **WP-0** | added `ollama_reachable()` TCP probe (150 ms, honours `OLLAMA_HOST`); now reports `available:false` when nothing is listening |
+| **B2** `:free` models billed as paid | ✅ **done** | — | **WP-0** | `get_pricing` short-circuits on the `:free` suffix. Verified: `/v1/cost` → `0.0` over 30k tokens |
+| **B3** sandbox "not initialized" | ✅ **done** | — | **WP-0** | **root cause was not `rebuild_runner`** — see note below. Fixed in all 5 tool modules |
+| **B4** keyring store never registered | ✅ **done** | — | **WP-0** | `SecretStore::get` now degrades a missing keyring store to `NotFound`, so the API says *"Set ZAI_API_KEY"* instead of leaking *"No default store has been set"* |
+
+> **B3 was misdiagnosed as an approval-path bug. It was a latent thread-affinity race affecting every sandboxed tool call.**
+>
+> `file`, `shell`, `search`, `kms` and `memory` each held their sandbox/vault in a **`thread_local!`**. `build_tool_registry` sets it on whichever thread builds the registry, but tools *execute* later on an arbitrary tokio worker — so a tool call succeeded or failed with `"… not initialized"` depending on which worker picked up the task. It surfaced during the approval test only because `rebuild_runner` reshuffled the timing; it was never approval-specific, and `file_read`/`grep`/`mem_*` were equally exposed.
+>
+> Fixed by moving all five contexts to a process-global `RwLock<Option<Arc<…>>>`, which is correct here because the harness has exactly one sandbox and one vault by construction ([§2.3](#23-concurrency-model-corrected)). `get_*` clones the `Arc` out, so no guard is ever held across an `await`.
+>
+> The tool tests had been relying on thread-locals for isolation and began clobbering one another once the context went global; they are now serialised through `tools::test_support::sandbox_guard()`. Suite green at **297 passed**.
+| **G4** MCP status | ⬜ open | Sonnet 5 | **WP-1** | `tool_count: null`, see §4.7 of scratchpad |
+| **G5** memory search | ⬜ open | Sonnet 5 | **WP-1** | `std::sync::Mutex` — no await while held |
+| **G8** session messages | ⬜ open | Sonnet 5 | **WP-1** | extend the existing walk, pair by call id |
+| **G6** file read/tree | ⬜ open | **Opus 5** | **WP-2** | security boundary; `security-review` gate |
+| **G9** static serving | ⬜ open | Haiku 4.5 | **WP-6** | needs `web/out/` to exist first |
+| **F1–F3** scaffold, client, SSE parser | ⬜ open | Sonnet 5 (+Haiku for types) | **WP-3** | codes to §5/§7, not to what's implemented |
+| **F4–F11, F29** core chat | ⬜ open | Sonnet 5 | **WP-4** | F9 approval dialog is the risky one |
+| **F12–F20** management panels | ⬜ open | Sonnet 5 | **WP-5** | |
+| **F21–F28** polish | ⬜ open | Haiku 4.5 | **WP-6** | |
+| **T1–T5** Tauri core | ⬜ open | **Opus 5** | **WP-7** | process supervision, cross-platform kill |
+| **T6–T9, T12** shell features | ⬜ open | Sonnet 5 | **WP-8** | |
+| **T10, T11, T13** ship pipeline | ⬜ open | Sonnet 5 + human | **WP-9** | T13 signing needs human credentials |
+
+### 12.2 Model Routing Rubric
+
+Route on **cost of being wrong**, not on task size. A 30-line handler that decides whether a path escapes the sandbox is Opus work; a 400-line React panel that renders a list is not.
+
+| Model | Give it | Why | In this plan |
+|---|---|---|---|
+| **Opus 5** | Security boundaries, concurrency/lock ordering, process supervision, cross-cutting refactors, final review of the above | Failure modes are silent and expensive: a traversal bug ships an exfiltration primitive; a lock-order bug deadlocks the gateway under a rare interleaving that tests miss | WP-2 (G6), WP-7 (T1–T5), review gates on WP-1/WP-4 |
+| **Sonnet 5** | Implementation against a settled contract — endpoints whose payload §7 already fixes, React components whose behaviour §6 already fixes, test suites | The spec removes the design risk; what remains is throughput, and Sonnet has the context budget to hold a module plus its tests | WP-0, WP-1, WP-3, WP-4, WP-5, WP-8, WP-9 |
+| **Haiku 4.5** | Mechanical transforms with a checkable output: route stubs, TS types mirrored from Rust structs, empty/loading states, icon and copy passes, doc table updates | No judgment required, and every result is diff-checkable against a source of truth | R1, types in WP-3, WP-6 |
+
+**Escalation rule.** Any agent that hits one of these stops and hands back up rather than guessing:
+- a lock is needed across an `await`, or the phase ordering in [§2.4](#24-approval-flow-corrected) doesn't fit → **Opus**
+- a `/v2` payload must differ from [§7](#7-gateway-endpoint-reference) → **spec change first**, not a local deviation
+- a sandbox check can't be expressed with `resolve_path` + `check_readable` + `is_ignored` → **Opus**
+
+**Skills to attach**, per the scratchpad's §8:
+- `security-review` — **mandatory gate** on WP-2 before merge.
+- `code-review` — gate on WP-1 and WP-7.
+- `frontend-design` — opening move on WP-3/WP-4 for the 3-panel visual direction.
+- `example-skills:webapp-testing` — Playwright on the approval dialog, WP-4 exit.
+- `commit` — conventional commits at each package boundary.
+- **Not** `prd-generator` — the spec exists and is reconciled.
+
+### 12.3 Contention Map — why naive parallelism breaks
+
+Two files are written by nearly every open package. Dispatching the packages in parallel without handling these produces merge conflicts on every landing:
+
+| Hot file | Contended by | Mitigation |
+|---|---|---|
+| `src/gateway/mod.rs` (routes + `GatewayState`) | G4, G5, G6, G8, G9 | **R1 lands first**: register all five routes pointing at stub handlers that return `501 not_implemented` in the [§8](#8-error-model) error shape. Feature packages then only touch their own handler file. |
+| `web/src/lib/types.ts` | F2 and every F-task after it | **F2 lands the complete type surface up front** — it is fully derivable from [§5](#5-sse-event-protocol) and [§7](#7-gateway-endpoint-reference) without any endpoint existing. Later packages import, never extend. |
+
+This is what makes the frontend safe to start before the gateway is finished — a reversal of the scratchpad's "finish G4–G8 first" advice. That advice was sound when the API surface was still moving; §5 and §7 have since frozen it. **The spec is the contract, and the frontend codes against the spec.** Stub routes returning `501` let WP-3/WP-4 build and run end-to-end against real HTTP.
+
+### 12.4 Work Packages
+
+Each package is one agent's assignment: self-contained, one branch, one review, one merge.
+
+---
+
+**WP-0 · Unblock & pre-register** — Sonnet 5 (G0) + Haiku 4.5 (R1) · *serial, blocks everything*
+
+✅ **The environment blocker is gone — no human action, no credits needed.** The working reference config is `openrouter` + **`nvidia/nemotron-3-ultra-550b-a55b:free`** (free tier, tool-capable, 1M context). The prior blocker was a bogus default model slug, not an account problem.
+
+- **G0 — done.** Verified live 2026-08-05: tool-call part mapping, the **full approval round-trip**, sticky-approval behaviour, and the [§2.2](#22-lock-discipline-mandatory) deadlock canary (`GET /v2/agents` returned **200 in 0.4 ms** while an approval was parked). Transcript in scratchpad §5. Cost parity is the one check still open, and it is gated on **B2**, not on the environment.
+- **R1 — now the actual Wave-0 gate.** Add `/v2/mcp/servers`, `/v2/memory/search`, `/v2/memory/stats`, `/v2/files`, `/v2/files/tree`, `/v2/sessions/{id}/messages` as `501 not_implemented` stubs in the §8 error shape.
+- **Bug fixes batched here**, all found during verification and all cheap:
+  - **B0** — `.harness/settings.json` still defaults to the broken `google/gemma-4-26b-a4b-it:free` for both `default_model` and `memory.sidecar_model`. Point them at the working model. *(Left unmodified deliberately; it is the user's config.)*
+  - **B1** — `src/providers.rs:343` hard-codes `available:true` for `ollama` with no liveness probe, so `/v2/providers` reports it selectable when nothing listens on `:11434`. Misleads F13. Probe it, or split *configured* from *reachable*.
+  - **B2** — `:free` models are billed as paid (`GET /v1/cost` reached `$0.596` on a free model). **Fix before claiming G10 acceptance**, and before F18 shows a user a number.
+  - **B3** — Opus: the first tool call after an approval turn returns `tool.internal: shell tool sandbox not initialized`; `rebuild_runner()` appears not to re-establish the shell tool's global sandbox. In the G1 approval path, so it surfaces as a spurious error card.
+  - **B4** — `keyring-core` never has `set_default_store` called, so the entire OS-keychain path fails; `.env` is the only working secret source. Either register a store or drop the keychain claim from the docs.
+- **Exit:** cost parity passes once B2 lands; `curl $URL/v2/files` returns a well-formed 501; B0/B1/B3/B4 fixed or explicitly deferred.
+
+---
+
+**WP-1 · Gateway read endpoints** — Sonnet 5 · *parallel after R1* · gate: `code-review`
+
+G4 (MCP status) · G5 (memory search + stats) · G8 (session messages with tool calls).
+
+Three independent handler files, one branch. Constraints that are not negotiable:
+- G4 reports `tool_count: null` per server plus a global total — there is no per-server attribution (`McpService::toolset()` merges). `all_statuses()` is **async**.
+- G5 uses `ObsidianVault::search(&MemoryQuery)`, **not** `MemorySidecar::search_for_context`. The vault is behind a `std::sync::Mutex` — collect owned results, drop the guard, *then* serialise. Never `await` while holding it.
+- G8 walks the same `session.events().all()` as `/v1/sessions/{id}` and additionally maps `Part::FunctionCall`/`Part::FunctionResponse`, paired by call id.
+
+**Exit:** each task's §3.1 acceptance criterion passes via its §10 curl probe; the [§2.2](#22-lock-discipline-mandatory) deadlock canary test still passes.
+
+---
+
+**WP-2 · Sandboxed file access** — **Opus 5** · *parallel after R1* · gate: **`security-review` (blocking)**
+
+G6 only. Small in lines, largest in blast radius: this endpoint turns the gateway into a file server, and every classic mistake is reachable from a browser.
+
+Ship with the full G6 hardening list — absolute-path and `..` rejection, post-canonicalisation prefix re-check, symlink escape after resolution, `is_ignored` filtering so gitignored secrets don't leak, 1 MB cap with `truncated:true`, NUL-sniff binary detection, and **403 for everything out of sandbox, never 404** so the endpoint can't map the filesystem.
+
+**Exit:** `path=../../etc/passwd` → 403; a gitignored file → 403; a symlink to `/etc` → 403; a 5 MB log → truncated with no OOM; `security-review` returns no unresolved findings.
+
+---
+
+**WP-3 · Frontend foundation** — Sonnet 5, types by Haiku 4.5 · *parallel after R1* · gate: Vitest
+
+F1 (scaffold) · F2 (API client + types) · F3 (SSE parser) · F5 (app shell).
+
+- F1: `create-next-app` into `web/`, Next 15 / React 19 / Tailwind v4 / shadcn/ui / zustand, `output:'export'`, `images.unoptimized`.
+- F2: URL resolution chain `window.__GATEWAY_URL__ → NEXT_PUBLIC_GATEWAY_URL → http://localhost:3000`; uniform §8 error parsing; **the complete `types.ts` surface** per §12.3.
+- F3: `fetch` + `ReadableStream` + hand-rolled frame parser. **Not `EventSource`** (C3).
+- F5: 3-panel shell per §6 — open with the `frontend-design` skill.
+
+**The parser is the single highest-risk artifact in the frontend.** It is hand-rolled, and its failure mode is silent event loss. Vitest coverage is a merge requirement, not a nice-to-have: frames split mid-chunk, `\r\n` and `\n`, multi-line `data:`, `:` keep-alive comments, and unknown `event:` names (logged and surfaced, never silently dropped).
+
+**Exit:** `npm run build` produces `web/out/`; parser suite green; the shell renders against a live gateway with real `role`/`text`/`done` events.
+
+---
+
+**WP-4 · Core chat** — Sonnet 5 · *after WP-3* · gate: `code-review` + Playwright
+
+F4 (chat store) · F6 (chat panel) · F7 (markdown + Shiki) · F8 (tool-call cards) · F9 (approval dialog) · F10/F11 (sessions) · F29 (409 handling).
+
+**F9 carries a security requirement, not just a UX one.** Approval is sticky by tool *name* for the life of the process (C2) — approving `shell_exec` once means it is never asked again. The dialog must say so in plain language. **Q9 is hereby decided: ship the honest "Approve `shell_exec` for the rest of this session" copy now**; per-call approval is a harness change and is deferred (see [§11 Q9/Q10](#11-open-questions)). Also render `category` when `destructive`, and count down to `expires_at`.
+
+F29 must handle 409 `turn_in_progress` by disabling send and offering interrupt — never by auto-retrying. Re-sending a turn double-bills and can re-run tools.
+
+**Exit:** Playwright drives approve *and* deny against a mock SSE server; an interrupted turn leaves the UI able to start a fresh one.
+
+---
+
+**WP-5 · Management panels** — Sonnet 5 · *after WP-3; needs WP-1 + WP-2 merged*
+
+F12 (agents) · F13 (models) · F14 (MCP status) · F15 (memory) · F16 (files) · F17 (settings) · F18 (cost) · F19 (connection) · F20 (shortcuts).
+
+Two renderings are contractual, not cosmetic: F14 shows `tool_count: null` as **"—", never "0"**; F13 greys out `available:false` providers **and says why**. F17 must expose the `approved_tools` list with a clear button — that is the user's only visibility into what they've granted.
+
+---
+
+**WP-6 · Polish & serve** — Haiku 4.5 · *after WP-5*
+
+F21–F28 (errors, loading, responsive, code blocks, file attach, empty states, sounds, local storage) · G9 (`ServeDir` on `/ui/*`, auth-exempt, SPA fallback → `web/out/`).
+
+Per §6, the approval dialog stays a focus-trapped modal at every breakpoint — never inside a collapsible panel, or a mobile user strands a turn until it times out.
+
+---
+
+**WP-7 · Tauri core** — **Opus 5** · *after Phase 1*
+
+T1 (scaffold) · T2 (gateway supervisor) · T3 (URL injection) · T4 (open project) · T5 (single instance).
+
+Opus because T2 is process supervision with genuinely platform-divergent failure modes: **Windows has no SIGTERM** — a job object or `taskkill`, or the gateway leaks on every quit. T5 is a correctness requirement, not a convenience: two instances over one `.harness/` fight over global harness state and the session DB.
+
+Spawn `--gateway-port 0`, parse `MOMO_GATEWAY_LISTENING` from stdout (do not pre-pick a port — it races), poll `/health` with backoff to a 30 s ceiling, inject `window.__GATEWAY_URL__` via init script (build-time env vars cannot work under static export).
+
+---
+
+**WP-8 · Desktop shell features** — Sonnet 5 · *after WP-7*
+
+T6 (tray) · T7 (menus) · T8 (window state) · T9 (deep links) · T12 (icons/branding).
+
+T9 handles untrusted input: `momo://open?path=…` re-roots the sandbox. Validate and require explicit user confirmation of the target directory.
+
+---
+
+**WP-9 · Ship pipeline** — Sonnet 5 + human · *after WP-8*
+
+T10 (CI build, three targets, `momo-fetch` as a per-triple sidecar) · T13 (Apple notarization, Windows signing, updater key) · T11 (updater, blocked on T13).
+
+**Human action required:** T13 needs developer credentials and cannot be delegated to any model.
+
+### 12.5 Wave Schedule
+
+Estimates are engineering-days per package assuming one agent per lane.
+
+```
+Wave 0  ── ✅ COMPLETE 2026-08-05 ──────────────────────────────────────────
+  WP-0  G0 wire verification             ✅ approval round-trip + canary pass
+        R1 route stubs                   ✅ 6 × 501 registered
+        B0-B4 bug batch                  ✅ all fixed & verified live
+                                         ⇒ Waves 1-3 can start in parallel now
+
+Wave 1  ── 3 lanes in parallel ─────────────────────────────────────── ~4d
+  WP-1  G4 + G5 + G8          (Sonnet)  ──> code-review
+  WP-2  G6                    (Opus)    ──> security-review  [BLOCKING GATE]
+  WP-3  F1 F2 F3 F5           (Sonnet + Haiku)  ──> vitest
+
+Wave 2  ── 1 lane, depends on WP-3 ─────────────────────────────────── ~5d
+  WP-4  F4 F6-F11 F29         (Sonnet)  ──> code-review + playwright
+
+Wave 3  ── 1 lane, needs WP-1 + WP-2 merged ────────────────────────── ~4d
+  WP-5  F12-F20               (Sonnet)
+
+Wave 4  ── polish ──────────────────────────────────────────────────── ~3d
+  WP-6  F21-F28 + G9          (Haiku)
+                                        ══ Phase 1 complete ══
+
+Wave 5  ── Phase 2 ─────────────────────────────────────────────────── ~4d
+  WP-7  T1-T5                 (Opus)
+
+Wave 6  ── 2 lanes ─────────────────────────────────────────────────── ~4d
+  WP-8  T6-T9 T12             (Sonnet)
+  WP-9  T10 T13 T11           (Sonnet + HUMAN for signing credentials)
+```
+
+Critical path: **WP-0 → WP-3 → WP-4 → WP-5 → WP-6 → WP-7**. WP-1 and WP-2 are off the critical path and can absorb schedule slip; WP-3 cannot — everything downstream of it stalls.
+
+**Only one item still needs a human, and it is not urgent.**
+
+| | Blocks | When it bites | Status |
+|---|---|---|---|
+| ~~Provider credits~~ | ~~Everything~~ | — | ✅ **Resolved 2026-08-05.** Not a credit problem — a bad default model slug. `nvidia/nemotron-3-ultra-550b-a55b:free` works on the free tier, tool calling included. No spend required. |
+| **Code-signing credentials** (WP-9) | T13 → T11 (auto-updater) only | **~Week 5** | Needs an Apple Developer account and a Windows cert — procurement, not engineering. |
+
+Code signing is a **lead-time item, not a blocker**. Unsigned builds still produce working `.dmg`/`.msi`/`.deb` artifacts from T10; only the auto-updater (T11) truly requires T13. Start the certificate paperwork early because issuance takes days, but do **not** treat it as blocking Phase 1, WP-7, or WP-8.
+
+### 12.6 Handoff Contract
+
+Every package hands off with the same five things. A package that skips these forces the next agent to re-derive context — which is the failure mode this document exists to prevent.
+
+1. **Ledger updated** — [§12.1](#121-status-ledger) state flipped, nowhere else.
+2. **Acceptance evidence** — the actual §10 probe output, not a claim that it passed.
+3. **Deviations from spec** — anything built differently than §3/§5/§7 says, with the reason. If the spec was wrong, **fix the spec in the same PR**; a spec that drifts from the code is worse than no spec, because it is trusted.
+4. **New hard-won knowledge** — anything that cost real investigation goes into scratchpad §4. That section is the highest-value artifact in this project.
+5. **Conventional commit** at the package boundary (`commit` skill).
+
+### 12.7 Quality Gates
+
+| Gate | Applies to | Blocking? | What it catches |
+|---|---|---|---|
+| `cargo check --all-targets` clean | every Rust package | yes | — |
+| Deadlock canary ([§10](#10-testing-strategy)) | WP-1, WP-2 | yes | a `/v2` GET taken while an approval is parked must return promptly — the [§2.2](#22-lock-discipline-mandatory) regression test |
+| `security-review` | **WP-2** | **yes** | traversal, symlink escape, gitignored-secret leak, 404-vs-403 disclosure |
+| `code-review` | WP-1, WP-4, WP-7 | yes | lock ordering, process supervision, approval-state handling |
+| Vitest on `sse-parser` | WP-3 | yes | silent event loss on split frames — the frontend's top risk |
+| Playwright approval flow | WP-4 | yes | the approve/deny round-trip, incl. sticky-scope disclosure |
+| Cost parity (REPL vs gateway) | WP-0 | yes | G10's acceptance criterion, still unproven on the wire |
 
 ---
 
@@ -1040,4 +1335,27 @@ Phase 2:
                                                      ├──> T8 (window state)
                                                      └──> T10 (build) ──> T13 (signing) ──> T11 (updater)
                                                           T12 (icons)
+```
+
+### Package-level view (dispatch order — see [§12.5](#125-wave-schedule))
+
+The task graph above is the *logical* dependency order. This is the order work is actually handed out; `R1` (route stubs) and a complete `types.ts` are what cut the two edges that would otherwise force gateway and frontend to run in series.
+
+```
+        ┌─ R1 stubs (Haiku) ─┬──> WP-1  G4 G5 G8      (Sonnet) ─┐
+WP-0 ───┤                    ├──> WP-2  G6            (Opus)   ─┤
+        └─ G0 verify (Sonnet)└──> WP-3  F1 F2 F3 F5   (Sonnet) ─┼──> WP-5  F12-F20 (Sonnet)
+           ⚠ human: credits            │                        │         │
+                                       └──> WP-4  F4 F6-F11 F29 ┘         │
+                                                  (Sonnet)                │
+                                                                          ▼
+                                                            WP-6  F21-F28 + G9 (Haiku)
+                                                                          │
+                                                                          ▼
+                                                            WP-7  T1-T5   (Opus)
+                                                                          │
+                                                              ┌───────────┴───────────┐
+                                                              ▼                       ▼
+                                                WP-8  T6-T9 T12 (Sonnet)   WP-9  T10 T13 T11
+                                                                             (Sonnet + ⚠ human: signing)
 ```

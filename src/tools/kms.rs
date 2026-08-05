@@ -1,7 +1,6 @@
-use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use adk_tool::{AdkError, tool};
 use schemars::JsonSchema;
@@ -10,24 +9,26 @@ use serde_json::{Value, json};
 
 use crate::sandbox::FilesystemSandbox;
 
-// ─── Thread-local sandbox context ──────────────────────────────
+// ─── Process-global sandbox context ────────────────────────────
+//
+// Process-global rather than `thread_local!` — see the note in `file.rs`.
 
-thread_local! {
-    static SANDBOX_CTX: RefCell<Option<Arc<FilesystemSandbox>>> = RefCell::new(None);
-}
+static SANDBOX_CTX: RwLock<Option<Arc<FilesystemSandbox>>> = RwLock::new(None);
 
-/// Set the sandbox for the current thread (called before tool execution).
+/// Set the sandbox for the process (called when building the tool registry).
 pub fn set_sandbox(sandbox: Arc<FilesystemSandbox>) {
-    SANDBOX_CTX.with(|ctx| *ctx.borrow_mut() = Some(sandbox));
+    if let Ok(mut ctx) = SANDBOX_CTX.write() {
+        *ctx = Some(sandbox);
+    }
 }
 
-/// Get the sandbox for the current thread.
+/// Get the sandbox. Returns an owned `Arc`, so no guard is held by the caller.
 fn get_sandbox() -> Result<Arc<FilesystemSandbox>, AdkError> {
-    SANDBOX_CTX.with(|ctx| {
-        ctx.borrow()
-            .clone()
-            .ok_or_else(|| AdkError::tool("kms tool sandbox not initialized"))
-    })
+    SANDBOX_CTX
+        .read()
+        .ok()
+        .and_then(|ctx| ctx.clone())
+        .ok_or_else(|| AdkError::tool("kms tool sandbox not initialized"))
 }
 
 // ─── KmsRead ──────────────────────────────────────────────────
@@ -616,6 +617,7 @@ mod tests {
 
         let sandbox =
             FilesystemSandbox::new(&root, crate::sandbox::PermissionMode::Auto).unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_read(KmsReadArgs {
@@ -638,6 +640,7 @@ mod tests {
 
         let sandbox =
             FilesystemSandbox::new(&root, crate::sandbox::PermissionMode::Auto).unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_read(KmsReadArgs {
@@ -658,6 +661,7 @@ mod tests {
 
         let sandbox =
             FilesystemSandbox::new(&root, crate::sandbox::PermissionMode::Auto).unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_read(KmsReadArgs {
@@ -677,6 +681,7 @@ mod tests {
 
         let sandbox =
             FilesystemSandbox::new(&root, crate::sandbox::PermissionMode::Auto).unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_search(KmsSearchArgs {
@@ -705,6 +710,7 @@ mod tests {
 
         let sandbox =
             FilesystemSandbox::new(&root, crate::sandbox::PermissionMode::Auto).unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_search(KmsSearchArgs {
@@ -729,6 +735,7 @@ mod tests {
             crate::sandbox::PermissionMode::Auto,
         )
         .unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_search(KmsSearchArgs {
@@ -750,6 +757,7 @@ mod tests {
 
         let sandbox =
             FilesystemSandbox::new(&root, crate::sandbox::PermissionMode::Auto).unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_write(KmsWriteArgs {
@@ -783,6 +791,7 @@ mod tests {
 
         let sandbox =
             FilesystemSandbox::new(&root, crate::sandbox::PermissionMode::Auto).unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_write(KmsWriteArgs {
@@ -812,6 +821,7 @@ mod tests {
             crate::sandbox::PermissionMode::Auto,
         )
         .unwrap();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(Arc::new(sandbox));
 
         let result = kms_write(KmsWriteArgs {

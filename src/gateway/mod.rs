@@ -205,6 +205,19 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
             "/v2/settings/approved-tools",
             axum::routing::delete(v2_handlers::v2_settings_clear_approvals),
         )
+        // R1 — surface registered ahead of implementation so the remaining
+        // gateway tasks don't all contend on this file, and so the frontend can
+        // build against real HTTP. Each returns 501 in the standard error
+        // shape. Swap the handler, not the route. See spec §12.3.
+        .route("/v2/mcp/servers", get(v2_handlers::v2_mcp_servers))
+        .route("/v2/memory/search", get(v2_handlers::v2_memory_search))
+        .route("/v2/memory/stats", get(v2_handlers::v2_memory_stats))
+        .route("/v2/files", get(v2_handlers::v2_files))
+        .route("/v2/files/tree", get(v2_handlers::v2_files_tree))
+        .route(
+            "/v2/sessions/{session_id}/messages",
+            get(v2_handlers::v2_session_messages),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), auth::auth_middleware));
 
     // `/health` stays unauthenticated: it is the readiness probe the desktop

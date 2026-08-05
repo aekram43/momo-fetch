@@ -420,6 +420,18 @@ impl CostTracker {
 
     /// Get pricing for a provider/model combination.
     fn get_pricing(provider: &str, model: &str) -> PricingEntry {
+        // OpenRouter (and others) expose zero-cost variants with a `:free`
+        // suffix on the model slug — e.g.
+        // `nvidia/nemotron-3-ultra-550b-a55b:free`. Without this check the
+        // per-family fallbacks below bill them at paid rates, which silently
+        // corrupts every cost total the UI shows.
+        if model.ends_with(":free") {
+            return PricingEntry {
+                prompt_per_million: 0.0,
+                completion_per_million: 0.0,
+            };
+        }
+
         match provider {
             "anthropic" => {
                 // Claude pricing (2025)

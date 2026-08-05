@@ -1,14 +1,14 @@
 {
   "permission_mode": "auto",
   "default_provider": "openrouter",
-  "default_model": "google/gemma-4-26b-a4b-it:free",
+  "default_model": "nvidia/nemotron-3-ultra-550b-a55b:free",
   "memory": {
     "auto_search": true,
     "auto_write": true,
     "search_mode": "grep_llm",
     "max_results_per_turn": 5,
     "extract_threshold": 10,
-    "sidecar_model": "google/gemma-4-26b-a4b-it:free",
+    "sidecar_model": "nvidia/nemotron-3-ultra-550b-a55b:free",
     "sidecar_provider": "openrouter",
     "consolidate_threshold": 30
   },

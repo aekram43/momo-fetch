@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use adk_tool::{AdkError, tool};
 use schemars::JsonSchema;
@@ -9,30 +8,36 @@ use serde_json::{Value, json};
 use crate::memory::types::ActionRecord;
 use crate::memory::vault::ObsidianVault;
 
-// ─── Thread-local vault context ──────────────────────────────────
+// ─── Process-global vault context ────────────────────────────────
+//
+// Process-global rather than `thread_local!` — see the note in `file.rs`.
+// The same thread-affinity bug applied here: memory tools would fail with
+// "vault not initialized" depending on which tokio worker ran them.
 
-thread_local! {
-    static VAULT_CTX: RefCell<Option<Arc<Mutex<ObsidianVault>>>> = RefCell::new(None);
-}
+static VAULT_CTX: RwLock<Option<Arc<Mutex<ObsidianVault>>>> = RwLock::new(None);
 
-/// Set the vault for the current thread (called before tool execution).
+/// Set the vault for the process (called when building the tool registry).
 pub fn set_vault(vault: Arc<Mutex<ObsidianVault>>) {
-    VAULT_CTX.with(|ctx| *ctx.borrow_mut() = Some(vault));
+    if let Ok(mut ctx) = VAULT_CTX.write() {
+        *ctx = Some(vault);
+    }
 }
 
-/// Get the vault for the current thread.
+/// Get the vault. Returns an owned `Arc`, so no guard is held by the caller.
 fn get_vault() -> Result<Arc<Mutex<ObsidianVault>>, AdkError> {
-    VAULT_CTX.with(|ctx| {
-        ctx.borrow()
-            .clone()
-            .ok_or_else(|| AdkError::tool("memory tool vault not initialized"))
-    })
+    VAULT_CTX
+        .read()
+        .ok()
+        .and_then(|ctx| ctx.clone())
+        .ok_or_else(|| AdkError::tool("memory tool vault not initialized"))
 }
 
-/// Clear the vault for the current thread.
+/// Clear the vault.
 #[allow(dead_code)]
 pub fn clear_vault() {
-    VAULT_CTX.with(|ctx| *ctx.borrow_mut() = None);
+    if let Ok(mut ctx) = VAULT_CTX.write() {
+        *ctx = None;
+    }
 }
 
 // ─── Action Record Args ──────────────────────────────────────────
@@ -562,6 +567,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_write_tool() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         let result = mem_write(MemWriteArgs {
@@ -588,6 +594,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_extract_tool() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         let result = mem_extract(MemExtractArgs {
@@ -616,6 +623,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_stats_tool() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         let result = mem_stats(MemStatsArgs {}).await.unwrap();
@@ -629,6 +637,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_read_tool() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // Create a note via extraction
@@ -674,6 +683,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_search_tool_grep_llm() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // Create some data
@@ -715,6 +725,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_search_tool_tag_filter() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // Create data with tags
@@ -750,6 +761,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_graph_tool() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // Create notes with wikilinks
@@ -786,6 +798,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_profile_tool_missing() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // No profile created yet
@@ -804,6 +817,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_profile_tool_default_agent() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // Default should be agent profile
@@ -822,6 +836,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_consolidate_tool_empty() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         let result = mem_consolidate(MemConsolidateArgs {}).await.unwrap();
@@ -839,6 +854,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_consolidate_tool_with_data() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // Create enough MemCells for consolidation
@@ -867,6 +883,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_validate_foresights_tool() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // Create data but no expired foresights
@@ -895,6 +912,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_reflect_tool_weekly() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         // Create some data
@@ -929,6 +947,7 @@ mod tests {
     #[tokio::test]
     async fn test_mem_reflect_tool_monthly() {
         let (_tmpdir, vault) = setup_vault();
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_vault(vault.clone());
 
         let result = mem_reflect(MemReflectArgs {

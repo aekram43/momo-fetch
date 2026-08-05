@@ -1,6 +1,5 @@
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use adk_tool::{AdkError, tool};
 use schemars::JsonSchema;
@@ -9,30 +8,39 @@ use serde_json::{Value, json};
 
 use crate::sandbox::FilesystemSandbox;
 
-// ─── Thread-local sandbox context ──────────────────────────────
+// ─── Process-global sandbox context ────────────────────────────
+//
+// This is deliberately process-global, not `thread_local!`. The registry is
+// built on whichever thread happens to call `build_tool_registry`, but tools
+// execute later on an arbitrary tokio worker thread — a thread-local would be
+// unset there, failing with "sandbox not initialized" depending on which
+// worker picked up the task. The harness has exactly one sandbox by
+// construction (spec §2.3), so a global is both correct and simpler.
 
-thread_local! {
-    static SANDBOX_CTX: RefCell<Option<Arc<FilesystemSandbox>>> = RefCell::new(None);
-}
+static SANDBOX_CTX: RwLock<Option<Arc<FilesystemSandbox>>> = RwLock::new(None);
 
-/// Set the sandbox for the current thread (called before tool execution).
+/// Set the sandbox for the process (called when building the tool registry).
 pub fn set_sandbox(sandbox: Arc<FilesystemSandbox>) {
-    SANDBOX_CTX.with(|ctx| *ctx.borrow_mut() = Some(sandbox));
+    if let Ok(mut ctx) = SANDBOX_CTX.write() {
+        *ctx = Some(sandbox);
+    }
 }
 
-/// Get the sandbox for the current thread.
+/// Get the sandbox. Returns an owned `Arc`, so no guard is held by the caller.
 fn get_sandbox() -> Result<Arc<FilesystemSandbox>, AdkError> {
-    SANDBOX_CTX.with(|ctx| {
-        ctx.borrow()
-            .clone()
-            .ok_or_else(|| AdkError::tool("file tool sandbox not initialized"))
-    })
+    SANDBOX_CTX
+        .read()
+        .ok()
+        .and_then(|ctx| ctx.clone())
+        .ok_or_else(|| AdkError::tool("file tool sandbox not initialized"))
 }
 
-/// Clear the sandbox for the current thread.
+/// Clear the sandbox.
 #[allow(dead_code)]
 pub fn clear_sandbox() {
-    SANDBOX_CTX.with(|ctx| *ctx.borrow_mut() = None);
+    if let Ok(mut ctx) = SANDBOX_CTX.write() {
+        *ctx = None;
+    }
 }
 
 // ─── FileRead ──────────────────────────────────────────────────
@@ -344,6 +352,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         // Write a test file directly
@@ -374,6 +383,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let file_path = tmp.path().join("test.txt");
@@ -403,6 +413,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         // Write
@@ -439,6 +450,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         // Create initial file
@@ -472,6 +484,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let file_path = tmp.path().join("test.txt");
@@ -497,6 +510,7 @@ mod tests {
         let sandbox = Arc::new(
             FilesystemSandbox::new(tmp.path(), crate::sandbox::PermissionMode::Auto).unwrap(),
         );
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let file_path = tmp.path().join("test.txt");
@@ -530,6 +544,7 @@ mod tests {
         assert!(sandbox.resolve_path("../../../etc/shadow").is_err());
 
         // Should also fail through the tool
+        let _sandbox_guard = crate::tools::test_support::sandbox_guard();
         set_sandbox(sandbox.clone());
 
         let result = file_read(FileReadArgs {

@@ -820,6 +820,57 @@ pub async fn v2_settings_clear_approvals(State(state): State<GatewayState>) -> R
     }
 }
 
+// ─── R1: not-yet-implemented endpoints ─────────────────────────
+//
+// These routes are registered ahead of their implementations on purpose.
+//
+// Every remaining gateway task (G4 memory/MCP, G5 memory, G6 files, G8 session
+// messages) would otherwise have to edit `mod.rs` to add its own route, so all
+// of them would collide in the same file. Registering the surface up front lets
+// each task land in its own handler module, and lets the frontend (F2/F3) build
+// and run against real HTTP — a well-formed 501 in the standard error shape is
+// something a client can code against; a 404 from an unregistered path is not.
+//
+// Replace the stub, not the route, when implementing. See spec §12.3.
+async fn not_implemented(task: &str, endpoint: &str) -> Response {
+    v2_error(
+        StatusCode::NOT_IMPLEMENTED,
+        "not_implemented",
+        format!("{endpoint} is not implemented yet ({task})."),
+        Some(serde_json::json!({ "task": task, "endpoint": endpoint })),
+    )
+}
+
+/// **G4** — MCP server status. Not implemented.
+pub async fn v2_mcp_servers() -> Response {
+    not_implemented("G4", "GET /v2/mcp/servers").await
+}
+
+/// **G5** — memory vault search. Not implemented.
+pub async fn v2_memory_search() -> Response {
+    not_implemented("G5", "GET /v2/memory/search").await
+}
+
+/// **G5** — memory vault statistics. Not implemented.
+pub async fn v2_memory_stats() -> Response {
+    not_implemented("G5", "GET /v2/memory/stats").await
+}
+
+/// **G6** — sandboxed file read. Not implemented.
+pub async fn v2_files() -> Response {
+    not_implemented("G6", "GET /v2/files").await
+}
+
+/// **G6** — sandboxed directory listing. Not implemented.
+pub async fn v2_files_tree() -> Response {
+    not_implemented("G6", "GET /v2/files/tree").await
+}
+
+/// **G8** — session messages including tool calls. Not implemented.
+pub async fn v2_session_messages() -> Response {
+    not_implemented("G8", "GET /v2/sessions/{id}/messages").await
+}
+
 fn current_selection(harness: &Harness) -> Response {
     (
         StatusCode::OK,

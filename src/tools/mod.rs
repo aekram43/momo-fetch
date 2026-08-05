@@ -13,6 +13,31 @@ use adk_tool::Tool;
 use crate::memory::vault::ObsidianVault;
 use crate::sandbox::FilesystemSandbox;
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    static SANDBOX_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    /// Serialise tests that install the process-global sandbox or vault.
+    ///
+    /// The sandbox/vault contexts in `file`, `shell`, `search`, `kms` and
+    /// `memory` are process-global (they must be — tools execute on arbitrary
+    /// tokio worker threads, so a thread-local is unset by the time the tool
+    /// runs). Tests each point that global at their own temp directory, so
+    /// without this guard they clobber one another under the default parallel
+    /// test runner.
+    ///
+    /// Hold the returned guard for the body of the test. Poisoning is ignored:
+    /// one failing test should not cascade into every other test erroring.
+    pub fn sandbox_guard() -> MutexGuard<'static, ()> {
+        SANDBOX_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 /// Build the complete set of built-in tools for the agent.
 ///
 /// Returns a vector of `Arc<dyn Tool>` ready for registration

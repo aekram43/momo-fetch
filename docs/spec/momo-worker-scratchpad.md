@@ -2,19 +2,26 @@
 
 > **Purpose:** Working state for the MoMo Worker build so another agent can continue without re-deriving anything.
 > **Spec:** [`docs/spec/momo-worker.md`](./momo-worker.md) — read §0 (Code Audit) first; it is the load-bearing part.
-> **Last updated:** 2026-07-28 · branch `dev` · base commit `7c4b704` (0.8.0)
-> **Build state:** `cargo check --all-targets` clean · `cargo test --bin momo-fetch` → **297 passed** (11 new)
+> **Dispatch:** spec **§12** is the work plan (packages, model routing, waves). §9 below is now just a pointer into it.
+> **Last updated:** 2026-08-05 · branch `dev` · head `546ef04` (0.9.1)
+> **Build state (verified 2026-08-05):** `cargo check --all-targets` clean (warnings only) · `cargo test --bin momo-fetch` → **297 passed**
 
 ---
 
 ## 1. Context
 
-The task is a web UI + desktop app for momo-fetch, built as: Next.js frontend → existing axum gateway → Rust harness. Two things happened in this session:
+The task is a web UI + desktop app for momo-fetch, built as: Next.js frontend → existing axum gateway → Rust harness. Two things happened in the originating session:
 
 1. **The spec was audited against the code and rewritten.** The original draft assumed behaviour the harness does not have — the corrections are §0 of the spec, table C1–C12. Anyone continuing this work must read that table; several "obvious" implementations are wrong for this codebase.
 2. **The Sprint-1 P0 gateway slab was implemented.** Rust only. No frontend code exists yet.
 
-The gateway (`src/gateway/`) is untracked in git (`?? src/gateway/`) — it is uncommitted work-in-progress, not a published module. Nothing here has been committed.
+**The gateway work is committed** as `546ef04` *"✨ feat(gateway): add V2 API with tool approval, turn guard and cost tracking"*, and the version has moved to **0.9.1**. Earlier revisions of this document described `src/gateway/` as untracked WIP — that is no longer true.
+
+### Uncommitted work in the tree (not part of the gateway slab)
+
+`git status` shows `M src/mcp/mod.rs` — an unrelated in-progress change that adds `PrefixedToolset` wrapping so MCP tools can't collide with built-in tool names. It matters here for one reason: **it partially invalidates §4.7 below**, which is a load-bearing constraint for G4. See that section.
+
+Also modified and unrelated: `Cargo.toml`, `Cargo.lock`, `docs/user-guide.md`. Also untracked and unrelated: `.harness/skills/`, `.pi/`, `AGENTS.md`, `docs/skills/`, `src/momo-gateway/` (a shell script, not a Rust module).
 
 ---
 
@@ -57,7 +64,9 @@ Also added, from spec §9: the gateway now **refuses to start** on a non-loopbac
 
 **Phase 2 (Tauri):** nothing. T1–T13 all open.
 
-Suggested order: finish **G4 → G5 → G6 → G8** so the gateway surface is complete and stable, *then* scaffold the frontend against it. Building the UI against a half-finished API means reworking `lib/types.ts` twice.
+> **Superseded ordering advice.** This section used to say: finish G4 → G5 → G6 → G8 first, *then* scaffold the frontend, because building the UI against a half-finished API means reworking `lib/types.ts` twice.
+>
+> **Spec §12.3 reverses this.** That reasoning was correct while the API surface was still moving; spec §5 and §7 have since frozen it, so `types.ts` is fully derivable today without a single endpoint existing. The new plan lands `501 not_implemented` route stubs first (R1), then runs gateway and frontend **in parallel** — which takes ~4 days off the critical path. See spec §12.3 for the contention map and §12.5 for the wave schedule.
 
 ---
 
@@ -94,8 +103,18 @@ Source: `~/.cargo/registry/src/*/adk-core-0.7.0/src/`
 - `UsageMetadata { prompt_token_count, candidates_token_count, total_token_count, .. }` (all `i32`) — `model.rs:148`
 - `event.llm_response.usage_metadata` · `event.actions.tool_confirmation` · `event.llm_response.error_message` · `event.is_final_response()`
 
-### 4.7 There is no per-server MCP tool count
-`McpService::toolset()` returns one merged `Option<Arc<dyn Toolset>>` — no per-server attribution. **G4** must report `tool_count: null` per server plus a global total, or add attribution in `src/mcp/`. The UI must render null as "—", never "0".
+### 4.7 MCP tool counts are attributable for HTTP servers, not stdio — *revised 2026-08-05*
+
+**This changed under the uncommitted `src/mcp/mod.rs` edit (see §1).** The original claim — "no per-server attribution at all" — is now only half true, and G4 should be built against the new shape:
+
+- **HTTP servers: countable.** `http_toolsets` became `Vec<(String, Arc<dyn Toolset>)>` (was `Vec<Arc<dyn Toolset>>`), each wrapped in `PrefixedToolset::new(ts, server_id)`. The server id is retained, so a real `tool_count` is available per server.
+- **stdio servers: still not countable.** All stdio servers go through one `McpServerManager` wrapped in a *single* `PrefixedToolset::new(manager, "mcp")` — one shared prefix, no per-server split. Still `null`.
+
+**Caveat before relying on this:** `Toolset::tools()` takes `Arc<dyn ReadonlyContext>` and is async (`adk-tool-0.7.0/src/toolset/compose.rs:159`), so counting is not a free field read — it needs a context and an `.await`. If plumbing a context into the G4 handler proves ugly, report `null` for everything and keep the endpoint shape.
+
+Either way the **response shape does not change** and neither does the UI contract: `tool_count` stays nullable, and F14 must render null as **"—", never "0"**. Decide per-server-count-vs-null as an implementation detail inside G4; do not let it change `/v2/mcp/servers`.
+
+⚠️ If the `src/mcp/mod.rs` change is reverted or lands differently, re-check this section before building G4.
 
 ### 4.8 Memory search: use the right function
 `MemorySidecar::search_for_context` is enrichment-shaped (input → prompt injection, with its own relevance gate). General search for **G5** is `ObsidianVault::search(&MemoryQuery)` (`src/memory/vault.rs:321`), plus `stats()` / `counters()`.
@@ -104,23 +123,103 @@ Source: `~/.cargo/registry/src/*/adk-core-0.7.0/src/`
 
 ## 5. Environment blocker — live verification is incomplete
 
-**No LLM turn can complete on this machine.** Two independent causes:
-1. The configured default model `google/gemma-4-26b-a4b-it:free` (`.harness/settings.json`) is rejected by OpenRouter: `model.invalid_input: Provider returned error`.
-2. The OpenRouter account has no credits: `model.forbidden: Insufficient credits`. Only OpenRouter is configured; every other provider reports `available:false`.
+## 5. ~~Environment blocker~~ — RESOLVED 2026-08-05
 
-Both are pre-existing environment issues, **not** bugs in this code — the untouched v1 endpoint fails identically on the same prompt. Nothing was spent verifying this; the model switch used during testing was runtime-only (`POST /v2/switch-model`) and `settings.json` was not modified.
+> **This section previously said no LLM turn could complete. That is no longer true.**
+> A working free model was found. **Everything in the "NOT verified" list below has now been verified end-to-end**, including the approval round-trip.
+
+### The working configuration
+
+```
+provider: openrouter
+model:    nvidia/nemotron-3-ultra-550b-a55b:free      ← free tier, tool-capable, 1M context
+```
+
+Verified: streaming text, **tool calling**, **the full approval handshake**, stickiness, interrupt-free completion. This model is the reference config for all remaining verification work.
+
+### What was actually wrong (for the record)
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | Default `google/gemma-4-26b-a4b-it:free` → `model.invalid_input` | still broken — **it is a bogus slug**, and it is still the default in `.harness/settings.json` (both `default_model` and `memory.sidecar_model`) |
+| 2 | OpenRouter account has no credits → `model.forbidden: Insufficient credits` | still true — reconfirmed against paid `deepseek/deepseek-chat-v3-0324` |
+| 3 | OpenRouter retired the `:free` tier on the *obvious* fallbacks | true for `deepseek-chat-v3-0324:free`, `llama-3.3-70b-instruct:free`, `qwen-2.5-72b-instruct:free` — but **not universal**; nemotron's free tier is live |
+
+The whole blocker was **a bad default model plus an unlucky choice of fallbacks**, not an account problem. Credits are still zero and are no longer needed.
+
+### Where API keys actually come from — not the keychain
+
+`SecretStore::get` (`src/config/secrets.rs:58`) tries the env var first, then the OS keychain. In practice **only the env-var path works**:
+
+- `dotenvy::dotenv()` at `src/cli/mod.rs:68` loads **`.env`** at the repo root, which currently defines `OPENROUTER_API_KEY` and nothing else. That is the sole reason openrouter is the only available provider.
+- **The keychain path is entirely non-functional.** `keyring-core` 1.0 requires a concrete store to be registered at startup, and nothing in the codebase ever calls `set_default_store` — so every `Entry::new` fails with *"No default store has been set"*. `SecretStore::set`/`delete` cannot work either.
+
+**To add a provider, put its key in `.env`** (`ZAI_API_KEY`, `GROQ_API_KEY`, …). Do not expect `secrets set` to work until a keyring store is registered.
+
+### z.ai / `glm-5-turbo` — untested, no key
+
+`POST /v2/switch {"provider":"zai","model":"glm-5-turbo"}` → `503 provider_unavailable`, `Keychain error: … No default store has been set`. That is the missing-key path above, **not** a statement about the model. The switch was correctly rejected and harness state was left unchanged (the in-flight stream continued on the previous model). Add `ZAI_API_KEY` to `.env` to evaluate it.
+
+### Bugs found while verifying — **all fixed 2026-08-05**
+
+> Summary of the fixes, then the original findings for context. All verified live; `cargo test --bin momo-fetch` → **297 passed**.
+>
+> | ID | Fix | Verified |
+> |---|---|---|
+> | **B0** | `.harness/settings.json` → `nvidia/nemotron-3-ultra-550b-a55b:free` (both `default_model` and `memory.sidecar_model`) | gateway starts on a working model |
+> | **B1** | `ollama_reachable()` — 150 ms TCP probe, honours `OLLAMA_HOST` (`src/providers.rs`) | `/v2/providers` → `ollama available:false` |
+> | **B2** | `get_pricing` returns zero for any model slug ending `:free` (`src/cost.rs`) | `/v1/cost` → `total_cost: 0.0` over 30k tokens |
+> | **B3** | all 5 tool contexts moved `thread_local!` → process-global `RwLock` | 0 occurrences of `not initialized` across a full approval turn |
+> | **B4** | `SecretStore::get` maps a missing keyring store to `NotFound` (`src/config/secrets.rs`) | zai switch → *"Set ZAI_API_KEY or use /key set zai"* |
+>
+> **B3 turned out to be much bigger than the symptom suggested — read finding 3 below.**
+
+### Original findings
+
+1. **`ollama` availability is a false positive.** `src/providers.rs:343` — `available: *provider == "ollama" || SecretStore::get(provider).is_ok()`. Ollama is hard-coded available because it needs no key, with **no liveness probe**; `/v2/providers` reports `ollama available:true` while nothing listens on `:11434`. Misleads **F13**, which greys out unavailable providers *and explains why*. Filed as **B1** in spec §12.1.
+2. **`:free` models accrue nonzero cost.** The nemotron `:free` model reported `cost_usd` climbing to `0.596` over 118k tokens, and `GET /v1/cost` agrees. The pricing table does not understand the `:free` suffix. This directly corrupts **G10**'s acceptance criterion and **F18**'s cost badge. Filed as **B2**.
+3. **`shell tool sandbox not initialized`** — first seen as an intermittent failure on the turn following `run_confirmation_turn`, so it was initially filed as an approval-path bug. **That diagnosis was wrong, and the real one is worse.**
+
+   **Root cause: thread affinity.** `file`, `shell`, `search`, `kms` and `memory` each stored their sandbox/vault in a **`thread_local!`**. `build_tool_registry` (`src/tools/mod.rs:37-40`) sets it on whichever thread builds the registry — but tools *execute* later on an arbitrary tokio worker thread, where the thread-local is unset. So **any** tool call could fail with `"… not initialized"` depending purely on which worker picked up the task. `rebuild_runner` only changed the timing enough to make it visible; `file_read`, `grep`, and every `mem_*` tool were equally exposed. This had nothing to do with approvals.
+
+   **Fix:** all five contexts are now a process-global `RwLock<Option<Arc<…>>>`. That is the correct shape here — the harness has exactly one sandbox and one vault by construction (§4.4) — and `get_*` clones the `Arc` out, so no guard is held across an `await` (§4.3 still holds).
+
+   **Watch out when writing tool tests:** the thread-locals were also providing test isolation, and 15 tests began clobbering each other the moment the context went global. Tests that install a sandbox or vault must now take `crate::tools::test_support::sandbox_guard()` and hold it for the body of the test.
+
+**No credits were spent** — the working model is free tier, and every paid probe failed before billing. All model and permission switches were runtime-only (`POST /v2/switch-model`, `/v2/settings/permission`); **`.harness/settings.json` was not modified**, so its broken default model is still there (see finding 1).
 
 ### Verified live
 Port-0 bind + listening line · `/health` · `/v2/agents` · `/v2/settings` · `/v2/providers` · model + permission switching · error model (400 bad permission mode, 409 `stale_approval`, 409 `turn_in_progress`) · SSE framing, event names and ordering (`role` → … → `context_usage` → `done`) · error path surfaces a typed `error` + `done` where v1 just stops mid-stream · **6 concurrent turns → 1 admitted, 5 rejected 409, lease released after**.
 
-### NOT verified end-to-end (needs a working tool-capable model)
-- `tool_call_start` / `tool_call_result` part mapping
-- The approval handshake round-trip (`approval_required` → `POST /v2/chat/approve` → `approval_resolved` → follow-up leg)
-- Cost parity between a REPL turn and a gateway turn (**G10** acceptance)
+### Verified live — 2026-08-05 session (the previously blocked items)
 
-Unit tests cover the registry semantics, preview truncation on char boundaries, error detection, and event naming — but not the live wire path.
+All on `nvidia/nemotron-3-ultra-550b-a55b:free`.
 
-**To unblock:** add OpenRouter credits, or configure another provider key, then set a tool-capable model. Re-run the probes in spec §10.
+| Check | Result |
+|---|---|
+| `tool_call_start`/`tool_call_result` part mapping | ✅ `file_read` — `{id,name,args}` out, result paired on the **same `id`**, `output_preview` + `truncated` populated |
+| **Approval handshake round-trip** | ✅ full 4-phase stitch, single unbroken SSE response — see transcript below |
+| **Deadlock canary ([§2.2](#43-lock-discipline-is-not-optional))** | ✅ `GET /v2/agents` while an approval was parked → **200 in 0.4 ms**. The lock discipline is correct. |
+| Sticky approval (**C2**) | ✅ after approving once, `GET /v2/settings` → `approved_tools:["shell_exec"]`, and a **second** `shell_exec` in strict mode produced **zero** `approval_required` events |
+| Keep-alive comment frames | ✅ a bare `:` line appears mid-stream — **confirms the F3 parser must handle comment lines**, this is not theoretical |
+| Event ordering guarantees | ✅ `role` first, `done` last, `tool_call_result` after its `tool_call_start`, `usage`/`context_usage` before `done` |
+| Cost parity REPL vs gateway (**G10**) | ⚠️ **still open** — gateway side records correctly, but see bug **B2**: `:free` models are billed as paid, so the number itself is wrong on both sides |
+
+Approval transcript (abridged, one response):
+
+```
+role → usage → tool_call_start{shell_exec} → text("Tool confirmation required…")
+     → approval_required{sticky:true, destructive:false, expires_at:…}
+     ⏸  [POST /v2/chat/approve → {"resolved":true,"approved":true,"sticky":true}]
+     → approval_resolved{approved:true, reason:"user"}
+     → :                                    ← keep-alive
+     → usage → tool_call_start → tool_call_result{stdout:"hello-from-approval-test\n", exit_code:0}
+     → text×5 → usage → context_usage → done{stop_reason:"complete"}
+```
+
+Note the follow-up leg emits a **new `call_id`** for the same logical call — the pre-approval `tool_call_start` and the post-approval one do **not** share an id, because it is genuinely a new turn (C1). **F8/F9 must correlate on tool *name* plus ordering, not on `call_id`**, or the UI will render two separate tool cards for one user-approved action.
+
+Unit tests cover the registry semantics, preview truncation on char boundaries, error detection, and event naming; the wire path above is now covered by manual probe.
 
 ---
 
@@ -157,27 +256,33 @@ Note: `timeout` is not available on this macOS shell — use `curl --max-time`.
 
 ## 7. Artifacts
 
-- [`docs/spec/momo-worker.md`](./momo-worker.md) — the spec. §0 audit table, §2.2 lock discipline, §2.4 corrected approval flow, §5 event protocol, §8 error model, §9 security, §10 testing.
-- `src/gateway/turn.rs` — **new**, turn guard + approval broker (316 lines, 7 tests)
-- `src/gateway/v2_handlers.rs` — **new**, all `/v2` handlers (871 lines, 4 tests)
-- `src/gateway/v2_types.rs` — **new**, V2 request/event types + `v2_error()` (262 lines)
-- `src/gateway/mod.rs` — modified: state, config, routes, router split, bind overrides
+All of the below landed in **`546ef04`**.
+
+- [`docs/spec/momo-worker.md`](./momo-worker.md) — the spec. §0 audit table, §2.2 lock discipline, §2.4 corrected approval flow, §5 event protocol, §8 error model, §9 security, §10 testing, **§12 execution plan**.
+- `src/gateway/turn.rs` — **new**, turn guard + approval broker (7 tests)
+- `src/gateway/v2_handlers.rs` — **new**, all `/v2` handlers (17 fns, 4 tests)
+- `src/gateway/v2_types.rs` — **new**, V2 request/event types + `v2_error()`
+- `src/gateway/mod.rs` — modified: state, config, routes (`:184-206`), router split (`:213`), bind overrides
 - `src/gateway/handlers.rs` — modified: turn lease on v1, cost wiring, readiness payload
-- `src/harness.rs` — modified: turn lifecycle + approved-tools management
-- `src/providers.rs` — modified: `list_all()` + `KNOWN_PROVIDERS`
+- `src/harness.rs` — modified: turn lifecycle (`:440-456`) + approved-tools management
+- `src/providers.rs` — modified: `list_all()` (`:334,456`) + `KNOWN_PROVIDERS`
 - `src/cli/mod.rs`, `src/cli/repl.rs` — modified: flags; REPL routed through shared lifecycle
 
-Nothing is committed. `git status` also shows unrelated pre-existing modifications (`Cargo.toml`, `Cargo.lock`, `docs/user-guide.md`, `src/main.rs`) that are **not** part of this work.
+**Routes verified present at `546ef04`:** `/v2/chat/{stream,approve,deny,interrupt}` · `/v2/agents{,/switch,/default}` · `/v2/providers` · `/v2/{switch-model,switch-provider,switch}` · `/v2/settings{,/permission}` · `DELETE /v2/settings/approved-tools` · `/health` on the auth-exempt public router.
+
+For uncommitted, unrelated tree state see §1.
 
 ---
 
 ## 8. Suggested skills for the next agent
 
-- **`code-review`** — before committing the gateway slab; the concurrency and lock-ordering logic is the risky part and deserves a second pass.
-- **`security-review`** — mandatory before **G6** (sandboxed file read) ships. Path traversal, symlink escape, gitignored-secret leakage, and 404-vs-403 information disclosure are all in scope; hardening requirements are in spec G6 and §9.
-- **`frontend-design`** or **`example-skills:frontend-design`** — when starting F1/F5, for the 3-panel layout and visual direction.
-- **`example-skills:webapp-testing`** — Playwright driving of the approval dialog once the frontend exists.
-- **`commit`** — the work is uncommitted; conventional commits when the user is ready.
+Spec §12.2 now assigns these per work package. Summary:
+
+- **`code-review`** — gate on WP-1 (G4/G5/G8) and WP-7 (Tauri supervisor); the concurrency and lock-ordering logic is the risky part and deserves a second pass.
+- **`security-review`** — **blocking** gate on WP-2 (**G6**, sandboxed file read). Path traversal, symlink escape, gitignored-secret leakage, and 404-vs-403 information disclosure are all in scope; hardening requirements are in spec G6 and §9.
+- **`frontend-design`** or **`example-skills:frontend-design`** — opening move on WP-3 (F1/F5), for the 3-panel layout and visual direction.
+- **`example-skills:webapp-testing`** — Playwright driving of the approval dialog; WP-4 exit gate.
+- **`commit`** — conventional commit at each package boundary.
 
 Do **not** reach for `prd-generator` — the spec already exists and is reconciled against the code.
 
@@ -185,13 +290,23 @@ Do **not** reach for `prd-generator` — the spec already exists and is reconcil
 
 ## 9. Next steps
 
-1. **Unblock the provider** (credits or another key + a tool-capable model), then run the two unverified acceptance checks in §5. Do this first — it gates confidence in everything already written.
-2. **G4** MCP status — smallest remaining gateway task; mind §4.7 (no per-server tool counts).
-3. **G5** memory search — mind §4.8 (right function) and §4.3 (std Mutex, no await while held).
-4. **G6** file read — the security-sensitive one; run `security-review` on it.
-5. **G8** session messages with tool calls — extends the existing `/v1/sessions/{id}` walk to map `FunctionCall`/`FunctionResponse`, pairing by call id.
-6. **Then** frontend F1–F3 (scaffold, API client, SSE parser). Note **C3**: `EventSource` cannot POST — use `fetch` + `ReadableStream`. The hand-rolled frame parser is the most likely source of silent breakage; unit-test it against split frames, `\r\n`, multi-line `data:`, comment keep-alives, and unknown event names.
-7. **Decide spec Q9** (sticky-approval UX) before building F9. Recommendation on record: ship honest "approve for the session" copy now; per-call approval is a harness change, not a UI change.
+**The full plan is spec §12** — work packages, model routing, wave schedule, quality gates. Do not re-derive an ordering here; this section records only what is immediately actionable.
+
+**Start here (spec WP-0, blocks everything):**
+
+1. ⚠️ **Human action — unblock the provider.** Add OpenRouter credits or configure a second provider key, then set a tool-capable model. Nothing in §5's "NOT verified" list can be closed without it, and it gates confidence in the whole committed slab.
+2. **R1 — route stubs.** Register `/v2/mcp/servers`, `/v2/memory/search`, `/v2/memory/stats`, `/v2/files`, `/v2/files/tree`, `/v2/sessions/{id}/messages` returning `501 not_implemented` in the spec §8 error shape. Independent of item 1, so it can start now — and it is what unlocks parallel dispatch (spec §12.3).
+3. **G0 — run the two unverified acceptance checks** from §5 once item 1 lands: the approval round-trip, and REPL-vs-gateway cost parity.
+
+**Then, per spec §12.5, three lanes run in parallel:** WP-1 (G4/G5/G8) · WP-2 (G6 — Opus + `security-review`) · WP-3 (F1/F2/F3/F5).
+
+**Task-specific gotchas** — these stay here because they are what cost investigation time:
+
+- **G4** — mind the **revised §4.7**: HTTP servers are now countable, stdio still are not. The response shape is unchanged either way.
+- **G5** — mind §4.8 (`ObsidianVault::search`, not the sidecar) and §4.3 (`std::sync::Mutex`, no `await` while held).
+- **G8** — extends the existing `/v1/sessions/{id}` walk to map `FunctionCall`/`FunctionResponse`, pairing by call id.
+- **F3** — note **C3**: `EventSource` cannot POST, so use `fetch` + `ReadableStream`. The hand-rolled frame parser is the most likely source of silent breakage; unit-test it against split frames, `\r\n`, multi-line `data:`, comment keep-alives, and unknown event names.
+- **F9** — spec **Q9 is now decided**: ship the honest "approve for the rest of this session" copy. Per-call approval is deferred as a harness change. No need to re-open it.
 
 ---
 

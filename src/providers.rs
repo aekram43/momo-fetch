@@ -339,8 +339,15 @@ impl ProviderManager {
             .map(|provider| ProviderInfo {
                 provider: (*provider).to_string(),
                 default_model: default_model_for_provider(provider),
-                // Ollama runs locally and needs no key.
-                available: *provider == "ollama" || SecretStore::get(provider).is_ok(),
+                // Ollama needs no API key, but "no key required" is not the
+                // same as "usable" — reporting it available when nothing is
+                // listening makes the UI offer a provider that fails at turn
+                // time. Probe the socket instead.
+                available: if *provider == "ollama" {
+                    ollama_reachable()
+                } else {
+                    SecretStore::get(provider).is_ok()
+                },
             })
             .collect();
 
@@ -462,6 +469,36 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "zai",
     "ollama",
 ];
+
+/// Whether a local Ollama server is actually accepting connections.
+///
+/// Ollama requires no API key, so key presence says nothing about whether it
+/// is usable. A short TCP connect is enough to tell "installed and running"
+/// from "not there", and keeps this callable from the synchronous
+/// [`ProviderManager::list_all`] without blocking the runtime for long.
+fn ollama_reachable() -> bool {
+    use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+
+    // Honour OLLAMA_HOST when set; otherwise the documented default.
+    let host = std::env::var("OLLAMA_HOST")
+        .unwrap_or_else(|_| "127.0.0.1:11434".to_string());
+    let host = host
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .trim_end_matches('/')
+        .to_string();
+    let host = if host.contains(':') { host } else { format!("{host}:11434") };
+
+    let addrs: Vec<SocketAddr> = match host.to_socket_addrs() {
+        Ok(it) => it.collect(),
+        Err(_) => return false,
+    };
+
+    addrs
+        .iter()
+        .any(|addr| TcpStream::connect_timeout(addr, Duration::from_millis(150)).is_ok())
+}
 
 /// Get the default model name for a given provider.
 fn default_model_for_provider(provider: &str) -> String {
