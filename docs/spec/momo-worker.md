@@ -1045,7 +1045,7 @@ This section is the dispatch document. §1–§11 say *what* to build; this says
 
 Single source of truth for task state. Update this table, not the individual task sections.
 
-**As of `caef413` · 2026-08-05 · pushed to `origin/dev` · `cargo test` 303 passed · web 22 passed**
+**As of `063f50d` · 2026-08-05 · pushed to `origin/dev` · `cargo test` 303 passed · web 22 passed**
 
 > The same numbers are mirrored at the top of [`momo-worker-scratchpad.md`](./momo-worker-scratchpad.md) for a quick look. Update both together.
 
@@ -1053,10 +1053,10 @@ Single source of truth for task state. Update this table, not the individual tas
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
-| **Frontend** (F1–F29) | 4 | 25 | ██░░░░░░░░░░░░░░░░ 14% |
+| **Frontend** (F1–F29) | 12 | 17 | ███████░░░░░░░░░░░ 41% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 18 | 25 | ███████░░░░░░░░░░░ 42% |
-| **Whole project** | 18 | 38 | ██████░░░░░░░░░░░░ 32% |
+| **Phase 1** (gateway + frontend) | 26 | 17 | ███████████░░░░░░░ 60% |
+| **Whole project** | 26 | 30 | ████████░░░░░░░░░░ 46% |
 
 **The gateway is complete.** Every G-task is built and wire-verified — streaming, approvals, concurrency, cost, sandboxed file access, static serving. Phase 1 is 33% done by task count; everything still open is frontend, which is the larger half of the work and has not been started.
 
@@ -1089,12 +1089,12 @@ Single source of truth for task state. Update this table, not the individual tas
 | **G6** file read/tree | *WP-2* | `src/gateway/files.rs`. 4 deny layers — the spec's `is_ignored` assumption was wrong and would have leaked `.env`. ⚠️ `security-review` gate still owed |
 | **G9** static serving | *gateway wrap-up* | `/ui/*` via `ServeDir` + SPA fallback, auth-exempt, `ui_dir` configurable. Skipped cleanly when the dir is absent |
 | **F1–F3, F5** scaffold, client, SSE parser, shell | *WP-3* | `web/`. Next **16** (spec said 15). Needs `basePath:'/ui'` to match G9. 22 parser tests |
+| **F4, F6–F11, F29** core chat | *WP-4* | Full turn works in the browser, incl. the approval round-trip. Cards retire on approval — `call_id` changes across the seam |
 
 #### ⬜ Open
 
 | Task | Owner model | Package | Notes |
 |---|---|---|---|
-| **F4–F11, F29** core chat | Sonnet 5 | **WP-4** | F9 approval dialog is the risky one |
 | **F12–F20** management panels | Sonnet 5 | **WP-5** | |
 | **F21–F28** polish | Haiku 4.5 | **WP-6** | |
 | **T1–T5** Tauri core | **Opus 5** | **WP-7** | process supervision, cross-platform kill |

@@ -44,6 +44,28 @@
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ WP-4 — chat is usable (F4, F6–F11, F29) · 2026-08-05
+
+Wave 2. The browser can now drive a full turn: type → stream → tool call → approval → result.
+
+**Verified by driving the real UI with Playwright** against the *release* gateway in strict mode with `approved_tools` cleared: prompt → approval dialog appears with the right title and sticky copy, Deny holds initial focus → Approve → **exactly one** green `shell_exec done` card, no duplicate, no stuck spinner, status bar returns to `idle`.
+
+**Two harness behaviours the UI has to encode, or it renders lies:**
+
+1. **`call_id` does not survive an approval** (§5). The follow-up leg's `tool_call_start` carries a *different* id, so keying cards purely on id leaves the pre-approval card spinning forever *and* draws a second card for the same user-approved action. `onApprovalResolved` retires the awaiting card instead — the follow-up leg's own start/result pair tells the whole story. This is the single most likely thing for a future refactor to break; the Playwright check above is what catches it.
+
+2. **`usage` is per-leg, `cost_usd` is a running session total.** Token counts accumulate across legs; cost is *replaced*, not summed. Summing cost across legs of one turn inflates it by roughly the number of legs.
+
+**F9 copy is a security requirement, not UX polish.** It states that approving inserts the tool *name* into a process-wide set (one Approve on `shell_exec` = never asked again for the life of the process), and that denial is **not** remembered because `run_confirmation_turn(name, false)` records nothing. Do not soften either sentence — both are literally what the code does. Deny takes initial focus so a stray Enter picks the safe action; Escape denies.
+
+**Deferred deliberately:** Shiki (spec §3.2) is not wired. It wants one reused highlighter instance, and re-highlighting a growing code block on every streamed chunk is the wrong shape. Blocks are styled and copyable; F24 can add highlighting without changing the component's interface.
+
+**Known wart, not fixed:** after an approval the assistant message still contains the pre-approval leg's synthetic text — *"Tool confirmation required for 'shell_exec'. Provide approve/deny decision to continue."* — which reads as stale once the tool has run. It is emitted by the harness as a real `text` event, so the honest fix is server-side (don't forward it) rather than a client-side match on that exact string. Visible in the WP-4 screenshot.
+
+**Lint note for future components:** React 19's `react-hooks/set-state-in-effect` rejects calling an extracted `useCallback` fetcher straight from an effect. Use the inline `let cancelled = false` async pattern (see `header.tsx` and `session-list.tsx`) — same behaviour, and it is the shape the rule wants.
+
+---
+
 ### ✅ WP-3 — frontend foundation (F1, F2, F3, F5) · 2026-08-05
 
 Wave 1, lane 3. First frontend code in the project — `web/` did not exist before this.
