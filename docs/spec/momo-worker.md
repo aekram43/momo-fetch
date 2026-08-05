@@ -1047,14 +1047,14 @@ Single source of truth for task state. Update this table, not the individual tas
 
 | | Done | Open | Progress |
 |---|---:|---:|---|
-| **Gateway** (G1–G13 + R1) | 13 | 1 | █████████████████░ 92% |
+| **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
 | **Frontend** (F1–F29) | 0 | 29 | ░░░░░░░░░░░░░░░░░░ 0% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 13 | 30 | █████░░░░░░░░░░░░░ 30% |
-| **Whole project** | 13 | 43 | ████░░░░░░░░░░░░░░ 23% |
+| **Phase 1** (gateway + frontend) | 14 | 29 | ██████░░░░░░░░░░░░ 33% |
+| **Whole project** | 14 | 42 | █████░░░░░░░░░░░░░ 25% |
 
-**Phase 1 is 30% done by task count, and all of it is backend.** The gateway's hard parts — streaming, approvals, concurrency, cost, sandboxed file access — are built and wire-verified; only **G9** remains, and it is blocked on `web/out/` existing. Not one line of UI exists yet, and the frontend is the larger half of the remaining work.
+**The gateway is complete.** Every G-task is built and wire-verified — streaming, approvals, concurrency, cost, sandboxed file access, static serving. Phase 1 is 33% done by task count; everything still open is frontend, which is the larger half of the work and has not been started.
 
 **Three things are outstanding and easy to lose track of:** the `security-review` gate on WP-2 has not been run, cost parity cannot be measured on a free model, and `GET /v1/sessions` reports `event_count: 0` for every session.
 
@@ -1083,12 +1083,12 @@ Single source of truth for task state. Update this table, not the individual tas
 | **G5** memory search | *WP-1* | `GET /v2/memory/{search,stats}`. Guard dropped before serialising; `limit` clamped 1..=100 |
 | **G8** session messages | *WP-1* | `GET /v2/sessions/{id}/messages`, tool calls paired by id; unpaired → `unresolved` |
 | **G6** file read/tree | *WP-2* | `src/gateway/files.rs`. 4 deny layers — the spec's `is_ignored` assumption was wrong and would have leaked `.env`. ⚠️ `security-review` gate still owed |
+| **G9** static serving | *gateway wrap-up* | `/ui/*` via `ServeDir` + SPA fallback, auth-exempt, `ui_dir` configurable. Skipped cleanly when the dir is absent |
 
 #### ⬜ Open
 
 | Task | Owner model | Package | Notes |
 |---|---|---|---|
-| **G9** static serving | Haiku 4.5 | **WP-6** | needs `web/out/` to exist first |
 | **F1–F3** scaffold, client, SSE parser | Sonnet 5 (+Haiku for types) | **WP-3** | codes to §5/§7, not to what's implemented |
 | **F4–F11, F29** core chat | Sonnet 5 | **WP-4** | F9 approval dialog is the risky one |
 | **F12–F20** management panels | Sonnet 5 | **WP-5** | |

@@ -38,6 +38,14 @@ pub struct GatewayConfig {
     /// How long a tool approval may stay pending before it is auto-denied.
     #[serde(default = "default_approval_timeout")]
     pub approval_timeout_secs: u64,
+    /// Directory served at `/ui/*` (G9).
+    ///
+    /// Relative paths resolve against the project root. The default matches
+    /// Next.js static export (`output: 'export'` writes `out/`, not `dist/` —
+    /// spec C12). Configurable because in development the binary and the build
+    /// output are not co-located.
+    #[serde(default = "default_ui_dir")]
+    pub ui_dir: String,
 }
 
 fn default_port() -> u16 {
@@ -52,6 +60,10 @@ fn default_approval_timeout() -> u64 {
     300
 }
 
+fn default_ui_dir() -> String {
+    "web/out".to_string()
+}
+
 // Derived `Default` would zero these fields, which is not the same as the serde
 // defaults used when the file exists — a missing `.harness/gateway.json` would
 // bind port 0 and build an empty CORS allow-list. Keep the two in step.
@@ -62,6 +74,7 @@ impl Default for GatewayConfig {
             cors_origins: default_cors(),
             auth: AuthConfig::default(),
             approval_timeout_secs: default_approval_timeout(),
+            ui_dir: default_ui_dir(),
         }
     }
 }
@@ -224,7 +237,45 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
     // `/health` stays unauthenticated: it is the readiness probe the desktop
     // shell polls before it has a key, and a container health check that 401s
     // is worse than useless. It exposes no session content.
-    let public = Router::new().route("/health", get(handlers::health));
+    let mut public = Router::new().route("/health", get(handlers::health));
+
+    // G9 — serve the built UI at /ui/*.
+    //
+    // Also auth-exempt, and for a harder reason than /health: a browser
+    // navigating to a page cannot attach an Authorization header, so an HTML
+    // shell behind a bearer token is unreachable by construction. The token
+    // still guards every /v1 and /v2 call the loaded app makes.
+    //
+    // Only the static bundle is exposed here — no harness state — and G6's
+    // deny-list is unaffected, since ServeDir is rooted at the build output
+    // rather than the project.
+    let ui_dir = {
+        let configured = std::path::Path::new(&gateway_config.ui_dir);
+        if configured.is_absolute() {
+            configured.to_path_buf()
+        } else {
+            project_path.join(configured)
+        }
+    };
+    if ui_dir.is_dir() {
+        use tower_http::services::{ServeDir, ServeFile};
+        // SPA fallback: client-side routes like /ui/settings have no file on
+        // disk, so anything unmatched resolves to index.html and lets the
+        // router take over. Without this, a refresh on any sub-route 404s.
+        let index = ui_dir.join("index.html");
+        let serve = ServeDir::new(&ui_dir).fallback(ServeFile::new(&index));
+        public = public.nest_service("/ui", serve);
+        tracing::info!("🖥️  Serving UI from {} at /ui", ui_dir.display());
+    } else {
+        // Not an error: the gateway is useful headless, and the frontend may
+        // simply not be built yet. Say so once rather than 404ing silently.
+        tracing::info!(
+            "UI directory {} not found — /ui is disabled. \
+             Build the frontend (npm run build in web/) or set ui_dir in \
+             .harness/gateway.json.",
+            ui_dir.display()
+        );
+    }
 
     let app = authed.merge(public).layer(cors).with_state(state);
 

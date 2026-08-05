@@ -65,7 +65,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Gateway (HTTP server)
 axum = { version = "0.8", features = ["macros"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
 async-stream = "0.3"
 futures = "0.3"
 

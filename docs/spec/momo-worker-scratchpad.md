@@ -4,7 +4,7 @@
 > **Spec:** [`docs/spec/momo-worker.md`](./momo-worker.md) — read §0 (Code Audit) first; it is the load-bearing part.
 > **Dispatch:** spec **§12** is the work plan (packages, model routing, waves). §9 below is now just a pointer into it.
 > **Last updated:** 2026-08-05 · branch `dev` (0.9.1)
-> **Build state:** `cargo check --all-targets` clean (warnings only) · `cargo test --bin momo-fetch` → **299 passed**
+> **Build state:** `cargo check --all-targets` clean (warnings only) · `cargo test --bin momo-fetch` → **303 passed**
 
 ---
 
@@ -13,18 +13,18 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**`3229774` · dev · 2026-08-05 · `cargo test` 303 passed · check clean**
+**`3229774`+G9 · dev · 2026-08-05 · `cargo test` 303 passed · check clean**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
-| **Gateway** (G1–G13 + R1) | 13 | 1 | █████████████████░ 92% |
+| **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
 | **Frontend** (F1–F29) | 0 | 29 | ░░░░░░░░░░░░░░░░░░ 0% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 13 | 30 | █████░░░░░░░░░░░░░ 30% |
-| **ทั้งโปรเจกต์** | 13 | 43 | ████░░░░░░░░░░░░░░ 23% |
+| **Phase 1** (gateway + frontend) | 14 | 29 | ██████░░░░░░░░░░░░ 33% |
+| **ทั้งโปรเจกต์** | 14 | 42 | █████░░░░░░░░░░░░░ 25% |
 
-**Backend แทบเสร็จ frontend ยังไม่เริ่ม.** ของยากทั้งหมด — streaming, approval, concurrency, cost, sandbox — สร้างและพิสูจน์บน wire แล้ว เหลือ gateway แค่ **G9** ตัวเดียวซึ่งบล็อกอยู่ที่ยังไม่มี `web/out/` งานที่เหลือส่วนใหญ่คือ UI ซึ่งเป็นครึ่งที่ใหญ่กว่า
+**✅ Gateway เสร็จครบแล้ว — งานที่เหลือทั้งหมดคือ frontend + desktop.** ของยากทั้งหมด — streaming, approval, concurrency, cost, sandbox, static serving — สร้างและพิสูจน์บน wire แล้ว ยังไม่มี UI สักบรรทัด ซึ่งเป็นครึ่งที่ใหญ่กว่าของงานที่เหลือ
 
 **Wave ถัดไป: WP-3** — F1 scaffold · F2 API client + types · F3 SSE parser · F5 app shell
 
@@ -43,6 +43,18 @@
 ## 0. Wave progress log
 
 Newest first. One entry per work package, added on completion.
+
+### ✅ G9 — static UI serving · 2026-08-05 · **Gateway is now complete**
+
+`GET /ui/*` from `ServeDir`, with `ServeFile(index.html)` as the fallback so client-side routes survive a refresh. Path comes from `gateway.json` → `ui_dir`, defaulting to **`web/out`** (Next.js static export writes `out/`, not `dist/` — spec C12). Relative values resolve against the project root. Needed `tower-http`'s `fs` feature, now enabled.
+
+**Auth-exempt, and for a stronger reason than `/health`:** a browser navigating to a page cannot attach an `Authorization` header, so an HTML shell behind a bearer token is unreachable by construction. Only the static bundle is exposed; the token still guards every `/v1` and `/v2` call the loaded app makes.
+
+**Absent `web/out` is not an error.** The gateway is useful headless and the frontend may simply not be built yet, so the route is skipped and a one-line hint is logged. Verified both ways: without the directory `/ui/` → 404 and `/health` → 200; with it, `/ui/`, `/ui/index.html` and `/ui/_next/app.css` all → 200.
+
+**Traversal check.** `/ui/../.env`, `/ui/../../.env`, `/ui/%2e%2e/%2e%2e/.env` and `/ui/..%2f.env` all return 200 — but the body is `index.html`, not `.env`. `ServeDir` rejects the traversal and the SPA fallback answers. Confirmed by grepping the response for `API_KEY`/`sk-or-`: no match on any of them. **Do not "fix" that 200 into a 404 without re-checking the body** — it is the fallback behaving correctly, and the same 200 is what makes `/ui/settings/deep` work.
+
+---
 
 ### ✅ WP-2 — G6 sandboxed file access · 2026-08-05
 
