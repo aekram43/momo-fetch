@@ -1,10 +1,12 @@
 # MoMo Worker — Web UI & Desktop App Spec
 
-> **Status:** v3 — reconciled against code at `546ef04` (0.9.1). Sprint-1 gateway slab **landed**.
+> **Status:** v3 — reconciled against code at `a218c19` (0.9.1), pushed to `origin/dev`.
+> **Progress:** Sprint-1 gateway slab **landed** · **Wave 0 complete** (verification + R1 + B0–B4) · Waves 1–3 ready to start in parallel · frontend not started.
+> **Where to look:** [**§12.1 Status Ledger**](#121-status-ledger) — what is done, what is open, who owns it. Start there.
 > **Inspired by:** OpenWorker.com (3-panel layout, approval flow, artifacts)
 > **Architecture:** Next.js frontend ↔ existing Gateway (axum) ↔ Harness (Rust)
 > **Execution plan:** [§12](#12-execution-plan--model-assignment) is the dispatch document — read it before picking up work.
-> **Handoff state:** [`momo-worker-scratchpad.md`](./momo-worker-scratchpad.md) (§4 "hard-won knowledge" is still current; its §2/§7 claim the work is uncommitted — that is stale, it landed in `546ef04`).
+> **Handoff state:** [`momo-worker-scratchpad.md`](./momo-worker-scratchpad.md) — §4 "hard-won knowledge" is the load-bearing part.
 
 ---
 
@@ -1039,24 +1041,56 @@ This section is the dispatch document. §1–§11 say *what* to build; this says
 
 Single source of truth for task state. Update this table, not the individual task sections.
 
-| Task | State | Owner model | Package | Notes |
-|---|---|---|---|---|
-| G1 rich SSE stream | ✅ landed | — | — | 4-phase approval stitch; wire-verification pending (Wave 0) |
-| G2 agents | ✅ landed | — | — | |
-| G3 providers/models | ✅ landed | — | — | |
-| G7 settings | ✅ landed | — | — | incl. `DELETE /v2/settings/approved-tools` |
-| G10 cost/context | ✅ landed | — | — | shared lifecycle in `src/harness.rs:440-456`; parity untested |
-| G11 port/bind flags | ✅ landed | — | — | |
-| G12 health exemption | ✅ landed | — | — | |
-| G13 interrupt | ✅ landed | — | — | |
-| — turn guard | ✅ landed | — | — | `src/gateway/turn.rs`, 7 tests |
-| **G0** wire verification | ✅ **unblocked & passed** 2026-08-05 | — | **WP-0** | approval round-trip, tool mapping, stickiness, deadlock canary all verified on `nvidia/nemotron-3-ultra-550b-a55b:free`. Only cost parity remains, gated on B2 |
-| **R1** route pre-registration | ✅ **done** | — | **WP-0** | 6 routes registered, `501 not_implemented` in the §8 shape. **Parallel dispatch is unblocked** |
-| **B0** fix broken default model | ✅ **done** | — | **WP-0** | `.harness/settings.json` → `nvidia/nemotron-3-ultra-550b-a55b:free` for both `default_model` and `memory.sidecar_model` |
-| **B1** ollama availability false positive | ✅ **done** | — | **WP-0** | added `ollama_reachable()` TCP probe (150 ms, honours `OLLAMA_HOST`); now reports `available:false` when nothing is listening |
-| **B2** `:free` models billed as paid | ✅ **done** | — | **WP-0** | `get_pricing` short-circuits on the `:free` suffix. Verified: `/v1/cost` → `0.0` over 30k tokens |
-| **B3** sandbox "not initialized" | ✅ **done** | — | **WP-0** | **root cause was not `rebuild_runner`** — see note below. Fixed in all 5 tool modules |
-| **B4** keyring store never registered | ✅ **done** | — | **WP-0** | `SecretStore::get` now degrades a missing keyring store to `NotFound`, so the API says *"Set ZAI_API_KEY"* instead of leaking *"No default store has been set"* |
+**As of `a218c19` · 2026-08-05 · pushed to `origin/dev` · `cargo test` 297 passed**
+
+| | Done | Open | Progress |
+|---|---|---|---|
+| **Gateway** (G1–G13 + R1) | 12 | 5 | ██████████████░░░░ 71% |
+| **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
+| **Frontend** (F1–F29) | 0 | 29 | ░░░░░░░░░░░░░░░░░░ 0% |
+| **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
+
+**Phase 1 is roughly one-third done.** All of it is backend: the gateway's hard parts — streaming, approvals, concurrency, cost — are built and now wire-verified. Not one line of UI exists yet, and the frontend is the larger half of the remaining work.
+
+#### ✅ Done
+
+| Task | Landed in | Notes |
+|---|---|---|
+| G1 rich SSE stream | `546ef04` | 4-phase approval stitch — **wire-verified 2026-08-05** |
+| G2 agents | `546ef04` | |
+| G3 providers/models | `546ef04` | incl. `list_all()` so unconfigured providers report `available:false` |
+| G7 settings | `546ef04` | incl. `DELETE /v2/settings/approved-tools` |
+| G10 cost/context | `546ef04` | shared lifecycle, `src/harness.rs:440-456` |
+| G11 port/bind flags | `546ef04` | `--gateway-port 0` + `MOMO_GATEWAY_LISTENING` |
+| G12 health exemption | `546ef04` | auth-exempt `/health` with readiness payload |
+| G13 interrupt | `546ef04` | |
+| — turn guard | `546ef04` | `src/gateway/turn.rs`, 7 tests |
+| **G0** wire verification | `57fb7a4` | approval round-trip · tool mapping · stickiness · **deadlock canary 200 in 0.4 ms**. Ran on `nvidia/nemotron-3-ultra-550b-a55b:free` |
+| **R1** route pre-registration | `57fb7a4` | 6 routes → `501 not_implemented` in the §8 shape. **This is what unblocks parallel dispatch** |
+| **B0** broken default model | `57fb7a4` | `.harness/settings.json` pointed at a slug that does not exist |
+| **B1** ollama false positive | `57fb7a4` | `ollama_reachable()` TCP probe, 150 ms, honours `OLLAMA_HOST` |
+| **B2** `:free` billed as paid | `57fb7a4` | `get_pricing` short-circuits the `:free` suffix. `/v1/cost` → `0.0` over 30k tokens (was `$0.596`) |
+| **B3** sandbox "not initialized" | `57fb7a4` | thread-affinity race — see note below |
+| **B4** keyring never registered | `57fb7a4` | missing store now degrades to `NotFound`, so the API says *"Set ZAI_API_KEY"* |
+| — MCP tool-name prefixing | `9d71ddc` | pre-existing work; gives HTTP servers per-server attribution (affects G4) |
+
+#### ⬜ Open
+
+| Task | Owner model | Package | Notes |
+|---|---|---|---|
+| **G4** MCP status | Sonnet 5 | **WP-1** | `tool_count` nullable — see the §4.7 revision in the scratchpad |
+| **G5** memory search | Sonnet 5 | **WP-1** | `std::sync::Mutex` — no `await` while held |
+| **G8** session messages | Sonnet 5 | **WP-1** | extend the existing walk, pair by call id |
+| **G6** file read/tree | **Opus 5** | **WP-2** | security boundary; `security-review` is a blocking gate |
+| **G9** static serving | Haiku 4.5 | **WP-6** | needs `web/out/` to exist first |
+| **F1–F3** scaffold, client, SSE parser | Sonnet 5 (+Haiku for types) | **WP-3** | codes to §5/§7, not to what's implemented |
+| **F4–F11, F29** core chat | Sonnet 5 | **WP-4** | F9 approval dialog is the risky one |
+| **F12–F20** management panels | Sonnet 5 | **WP-5** | |
+| **F21–F28** polish | Haiku 4.5 | **WP-6** | |
+| **T1–T5** Tauri core | **Opus 5** | **WP-7** | process supervision, cross-platform kill |
+| **T6–T9, T12** shell features | Sonnet 5 | **WP-8** | |
+| **T10, T11, T13** ship pipeline | Sonnet 5 + human | **WP-9** | T13 signing needs human credentials |
+| **Cost parity** (G10 acceptance) | Sonnet 5 | **WP-1** | the one Wave-0 check still open — was gated on B2, now unblocked. Needs a paid model to be meaningful |
 
 > **B3 was misdiagnosed as an approval-path bug. It was a latent thread-affinity race affecting every sandboxed tool call.**
 >
@@ -1065,18 +1099,6 @@ Single source of truth for task state. Update this table, not the individual tas
 > Fixed by moving all five contexts to a process-global `RwLock<Option<Arc<…>>>`, which is correct here because the harness has exactly one sandbox and one vault by construction ([§2.3](#23-concurrency-model-corrected)). `get_*` clones the `Arc` out, so no guard is ever held across an `await`.
 >
 > The tool tests had been relying on thread-locals for isolation and began clobbering one another once the context went global; they are now serialised through `tools::test_support::sandbox_guard()`. Suite green at **297 passed**.
-| **G4** MCP status | ⬜ open | Sonnet 5 | **WP-1** | `tool_count: null`, see §4.7 of scratchpad |
-| **G5** memory search | ⬜ open | Sonnet 5 | **WP-1** | `std::sync::Mutex` — no await while held |
-| **G8** session messages | ⬜ open | Sonnet 5 | **WP-1** | extend the existing walk, pair by call id |
-| **G6** file read/tree | ⬜ open | **Opus 5** | **WP-2** | security boundary; `security-review` gate |
-| **G9** static serving | ⬜ open | Haiku 4.5 | **WP-6** | needs `web/out/` to exist first |
-| **F1–F3** scaffold, client, SSE parser | ⬜ open | Sonnet 5 (+Haiku for types) | **WP-3** | codes to §5/§7, not to what's implemented |
-| **F4–F11, F29** core chat | ⬜ open | Sonnet 5 | **WP-4** | F9 approval dialog is the risky one |
-| **F12–F20** management panels | ⬜ open | Sonnet 5 | **WP-5** | |
-| **F21–F28** polish | ⬜ open | Haiku 4.5 | **WP-6** | |
-| **T1–T5** Tauri core | ⬜ open | **Opus 5** | **WP-7** | process supervision, cross-platform kill |
-| **T6–T9, T12** shell features | ⬜ open | Sonnet 5 | **WP-8** | |
-| **T10, T11, T13** ship pipeline | ⬜ open | Sonnet 5 + human | **WP-9** | T13 signing needs human credentials |
 
 ### 12.2 Model Routing Rubric
 
