@@ -44,6 +44,37 @@
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ WP-3 — frontend foundation (F1, F2, F3, F5) · 2026-08-05
+
+Wave 1, lane 3. First frontend code in the project — `web/` did not exist before this.
+
+| Task | Landed | Notes |
+|---|---|---|
+| **F1** | `web/` scaffold | Next **16.3** + React 19.2 + Tailwind v4 + zustand, `output:'export'` → `web/out` |
+| **F2** | `lib/types.ts`, `lib/api-client.ts` | full type surface + URL resolution + §8 error parsing |
+| **F3** | `lib/sse-parser.ts` | `fetch` + `ReadableStream`, hand-rolled frames, **22 vitest cases** |
+| **F5** | `components/layout/*` | 3-panel shell, collapsible, dark-first |
+
+**Spec deviation:** §3.2 specifies Next 15; `create-next-app@latest` installs **16.3**. Kept 16 — it is the current line and nothing in the spec depends on 15. Note `web/AGENTS.md` (written by `next dev`) warns that Next 16 has breaking changes and to read `node_modules/next/dist/docs/` before writing config; that is how `basePath` below was confirmed.
+
+**🔴 Two integration bugs that only appear when you actually serve the build through G9.** Both are the kind that a unit test never catches:
+
+1. **Completely unstyled page.** Next emits **absolute** asset URLs, so a bundle mounted at `/ui` links `/_next/static/…` — not under `/ui`, so the browser 404s every stylesheet and script. Fixed with **`basePath: '/ui'`** in `next.config.ts`. This is easy to mis-diagnose as a Tailwind problem: fetching those same assets by hand *with* a `/ui` prefix returns 200, which is exactly what I did first and it told me nothing was wrong. **`basePath` must match G9's mount point**, and it is inlined at build time — changing one without the other silently breaks asset loading.
+
+2. **"offline" on a page the gateway itself served.** `NEXT_PUBLIC_GATEWAY_URL` is baked in at build time, but the gateway binds an ephemeral port under `--gateway-port 0`, so the value is guaranteed wrong. `gatewayUrl()` now prefers `window.location.origin` when the path starts with `/ui`. Side benefit: those calls become same-origin, so the permissive CORS default stops mattering on the served-by-gateway path. This step is **not** in spec §3.2's resolution chain — it was added from testing and the spec should absorb it.
+
+**Verified end to end:** `npm run build` → `web/out/` → gateway serves `/ui` with correct content types → SPA fallback works on `/ui/anything/deep` → header shows **`● connected`** and the live model name read back from the running harness. Screenshotted at 1440×900.
+
+**Design direction** (F5, for whoever does F6–F9 and must stay consistent): *instrument panel, not terminal cosplay.* Two rules carry it —
+- **Amber (`--color-signal`) is a state, never decoration.** It means the agent is working or wants something from you. If amber is on screen, the user has something to attend to. Do not use it for emphasis, links, or branding.
+- **Monospace is machine speech** (tool names, paths, session ids, token counts); **sans is the interface talking to you.** They never swap.
+
+The signature element is the **turn rail** — the 3px strip on the chat panel's leading edge. Idle it is dark; running, an amber segment travels; awaiting approval, the whole column pulses. It exists because the turn lifecycle is this product's core and is otherwise invisible. Status is never colour-alone: every dot is paired with a word.
+
+Placeholders say what is missing and which task fills it (`F10`, `F14`, …) rather than faking content — a shell with mock messages hides exactly the integration problems above.
+
+---
+
 ### ✅ G9 — static UI serving · 2026-08-05 · **Gateway is now complete**
 
 `GET /ui/*` from `ServeDir`, with `ServeFile(index.html)` as the fallback so client-side routes survive a refresh. Path comes from `gateway.json` → `ui_dir`, defaulting to **`web/out`** (Next.js static export writes `out/`, not `dist/` — spec C12). Relative values resolve against the project root. Needed `tower-http`'s `fs` feature, now enabled.

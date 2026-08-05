@@ -535,7 +535,7 @@ Parser requirements: handle `event:`/`data:`/`id:` lines, multi-line `data:`, `\
 
 | Layer | Choice | Rationale |
 |-------|--------|-----------|
-| Framework | Next.js 15 (App Router, React 19) | v1 said 14; 15 is the current line and required for React 19 + Tailwind v4 tooling |
+| Framework | Next.js **16** (App Router, React 19) | Shipped in WP-3. The spec previously said 15; `create-next-app@latest` installs 16 and nothing here depends on 15 |
 | UI Components | shadcn/ui + Radix | Accessible, composable, dark mode built-in |
 | Styling | Tailwind CSS v4 | shadcn/ui supports v4; use the CSS-first `@theme` config |
 | State | Zustand | Lightweight, no boilerplate |
@@ -608,7 +608,11 @@ web/
 └── .env.local                      # NEXT_PUBLIC_GATEWAY_URL=http://localhost:3000
 ```
 
-**Gateway URL resolution** (one place, `api-client.ts`): `window.__GATEWAY_URL__` (injected by Tauri, T3) → `process.env.NEXT_PUBLIC_GATEWAY_URL` → `http://localhost:3000`. Because `output: 'export'` inlines env vars at build time, the Tauri path *must* be the runtime injection, not the env var.
+**Gateway URL resolution** (one place, `api-client.ts`): `window.__GATEWAY_URL__` (injected by Tauri, T3) → **same origin when the page is served under `/ui`** → `process.env.NEXT_PUBLIC_GATEWAY_URL` → `http://localhost:3000`. Because `output: 'export'` inlines env vars at build time, the Tauri path *must* be the runtime injection, not the env var.
+
+The same-origin step was added during WP-3 after testing against G9: the gateway binds an ephemeral port under `--gateway-port 0`, so a build-time `NEXT_PUBLIC_GATEWAY_URL` is guaranteed wrong there and the UI loads fine, then reports "offline". It also makes those calls same-origin, so the permissive CORS default stops mattering on the served-by-gateway path.
+
+**`basePath` must match G9's mount.** Next emits absolute asset URLs, so a bundle served at `/ui` needs `basePath: '/ui'` in `next.config.ts` or the browser 404s every stylesheet and renders unstyled. The value is inlined at build time; changing the gateway mount without rebuilding silently breaks assets.
 
 **Type parity:** `lib/types.ts` mirrors `src/gateway/types.rs`. Keep them in sync by deriving `ts-rs`/`schemars` output from the Rust types in CI rather than hand-copying; a drifted event enum fails silently at runtime (unknown `event:` names get dropped by the parser). Minimum bar: the parser logs and surfaces unknown event types instead of ignoring them.
 
@@ -1041,7 +1045,7 @@ This section is the dispatch document. §1–§11 say *what* to build; this says
 
 Single source of truth for task state. Update this table, not the individual task sections.
 
-**As of `3229774` · 2026-08-05 · pushed to `origin/dev` · `cargo test` 303 passed**
+**As of `caef413` · 2026-08-05 · pushed to `origin/dev` · `cargo test` 303 passed · web 22 passed**
 
 > The same numbers are mirrored at the top of [`momo-worker-scratchpad.md`](./momo-worker-scratchpad.md) for a quick look. Update both together.
 
@@ -1049,10 +1053,10 @@ Single source of truth for task state. Update this table, not the individual tas
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
-| **Frontend** (F1–F29) | 0 | 29 | ░░░░░░░░░░░░░░░░░░ 0% |
+| **Frontend** (F1–F29) | 4 | 25 | ██░░░░░░░░░░░░░░░░ 14% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 14 | 29 | ██████░░░░░░░░░░░░ 33% |
-| **Whole project** | 14 | 42 | █████░░░░░░░░░░░░░ 25% |
+| **Phase 1** (gateway + frontend) | 18 | 25 | ███████░░░░░░░░░░░ 42% |
+| **Whole project** | 18 | 38 | ██████░░░░░░░░░░░░ 32% |
 
 **The gateway is complete.** Every G-task is built and wire-verified — streaming, approvals, concurrency, cost, sandboxed file access, static serving. Phase 1 is 33% done by task count; everything still open is frontend, which is the larger half of the work and has not been started.
 
@@ -1084,12 +1088,12 @@ Single source of truth for task state. Update this table, not the individual tas
 | **G8** session messages | *WP-1* | `GET /v2/sessions/{id}/messages`, tool calls paired by id; unpaired → `unresolved` |
 | **G6** file read/tree | *WP-2* | `src/gateway/files.rs`. 4 deny layers — the spec's `is_ignored` assumption was wrong and would have leaked `.env`. ⚠️ `security-review` gate still owed |
 | **G9** static serving | *gateway wrap-up* | `/ui/*` via `ServeDir` + SPA fallback, auth-exempt, `ui_dir` configurable. Skipped cleanly when the dir is absent |
+| **F1–F3, F5** scaffold, client, SSE parser, shell | *WP-3* | `web/`. Next **16** (spec said 15). Needs `basePath:'/ui'` to match G9. 22 parser tests |
 
 #### ⬜ Open
 
 | Task | Owner model | Package | Notes |
 |---|---|---|---|
-| **F1–F3** scaffold, client, SSE parser | Sonnet 5 (+Haiku for types) | **WP-3** | codes to §5/§7, not to what's implemented |
 | **F4–F11, F29** core chat | Sonnet 5 | **WP-4** | F9 approval dialog is the risky one |
 | **F12–F20** management panels | Sonnet 5 | **WP-5** | |
 | **F21–F28** polish | Haiku 4.5 | **WP-6** | |
