@@ -820,30 +820,6 @@ pub async fn v2_settings_clear_approvals(State(state): State<GatewayState>) -> R
     }
 }
 
-// ─── R1: not-yet-implemented endpoints ─────────────────────────
-//
-// Routes are registered ahead of their implementations on purpose, so the
-// remaining gateway tasks don't all collide in `mod.rs` and the frontend can
-// build against real HTTP. Replace the stub, not the route. See spec §12.3.
-async fn not_implemented(task: &str, endpoint: &str) -> Response {
-    v2_error(
-        StatusCode::NOT_IMPLEMENTED,
-        "not_implemented",
-        format!("{endpoint} is not implemented yet ({task})."),
-        Some(serde_json::json!({ "task": task, "endpoint": endpoint })),
-    )
-}
-
-/// **G6** — sandboxed file read. Not implemented.
-pub async fn v2_files() -> Response {
-    not_implemented("G6", "GET /v2/files").await
-}
-
-/// **G6** — sandboxed directory listing. Not implemented.
-pub async fn v2_files_tree() -> Response {
-    not_implemented("G6", "GET /v2/files/tree").await
-}
-
 // ─── G4: MCP server status ─────────────────────────────────────
 
 /// Map a stdio server status to a human-readable failure reason.

@@ -1,4 +1,5 @@
 mod auth;
+mod files;
 mod handlers;
 mod turn;
 mod types;
@@ -212,8 +213,8 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
         .route("/v2/mcp/servers", get(v2_handlers::v2_mcp_servers))
         .route("/v2/memory/search", get(v2_handlers::v2_memory_search))
         .route("/v2/memory/stats", get(v2_handlers::v2_memory_stats))
-        .route("/v2/files", get(v2_handlers::v2_files))
-        .route("/v2/files/tree", get(v2_handlers::v2_files_tree))
+        .route("/v2/files", get(files::v2_files))
+        .route("/v2/files/tree", get(files::v2_files_tree))
         .route(
             "/v2/sessions/{session_id}/messages",
             get(v2_handlers::v2_session_messages),

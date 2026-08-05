@@ -12,6 +12,35 @@
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ WP-2 — G6 sandboxed file access · 2026-08-05
+
+Wave 1, lane 2. Landed in `src/gateway/files.rs` (own module — this is the surface a security review should read first).
+
+**🔴 The spec's security assumption was wrong, and it would have leaked the API key.**
+
+Spec G6 says to "filter with `is_ignored` so `.gitignore`d files and secrets don't leak into the browser". `is_ignored` consults **`.agentignore` only** (`src/sandbox/mod.rs:170`). This repo has **no `.agentignore`**, so `ignore_matcher` is `None` and *every* in-root path reports as not-ignored. `.env` is gitignored but not agentignored — so as specified, `GET /v2/files?path=.env` would have returned `OPENROUTER_API_KEY` in plaintext. CORS is permissive by default, so any page the user merely visited could have fetched it.
+
+**Fixed with four layers, in this order:**
+
+| # | Layer | Catches |
+|---|---|---|
+| 1 | `resolve_path` | `..`, symlink escape, absolute paths (`Path::join` discards the root, so the trailing prefix re-check is what saves it) |
+| 2 | `is_ignored` | `.agentignore` |
+| 3 | `gitignored()` **new** | `.gitignore` — the layer the spec assumed layer 2 provided |
+| 4 | `is_sensitive()` **new** | unconditional deny-list: `.env*`, `*.pem/key/p12/pfx/jks`, `id_rsa`, `.ssh`, `.git`, `.netrc`, `credentials`, `secrets.*` |
+
+Layer 4 exists because layer 3 is only as good as the user's `.gitignore`, and a project that never gitignored its keys is exactly the project whose keys most need protecting. It is deliberately **not configurable**.
+
+**Verified live — every one of these returns 403:** `.env` · `.env.local` · `../../etc/passwd` · `/etc/passwd` · `.git/config` · `../.env` · `src/../.env` · `.ssh/id_rsa` · `server.pem` · `target/debug/momo-fetch` (gitignored). The tree walk applies the same rules — `.` at depth 1 lists 18 entries with `.env`, `.git` and `target/` all absent.
+
+Other acceptance criteria: a 3 MB file → capped at exactly 1 MiB with `truncated:true` and no OOM (the cap is applied *while reading*, via `File::take`, not after); a binary file → `binary:true` with `content:null` rather than lossy-decoded garbage; a directory via `/v2/files` → 400; a missing but permitted in-sandbox path → 404.
+
+**403 vs 404 is load-bearing.** Everything denied returns 403, including paths that do not exist but would be denied. 404 is reserved for in-sandbox, permitted, genuinely absent. Splitting those would make the endpoint an oracle for mapping the filesystem.
+
+**Still owed:** the `security-review` skill has *not* been run on this yet — spec §12.7 lists it as a blocking gate for WP-2. Everything above is my own testing. Run it before treating G6 as shippable.
+
+---
+
 ### ✅ WP-1 — Gateway read endpoints (G4, G5, G8) · 2026-08-05
 
 Wave 1, lane 1. All three landed, verified live against a running gateway.
