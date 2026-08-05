@@ -99,7 +99,9 @@ impl SessionManager {
             .map(|s| SessionInfo {
                 id: s.id().to_string(),
                 updated_at: s.last_update_time(),
-                event_count: s.events().len(),
+                // Not `s.events().len()` — see the field docs. `list` does not
+                // load events, so that expression is always 0.
+                event_count: None,
             })
             .collect();
         // Most recently updated first
@@ -126,13 +128,25 @@ impl SessionManager {
 pub struct SessionInfo {
     pub id: String,
     pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub event_count: usize,
+    /// `None` when the count is unknown.
+    ///
+    /// [`SessionManager::list_sessions`] cannot fill this in: the backing
+    /// `SessionService::list` is a metadata-only query that returns sessions
+    /// with an empty event vector, so counting there always yields 0. Reporting
+    /// a confident `0` for a session with 21 events is worse than admitting we
+    /// do not know — same reasoning as `tool_count` in G4.
+    ///
+    /// Use [`SessionManager::get_session`] when the real count matters.
+    pub event_count: Option<usize>,
 }
 
 impl std::fmt::Display for SessionInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let time = self.updated_at.format("%Y-%m-%d %H:%M");
-        write!(f, "{}  ({} events, updated {})", self.id, self.event_count, time)
+        match self.event_count {
+            Some(n) => write!(f, "{}  ({n} events, updated {time})", self.id),
+            None => write!(f, "{}  (updated {time})", self.id),
+        }
     }
 }
 
@@ -186,11 +200,21 @@ mod tests {
         let info = SessionInfo {
             id: "abc-123".to_string(),
             updated_at: chrono::Utc::now(),
-            event_count: 5,
+            event_count: Some(5),
         };
         let display = format!("{info}");
         assert!(display.contains("abc-123"));
         assert!(display.contains("5 events"));
+
+        // Unknown count omits the clause rather than printing "0 events".
+        let unknown = SessionInfo {
+            id: "abc-123".to_string(),
+            updated_at: chrono::Utc::now(),
+            event_count: None,
+        };
+        let display = format!("{unknown}");
+        assert!(display.contains("abc-123"));
+        assert!(!display.contains("events"));
     }
 
     #[tokio::test]

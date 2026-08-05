@@ -128,6 +128,10 @@ export function SessionList() {
                 >
                   {active && <span aria-hidden>▸ </span>}
                   {s.id.slice(0, 8)}
+                  {/* null means unknown, not empty — never render it as 0. */}
+                  {s.event_count !== null && (
+                    <span className="ml-1.5 text-faint">{s.event_count}</span>
+                  )}
                 </button>
                 <button
                   type="button"

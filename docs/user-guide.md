@@ -1555,7 +1555,7 @@ Create `.harness/gateway.json` in your project to configure the gateway:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `port` | `u16` | `3000` | HTTP listen port |
-| `cors_origins` | `string[]` | `["*"]` | Allowed CORS origins. `"*"` = allow all |
+| `cors_origins` | `string[]` | `[]` | Allowed CORS origins. `[]` = same-origin only (the bundled `/ui` needs no entry). `"*"` requires `auth.enabled` — the gateway refuses to start otherwise, since it would let any visited website read your files and run shell commands. |
 | `auth.enabled` | `bool` | `false` | Enable Bearer token authentication |
 | `auth.keys` | `map` | `{}` | API key → metadata mapping |
 | `auth.keys.*.name` | `string` | `""` | Human-readable key name |

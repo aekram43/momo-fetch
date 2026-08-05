@@ -28,21 +28,72 @@
 
 **Wave ถัดไป: WP-6** — F21 errors · F22 loading · F23 responsive · F24 Shiki · F25 file attach · F26 empty states · F27 sounds · F28 local storage
 
-**⚠️ ค้างอยู่ 3 อย่าง**
+**✅ งานค้างทั้ง 3 อย่าง เคลียร์หมดแล้ว**
 
-| | เรื่อง | ผลกระทบ |
+| | เรื่อง | ผล |
 |---|---|---|
-| 🔴 | **`security-review` ยังไม่รันบน WP-2 (G6)** — spec §12.7 ระบุเป็น blocking gate | G6 ยังไม่ควรถือว่า ship ได้ ที่เทสไปเป็นการเทสของผู้เขียนเอง |
-| 🟡 | **cost parity (G10 acceptance) ยังพิสูจน์ไม่ได้** | ต้องใช้ paid model ถึงจะวัดได้ — free model ราคา 0 ทั้งสองฝั่ง เทียบแล้วไม่มีความหมาย |
-| 🟡 | **`GET /v1/sessions` คืน `event_count: 0` ทุก session** | bug เดิมใน list projection (`/v1/sessions/{id}` ถูกต้อง) จะกวน F10 ถ้าจะโชว์จำนวน event |
+| ✅ | `security-review` บน G6 | รันแล้ว เจอ 2 ช่อง **แก้ทั้งคู่** — ดู §0 |
+| ✅ | cost parity (G10 acceptance) | พิสูจน์แล้วบน paid model (zai) ทั้ง 3 path ตรงสูตรเป๊ะ |
+| ✅ | `/v1/sessions` `event_count: 0` | เปลี่ยนเป็น `Option` → `null` (ไม่รู้) แทนที่จะโกหกว่า 0 |
 
 **Human item เดียวที่เหลือ:** code-signing (T13 → T11) อยู่ ~สัปดาห์ 5 ไม่บล็อกอะไรตอนนี้ — build unsigned จาก T10 ใช้งานได้ปกติ
+
+⚠️ **`ZAI_API_KEY` หลุดเข้า terminal transcript ระหว่าง session นี้ — ควร rotate**
 
 ---
 
 ## 0. Wave progress log
 
 Newest first. One entry per work package, added on completion.
+
+### ✅ Backlog clearance — security-review gate, cost parity, event_count · 2026-08-05
+
+All three carried items closed.
+
+#### 🔴 `security-review` on G6 — ran, found two, fixed both
+
+**1. CORS `*` + auth off = RCE from any website the user visits. (HIGH)**
+
+Not a G6 bug — a *pre-existing default* whose blast radius this project's own new endpoints made critical. `cors_origins` defaulted to `["*"]` → `CorsLayer::permissive()`, and `auth.enabled` defaults to `false`, so `auth_middleware` passes everything through. `Access-Control-Allow-Origin: *` means a hostile page doesn't just *send* requests, it **reads the replies**:
+
+1. probe `/health` (auth-exempt by design) to find the gateway
+2. `GET /v2/files/tree` + `/v2/files` → exfiltrate the working tree (simple GET, no preflight)
+3. `POST /v2/settings/permission {"mode":"yolo"}`
+4. `POST /v2/chat/stream` with a `shell_exec` prompt → **code execution**
+
+Loopback is no defence: the browser is already inside the trust boundary.
+
+**Fixed:** default is now `[]` (same-origin; `/ui` needs no entry), and the gateway **refuses to start** on `["*"]` with auth off — same fail-fast shape as the existing non-loopback bind refusal. Verified: default config serves no ACAO header cross-origin; `["*"]`+no-auth refuses with a readable message; an explicit origin list echoes only that origin.
+
+**2. `.gitignore` layer only read the repo root. (MEDIUM)**
+
+`gitignore_matcher` built from `root/.gitignore` alone, but git honours an ignore file in *every* directory. A monorepo's `services/api/.gitignore` excluding `config.local.yaml` was not applied, and the file was served — the deny-list only catches credential-*shaped* names. **Fixed:** the matcher now composes every `.gitignore` from root down to the target's parent, deepest last so it wins. Two regression tests.
+
+#### ✅ Checked and sound (don't re-derive)
+
+- **Symlink escape via the tree walk** — I expected one, since `walk()` filters entries without re-running `resolve_path`. There isn't: tokio's `DirEntry::metadata()` is `symlink_metadata` on Unix and explicitly does not traverse, so a symlink-to-dir reports `is_dir:false` and is never recursed into; following it later hits `resolve_path` → 403. **⚠️ This is load-bearing on a tokio detail — if that call ever becomes `fs::metadata`, the walk gains an escape.**
+- Traversal, 403-vs-404 oracle, G9 static serving, the `thread_local!`→global refactor (sub-agents get the *same* `Arc`, so no boundary is crossed), token-in-memory, React XSS — all verified sound.
+
+#### ✅ Cost parity (G10 acceptance) — proven, and a third path was missing entirely
+
+The zai key made this measurable for the first time (a free model reads 0 on both sides, so it proves nothing). Same prompt, paid model, `cost.json` deltas:
+
+| Path | prompt | completion | recorded | matches formula |
+|---|---:|---:|---:|---|
+| REPL | 8964 | 16 | 0.045060 | ✅ |
+| Gateway | 8964 | 3 | 0.044865 | ✅ |
+
+**Identical prompt accounting; the difference is purely completion length.** Parity holds.
+
+**But `momo-fetch -p` recorded nothing at all** — 329 → 329 records across two paid turns. `oneshot.rs` never called the cost lifecycle, so every scripted invocation spent real money invisibly and `/cost` under-reported by all of it. The spec's G10 says "REPL and gateway" and missed that there are **three** callers. Now wired to the same three shared helpers. Verified: `-p` records, formula matches.
+
+*(Aside: `zai` has no pricing entry, so it falls to the generic `$5/$15` per-million fallback. The parity result is unaffected — both paths use the same function — but the absolute figure for zai is a placeholder, not real pricing.)*
+
+#### ✅ `GET /v1/sessions` → `event_count: 0`
+
+Root cause was not the handler. `SqliteSessionService::list` builds each row with `events: Vec::new()` — it is a metadata-only query by design — so `s.events().len()` is *always* 0. Loading events per row would be N+1 (144 sessions here). `SessionInfo::event_count` is now `Option<usize>`, `None` from the list, and the UI renders nothing rather than a confident `0`. Same principle as `tool_count` in G4: **never report a number we don't have.**
+
+---
 
 ### ✅ WP-5 — management panels (F12–F20) · 2026-08-05
 

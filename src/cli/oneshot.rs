@@ -23,10 +23,18 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
         }
     }
 
+    // Cost lifecycle. One-shot is a third caller alongside the REPL and the
+    // gateway, and it was silently missing this — `momo-fetch -p …` spent real
+    // money and recorded nothing, so `/cost` under-reported by every scripted
+    // invocation. Same three shared helpers the other two paths use, so the
+    // three cannot drift.
+    harness.begin_turn();
+
     // Run a single turn (with memory enrichment if auto_search is enabled)
     match harness.run_turn_enriched(&full_prompt).await {
         Ok((_enriched, stream)) => {
-            let success = consume_stream_oneshot(stream).await;
+            let success = consume_stream_oneshot(harness, stream).await;
+            harness.end_turn();
             if success {
                 // Post-turn auto-write memory
                 if harness.memory_sidecar().auto_write_enabled() {
@@ -58,6 +66,9 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
             }
         }
         Err(e) => {
+            // Nothing was streamed, so there is no usage to persist — but the
+            // turn accumulator must not leak into whatever runs next.
+            harness.end_turn();
             eprintln!("{} {e}", "Error:".red());
             Err(e)
         }
@@ -70,7 +81,7 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
 /// - Print tool calls to stderr (yellow, dimmed)
 /// - Print text output to stdout
 /// - Return false if any errors occurred
-async fn consume_stream_oneshot(mut stream: EventStream) -> bool {
+async fn consume_stream_oneshot(harness: &Harness, mut stream: EventStream) -> bool {
     let mut success = true;
     let mut in_tool_call = false;
 
@@ -121,6 +132,11 @@ async fn consume_stream_oneshot(mut stream: EventStream) -> bool {
                             _ => {}
                         }
                     }
+                }
+
+                // Accumulate token usage for this turn.
+                if let Some(ref usage) = event.llm_response.usage_metadata {
+                    harness.record_usage(usage);
                 }
 
                 // Check for errors in the response

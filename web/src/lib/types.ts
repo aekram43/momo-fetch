@@ -284,7 +284,11 @@ export interface SessionMessages {
 export interface SessionInfo {
   id: string;
   created_at: string;
-  /** Currently always 0 from the list endpoint — known gateway bug. */
+  /**
+   * `null` from the list endpoint — it is a metadata-only query that does not
+   * load events, so no count is available. Render as unknown, never as 0.
+   * `GET /v2/sessions/{id}/messages` has the real number.
+   */
   event_count: number | null;
 }
 

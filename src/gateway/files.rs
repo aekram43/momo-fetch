@@ -106,28 +106,57 @@ fn is_sensitive(relative: &Path) -> bool {
     false
 }
 
-/// Build a matcher for the project's `.gitignore`, if it has one.
+/// Build a matcher covering **every** `.gitignore` from the sandbox root down to
+/// `dir`, in git's own precedence order (deepest last, so it wins).
 ///
-/// Returns `None` when there is no `.gitignore`; callers treat that as "no
-/// gitignore opinion", not as "allow everything" — the other layers still apply.
-fn gitignore_matcher(root: &Path) -> Option<ignore::gitignore::Gitignore> {
-    let path = root.join(".gitignore");
-    if !path.is_file() {
-        return None;
-    }
+/// Reading only the root `.gitignore` under-matches: git honours an ignore file
+/// in every directory, so a monorepo's `services/api/.gitignore` excluding
+/// `config.local.yaml` would otherwise be ignored by us and the file served.
+///
+/// Returns `None` only when no ignore file exists anywhere on the path. Callers
+/// treat that as "no gitignore opinion", never as "allow everything" — the
+/// unconditional deny-list still applies.
+fn gitignore_matcher(root: &Path, dir: &Path) -> Option<ignore::gitignore::Gitignore> {
     let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
-    // `add` returns Some(err) on failure; a malformed .gitignore should not take
-    // the endpoint down, but it must not silently become "allow all" either —
-    // we simply fall through to the remaining layers.
-    if builder.add(&path).is_some() {
+    let mut found = false;
+
+    // Root first, then each intermediate directory, so deeper rules override.
+    let mut chain: Vec<PathBuf> = vec![root.to_path_buf()];
+    if let Ok(rel) = dir.strip_prefix(root) {
+        let mut cur = root.to_path_buf();
+        for part in rel.components() {
+            cur = cur.join(part);
+            chain.push(cur.clone());
+        }
+    }
+
+    for d in chain {
+        let candidate = d.join(".gitignore");
+        if candidate.is_file() {
+            // `add` returns Some(err) on failure. A malformed ignore file should
+            // not take the endpoint down; skip it and keep the others.
+            if builder.add(&candidate).is_none() {
+                found = true;
+            }
+        }
+    }
+
+    if !found {
         return None;
     }
     builder.build().ok()
 }
 
-/// Whether `relative` is excluded by the project's `.gitignore`.
+/// Whether `relative` is excluded by any applicable `.gitignore`.
+///
+/// `relative` is the path from the sandbox root; the matcher is assembled from
+/// the ignore files governing its parent chain.
 fn gitignored(root: &Path, relative: &Path, is_dir: bool) -> bool {
-    gitignore_matcher(root)
+    let dir = relative
+        .parent()
+        .map(|p| root.join(p))
+        .unwrap_or_else(|| root.to_path_buf());
+    gitignore_matcher(root, &dir)
         .map(|m| m.matched_path_or_any_parents(relative, is_dir).is_ignore())
         .unwrap_or(false)
 }
@@ -443,6 +472,38 @@ mod tests {
         assert!(is_sensitive(Path::new(".ENV")));
         assert!(is_sensitive(Path::new("Server.PEM")));
         assert!(is_sensitive(Path::new(".GIT/config")));
+    }
+
+    /// Regression: a secret excluded by a *nested* `.gitignore` must not be
+    /// served. Reading only the root ignore file missed these entirely.
+    #[test]
+    fn nested_gitignore_is_honoured() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+
+        let nested = root.join("services").join("api");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join(".gitignore"), "config.local.yaml\n").unwrap();
+        std::fs::write(nested.join("config.local.yaml"), "dsn: secret").unwrap();
+        std::fs::write(nested.join("main.rs"), "fn main() {}").unwrap();
+
+        assert!(
+            gitignored(root, Path::new("services/api/config.local.yaml"), false),
+            "nested .gitignore rule must be applied"
+        );
+        // The root rule still works…
+        assert!(gitignored(root, Path::new("target/debug/app"), false));
+        // …and unrelated files are still readable.
+        assert!(!gitignored(root, Path::new("services/api/main.rs"), false));
+    }
+
+    #[test]
+    fn missing_gitignore_denies_nothing_by_itself() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No ignore file anywhere — layer 3 abstains, layer 4 still guards.
+        assert!(!gitignored(tmp.path(), Path::new("src/main.rs"), false));
+        assert!(is_sensitive(Path::new(".env")));
     }
 
     #[test]

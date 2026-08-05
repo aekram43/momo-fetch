@@ -52,8 +52,14 @@ fn default_port() -> u16 {
     3000
 }
 
+/// No cross-origin access by default.
+///
+/// The bundled UI is served from the gateway's own origin at `/ui` (G9) and
+/// resolves same-origin, so it needs no CORS grant. Anything else must opt in
+/// explicitly — see the refusal in [`run`] for why `["*"]` is not a safe
+/// default here.
 fn default_cors() -> Vec<String> {
-    vec!["*".to_string()]
+    Vec::new()
 }
 
 fn default_approval_timeout() -> u64 {
@@ -176,9 +182,34 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
         turns: turn::TurnRegistry::new(),
     };
 
+    // `*` plus no auth is remote code execution from any page the user visits.
+    //
+    // `CorsLayer::permissive()` sends `Access-Control-Allow-Origin: *`, so a
+    // hostile origin does not merely *send* requests — it can read the replies.
+    // With auth disabled that grants any visited website `GET /v2/files` over
+    // the whole working tree, and `POST /v2/settings/permission {"mode":"yolo"}`
+    // followed by `POST /v2/chat/stream` to run shell commands. Loopback does
+    // not help: the browser is already inside the trust boundary.
+    //
+    // Same fail-fast shape as the non-loopback bind check above.
+    if gateway_config.cors_origins.iter().any(|o| o == "*") && !gateway_config.auth.enabled {
+        anyhow::bail!(
+            "Refusing to start with cors_origins = [\"*\"] while authentication is disabled.\n\
+             That combination lets any website the user visits read files through \
+             /v2/files and drive the agent through /v2/chat/stream.\n\
+             Either list the origins you actually need in .harness/gateway.json, \
+             or enable auth (auth.enabled = true, with keys).\n\
+             The bundled UI at /ui is same-origin and needs no CORS entry."
+        );
+    }
+
     // Build CORS layer
-    let cors: CorsLayer = if gateway_config.cors_origins == vec!["*"] {
+    let cors: CorsLayer = if gateway_config.cors_origins.iter().any(|o| o == "*") {
         CorsLayer::permissive()
+    } else if gateway_config.cors_origins.is_empty() {
+        // Same-origin only: no CORS headers, so browsers refuse cross-origin
+        // reads. The `/ui` bundle is unaffected.
+        CorsLayer::new()
     } else {
         let origins: Vec<axum::http::HeaderValue> = gateway_config
             .cors_origins
