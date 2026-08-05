@@ -6,6 +6,7 @@ import { DetailPanel } from "@/components/detail/detail-panel";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TurnRail } from "@/components/shared/turn-rail";
+import { useShortcuts } from "@/hooks/use-shortcuts";
 import { useChatStore } from "@/stores/chat-store";
 import { useUiStore } from "@/stores/ui-store";
 
@@ -26,6 +27,7 @@ import { useUiStore } from "@/stores/ui-store";
 export function AppShell() {
   const { sidebarOpen, detailOpen, turnPhase, toggleSidebar, toggleDetail } =
     useUiStore();
+  useShortcuts();
 
   return (
     <div className="flex h-full flex-col">

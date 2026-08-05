@@ -13,20 +13,20 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**WP-4 · dev · 2026-08-05 · rust 303 passed · web 22 passed · tsc + eslint clean**
+**WP-5 · dev · 2026-08-05 · rust 303 passed · web 22 passed · tsc + eslint clean**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
-| **Frontend** (F1–F29) | 12 | 17 | ███████░░░░░░░░░░░ 41% |
+| **Frontend** (F1–F29) | 21 | 8 | █████████████░░░░░ 72% |
 | **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
-| **Phase 1** (gateway + frontend) | 26 | 17 | ███████████░░░░░░░ 60% |
-| **ทั้งโปรเจกต์** | 26 | 30 | ████████░░░░░░░░░░ 46% |
+| **Phase 1** (gateway + frontend) | 35 | 8 | ██████████████░░░░ 81% |
+| **ทั้งโปรเจกต์** | 35 | 21 | ███████████░░░░░░░ 62% |
 
-**✅ แชทใช้งานได้จริงแล้วบนเบราว์เซอร์** — พิมพ์ → stream → tool call → approval dialog → approve → ผลลัพธ์ ครบวงจร ขับผ่าน Playwright ยืนยันแล้ว ที่เหลือคือ panel จัดการ (agents/models/MCP/memory/files/settings)
+**✅ Phase 1 ใช้งานได้เกือบครบ** — แชท + approval + sessions + agents + models + MCP + memory + files + settings + cost + shortcuts ครบหมด เหลือแค่ polish (F21–F28)
 
-**Wave ถัดไป: WP-5** — F12 agents · F13 models · F14 MCP status · F15 memory · F16 files · F17 settings · F18 cost · F19 connection · F20 shortcuts
+**Wave ถัดไป: WP-6** — F21 errors · F22 loading · F23 responsive · F24 Shiki · F25 file attach · F26 empty states · F27 sounds · F28 local storage
 
 **⚠️ ค้างอยู่ 3 อย่าง**
 
@@ -43,6 +43,27 @@
 ## 0. Wave progress log
 
 Newest first. One entry per work package, added on completion.
+
+### ✅ WP-5 — management panels (F12–F20) · 2026-08-05
+
+Wave 3. Nine panels: agents, models, MCP status, memory, files, settings, cost, connection, shortcuts. Verified live against the release gateway with a screenshot at 1600×1000; no console errors.
+
+**Contractual renderings that are easy to get wrong and were checked on screen:**
+- **`tool_count: null` renders "—", never "0"** (G4). Confirmed: all four MCP servers show `—` with `4/4` running.
+- **Unavailable providers are listed, greyed, *with the reason*** (G3) — not omitted. "Where did Anthropic go?" is worse than "Anthropic: no key".
+- Every status dot is paired with a word or a count. No colour-only meaning.
+
+**Bug found and fixed on screen: ollama said "no key".** Ollama needs no API key — it is unavailable when nothing is listening on its port. The generic "set `<PROVIDER>_API_KEY`" copy would send the user hunting for an `OLLAMA_API_KEY` that does not exist. It now says "offline / Not running. Start Ollama, or set `OLLAMA_HOST`."
+
+**Naming bug caught by eslint, worth remembering:** the API client exported `useDefaultAgent`, which `react-hooks/rules-of-hooks` correctly flagged as a hook called outside a component. Renamed to `resetToDefaultAgent`. **Do not prefix plain API functions with `use`.**
+
+**New shared pieces** (use these rather than re-rolling): `hooks/use-gateway-resource.ts` for fetch-once-plus-reload, and `components/shared/panel-section.tsx` for section chrome and the status `Dot`. The hook exists partly to get React 19's `set-state-in-effect` pattern right in one place instead of eight.
+
+**`glm-5-turbo` on z.ai now works** — a `ZAI_API_KEY` appeared in `.env`, `POST /v2/switch {"provider":"zai","model":"glm-5-turbo"}` succeeded and the turn streamed normally. This closes the question left open in §5. ⚠️ That key was accidentally echoed into a terminal transcript during this session; **rotate it**.
+
+**F20 shortcuts:** `Esc` interrupts a running turn (G13), `Ctrl/Cmd+B` and `Ctrl/Cmd+J` toggle the panels. Escape is deliberately **not** bound while the approval dialog is open — the dialog owns Escape as "deny", and stealing it would make the safe action unreachable by keyboard.
+
+---
 
 ### ✅ WP-4 — chat is usable (F4, F6–F11, F29) · 2026-08-05
 

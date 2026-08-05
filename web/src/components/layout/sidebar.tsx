@@ -1,65 +1,26 @@
 "use client";
 
+import { AgentPicker } from "@/components/sidebar/agent-picker";
+import { ModelSelector } from "@/components/sidebar/model-selector";
 import { SessionList } from "@/components/sidebar/session-list";
+import { ToolStatus } from "@/components/sidebar/tool-status";
 
 /**
- * Left rail: sessions, agents, tools.
+ * Left rail: sessions, agents, models, tools.
  *
- * Sections are labelled but not numbered — these are three parallel registers,
- * not a sequence, and numbering them would imply an order that does not exist.
- *
- * Sessions are live (F10/F11). Agents and tools are still empty states until
- * F12 and F14 land; each says what it will hold rather than rendering a spinner
- * for something nobody has built yet.
+ * Sections are labelled but not numbered — these are parallel registers, not a
+ * sequence, and numbering would imply an order that does not exist.
  */
 export function Sidebar() {
   return (
     <nav
-      aria-label="Sessions, agents and tools"
+      aria-label="Sessions, agents, models and tools"
       className="flex w-56 shrink-0 flex-col gap-5 overflow-y-auto border-r border-rule bg-panel px-3 py-4"
     >
       <SessionList />
-
-      <Section title="Agents" hint="F12">
-        <Empty>
-          Personalities from <Path>.harness/agents/</Path>.
-        </Empty>
-      </Section>
-
-      <Section title="Tools" hint="F14">
-        <Empty>MCP server status appears here.</Empty>
-      </Section>
+      <AgentPicker />
+      <ModelSelector />
+      <ToolStatus />
     </nav>
   );
-}
-
-function Section({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <h2 className="mb-2 flex items-baseline justify-between text-[11px] font-semibold uppercase tracking-[0.14em] text-dim">
-        {title}
-        {/* Scaffold marker: which spec task fills this in. Removed as each lands. */}
-        <span className="font-mono text-[10px] font-normal text-faint">
-          {hint}
-        </span>
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs leading-relaxed text-faint">{children}</p>;
-}
-
-function Path({ children }: { children: React.ReactNode }) {
-  return <code className="font-mono text-[11px] text-dim">{children}</code>;
 }

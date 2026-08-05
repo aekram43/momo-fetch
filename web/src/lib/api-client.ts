@@ -203,7 +203,9 @@ export const getAgents = () =>
 export const switchAgent = (name: string) =>
   post<{ switched_to: string }>("/v2/agents/switch", { name });
 
-export const useDefaultAgent = () =>
+// Not `useDefaultAgent` — a name starting with "use" reads as a React hook to
+// both eslint and human readers, and this is a plain HTTP call.
+export const resetToDefaultAgent = () =>
   post<{ switched_to: null }>("/v2/agents/default");
 
 export const getProviders = () =>
