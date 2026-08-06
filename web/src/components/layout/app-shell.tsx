@@ -8,6 +8,7 @@ import { DeepLinkPrompt } from "@/components/chat/deep-link-prompt";
 import { DetailPanel } from "@/components/detail/detail-panel";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
+import { StandingPermissions } from "@/components/layout/standing-permissions";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { Toaster } from "@/components/shared/toaster";
 import { TurnRail } from "@/components/shared/turn-rail";
@@ -158,7 +159,7 @@ function BootScreen({ error, stderr }: { error?: string; stderr?: string }) {
   );
 }
 
-/** Bottom rail: the three facts that change what a keystroke will do. */
+/** Bottom rail: the facts that change what the next thing you do will cost. */
 function StatusBar() {
   const turnPhase = useUiStore((s) => s.turnPhase);
   const sessionId = useChatStore((s) => s.sessionId);
@@ -172,8 +173,13 @@ function StatusBar() {
         context {context ? `${context.percent.toFixed(0)}%` : "—"}
       </span>
       <span>${cost.toFixed(4)}</span>
-      <span className={`ml-auto ${turnPhase !== "idle" ? "text-signal" : ""}`}>
+      {/* Standing permissions sit next to the turn phase, at the end where the
+          eye lands when something is happening. */}
+      <span className="ml-auto flex items-center gap-3">
+        <StandingPermissions />
+      <span className={turnPhase !== "idle" ? "text-signal" : ""}>
         {turnPhase === "awaiting-approval" ? "awaiting approval" : turnPhase}
+      </span>
       </span>
     </footer>
   );

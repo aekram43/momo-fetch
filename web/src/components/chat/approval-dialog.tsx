@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, approve, deny } from "@/lib/api-client";
 import { useChatStore } from "@/stores/chat-store";
+import { useUiStore } from "@/stores/ui-store";
 
 /**
  * **F9 — the approval dialog. This is the product's security boundary.**
@@ -79,6 +80,10 @@ export function ApprovalDialog() {
     };
     try {
       await (approved ? approve(req) : deny(req));
+      // Approving adds a standing grant. Everything showing that set — the
+      // status-bar badge, the settings dialog — has to hear about it now, not
+      // at whatever poll comes next.
+      if (approved) useUiStore.getState().bumpServerState();
       onResolved(approved);
     } catch (err) {
       // A stale approval means the turn already moved on — dismiss quietly

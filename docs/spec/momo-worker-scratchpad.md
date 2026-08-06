@@ -54,6 +54,31 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ Standing-permissions badge in the status bar · 2026-08-06
+
+**A standing grant the user cannot see is the one most likely to surprise them.**
+Approval is per tool *name* for the life of the process (C2) — one "Approve" on
+`shell_exec` and every later shell command runs silently. That set was visible
+only inside the settings dialog, which is exactly where nobody is looking while
+they work.
+
+**Status bar, not the detail panel.** The panel was the suggestion, but it
+collapses with Cmd+J and becomes an overlay below 1280px, so an indicator there
+vanishes in both cases — and it is worth least precisely when it is hidden. The
+status bar is present at every width. Clicking the badge opens Settings →
+Permissions.
+
+**`yolo` outranks the count, persistently** — which §9.5 has required all along
+and nothing implemented. In yolo the approved list is irrelevant because nothing
+asks, so the badge says that instead of a number.
+
+Also: approving now bumps `serverStateNonce`. Without it the badge would have
+shown a stale count until some unrelated refetch — the exact failure the nonce
+was added for, in a new place.
+
+Shows nothing at zero grants in a non-yolo mode. A permanent "0" is noise, and
+the badge's job is to be the thing that appears when something is standing.
+
 ### ✅ Settings dialog + Customization group · 2026-08-06
 
 **Three homes, three questions.** Left rail: *what does this agent have to work
