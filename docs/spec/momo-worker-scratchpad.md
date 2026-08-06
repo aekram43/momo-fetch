@@ -54,7 +54,36 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 
 Newest first. One entry per work package, added on completion.
 
-### ✅ Brand — MOMO WORK · 2026-08-06
+### ✅ Brand v2 — rebuilt from the artwork sheet · 2026-08-06
+
+Replaced the first pass with assets cut from the proper brand sheet
+(`brand/source/brand-sheet.png`, 1536×1024), which ships purpose-built **LOGO /
+ICON / FAVICON** tiles rather than only a bare mark.
+
+Palette re-sampled from it: navy **`#061a2b`**, orange **`#f76915`** — a shade
+off the first values. Re-measured rather than assumed: orange on navy is 5.87:1,
+still AA; every other token still passes in both themes.
+
+**The muzzle problem is now settled for good.** Deriving from the hero mark eats
+the dog's muzzle — its white background reaches the muzzle through the gap at
+the chin, so a border flood-fill takes both. Confirmed again on this artwork.
+The sheet's ICON and FAVICON tiles are already composed on navy, so they need no
+keying at all; `make-assets.py` cuts those. Crop boxes were found by scanning for
+bounding boxes, not measured by eye.
+
+**Two edge-quality fixes worth keeping:**
+- Colour-keying leaves a pale ring: the anti-aliased pixels between the white
+  sheet and the navy shape are mid-grey, too dark for a white threshold to
+  catch, and they render as a deliberate-looking stroke around the badge at
+  22px. The round badge is now clipped with a **geometric circle mask** instead
+  — the shape is known, so guessing it from colour is the wrong tool.
+- Upscaling uses **bilinear**; the supersampler in `scale()` degrades to
+  nearest-neighbour when enlarging and left stair-stepped curves.
+
+Still soft at 1024 (the tiles are ~200px, so ~5×). Fine at real icon sizes; a
+≥1024px master or an SVG remains the one asset worth requesting.
+
+### ✅ Brand v1 — MOMO WORK · 2026-08-06
 
 Logo, wordmark, icons and palette, from the supplied art. Product renamed
 **MoMo Worker → MOMO WORK** across the app, bundle, docs and window chrome.

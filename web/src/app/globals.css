@@ -42,7 +42,7 @@
 
 /* Dark — the brand navy, verbatim.
  *
- * `--void` is `#041729`, the exact navy from the logo, so the app and the mark
+ * `--void` is `#061a2b`, the exact navy from the brand sheet, so the app and the mark
  * sit in the same colour rather than merely near each other. The panels above it
  * are that navy lifted, keeping the hue.
  *
@@ -51,20 +51,20 @@
  * is working, or wants something from you", and the brand also has exactly one
  * accent. Running both would put two oranges on screen with different meanings.
  * Instead the brand colour *is* the state colour — it clears AA on the navy
- * (5.89:1), so it can carry meaning rather than only decorate.
+ * (5.87:1), so it can carry meaning rather than only decorate.
  */
 :root,
 :root[data-theme="dark"] {
-  --void: #041729;
-  --panel: #0b1f33;
-  --raised: #12293f;
-  --rule: #1d3450;
+  --void: #061a2b;
+  --panel: #0d2236;
+  --raised: #142b42;
+  --rule: #1f3653;
 
   --ink: #ccd9e8;
   --dim: #7d90a6;
   --faint: #46586d;
 
-  --signal: #f66614;
+  --signal: #f76915;
   --consent: #4ec38c;
   --halt: #f0555c;
 
@@ -76,7 +76,7 @@
  * The identity has to survive the switch: the brand navy becomes the *text*
  * colour rather than the ground, so the palette still reads as this product.
  *
- * The brand orange cannot come along unchanged — `#f66614` on white is 3.08:1,
+ * The brand orange cannot come along unchanged — `#f76915` on white is 3.05:1,
  * which fails AA and, worse, turns the one colour that means "attend to this"
  * into decoration. Darkened to `#bf4605` (4.83:1) it keeps the hue and keeps the
  * meaning. Same reasoning for the other two signals.
@@ -87,7 +87,7 @@
   --raised: #eceff4;
   --rule: #d5dce6;
 
-  --ink: #041729;
+  --ink: #061a2b;
   --dim: #4e5f72;
   --faint: #8695a6;
 

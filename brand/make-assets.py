@@ -12,8 +12,8 @@ without adding an image dependency.
 import struct, zlib, sys
 from collections import deque
 
-NAVY = (4, 23, 41)      # #041729
-ORANGE = (246, 102, 20)  # #f66614
+NAVY = (6, 26, 43)       # #061a2b, sampled from the brand sheet
+ORANGE = (247, 105, 21)  # #f76915
 
 
 def read_png(path):
@@ -113,6 +113,90 @@ def clear_border_white(w, h, px, thresh=232):
     return px
 
 
+def circle_mask(w, h, px, feather=1.2):
+    """Clip to the inscribed circle with a soft edge.
+
+    Used instead of colour-keying for the round badge. Keying leaves the
+    anti-aliased ring between the white sheet background and the navy disc — a
+    mid-grey too dark for a white threshold to catch — which renders as a pale
+    outline around the badge at small sizes. The shape is a known circle, so
+    masking it geometrically gives an exact edge instead of guessing from colour.
+    """
+    out = bytearray(px)
+    cx, cy = (w - 1) / 2, (h - 1) / 2
+    r = min(w, h) / 2
+    for y in range(h):
+        for x in range(w):
+            d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            i = (y * w + x) * 4
+            if d > r:
+                out[i + 3] = 0
+            elif d > r - feather:
+                out[i + 3] = int(out[i + 3] * (r - d) / feather)
+    return out
+
+
+def defringe(w, h, px):
+    """Fade the pale halo left along a keyed edge.
+
+    `clear_border_white` only clears pixels *above* the white threshold, so the
+    anti-aliased ring between the white sheet background and the navy shape —
+    mid-greys, below the threshold — survives as an opaque light outline. At
+    22px in the header that reads as a deliberate stroke around the badge, which
+    it is not.
+
+    For each opaque pixel touching a cleared one, drop alpha in proportion to how
+    close it is to white, so the edge fades out instead of ending in a ring.
+    """
+    out = bytearray(px)
+    for y in range(h):
+        for x in range(w):
+            i = y * w + x
+            if px[i * 4 + 3] == 0:
+                continue
+            touches_cleared = False
+            for nx, ny in ((x-1,y),(x+1,y),(x,y-1),(x,y+1)):
+                if 0 <= nx < w and 0 <= ny < h and px[(ny*w+nx)*4+3] == 0:
+                    touches_cleared = True
+                    break
+            if not touches_cleared:
+                continue
+            o = i * 4
+            lightest = max(px[o], px[o+1], px[o+2])
+            if lightest > 150:
+                # 150 → keep, 255 → gone.
+                out[o + 3] = int(px[o + 3] * (255 - lightest) / 105)
+    return out
+
+
+def crop(w, h, px, x0, y0, x1, y1):
+    cw, ch = x1 - x0 + 1, y1 - y0 + 1
+    out = bytearray(cw * ch * 4)
+    for y in range(ch):
+        src = ((y + y0) * w + x0) * 4
+        out[y * cw * 4:(y + 1) * cw * 4] = px[src:src + cw * 4]
+    return cw, ch, out
+
+
+def upscale(w, h, px, tw, th):
+    """Bilinear. Used when enlarging, where the supersampler in `scale` degrades
+    to nearest-neighbour and leaves stair-stepped edges on the curves."""
+    out = bytearray(tw * th * 4)
+    for y in range(th):
+        fy = (y + 0.5) * h / th - 0.5
+        y0 = max(0, min(h - 1, int(fy))); y1 = min(h - 1, y0 + 1); wy = fy - y0
+        for x in range(tw):
+            fx = (x + 0.5) * w / tw - 0.5
+            x0 = max(0, min(w - 1, int(fx))); x1 = min(w - 1, x0 + 1); wx = fx - x0
+            q = (y * tw + x) * 4
+            for c in range(4):
+                a = px[(y0 * w + x0) * 4 + c] * (1 - wx) + px[(y0 * w + x1) * 4 + c] * wx
+                b = px[(y1 * w + x0) * 4 + c] * (1 - wx) + px[(y1 * w + x1) * 4 + c] * wx
+                # Clamp: bilinear weights can round a 255 to 256.
+                out[q + c] = min(255, max(0, int(a * (1 - wy) + b * wy + 0.5)))
+    return out
+
+
 def scale(w, h, px, tw, th):
     """Nearest-neighbour with 3x3 supersampling — adequate for downscaling flat
     vector-style art, and keeps this dependency-free."""
@@ -157,24 +241,45 @@ def composite(fg_w, fg_h, fg, size, bg, margin=0.14):
     return out
 
 
+# Regions on the brand sheet, found by scanning for their bounding boxes rather
+# than measured by eye. Re-derive with the bbox helper if the sheet is replaced.
+SHEET = "brand/source/brand-sheet.png"
+ICON_BOX = (763, 615, 970, 824)      # the "ICON" squircle
+FAVICON_BOX = (1189, 633, 1373, 825)  # the "FAVICON" circle
+LOCKUP_BOX = (60, 620, 600, 830)      # the "LOGO" horizontal lockup
+
+
 if __name__ == "__main__":
-    # The circle lockup, not the bare mark.
-    #
-    # `mark.png` sits on a white field that reaches the dog's muzzle through the
-    # gap at its chin, so flood-filling from the border removes the muzzle along
-    # with the background and the face comes out wrong. In the circle version the
-    # navy ring encloses every interior white, so the fill stops where it should
-    # and only the four corners clear.
-    w, h, px = read_png("brand/source/mark-circle-dark.png")
-    px = clear_border_white(w, h, px, thresh=int(sys.argv[1]) if len(sys.argv) > 1 else 232)
+    w, h, px = read_png(SHEET)
 
-    # Badge with transparent corners — legible on light or dark, so one asset
-    # serves both themes.
-    size = 512
-    write_png("brand/mark.png", size, size, scale(w, h, px, size, size))
+    # The sheet ships purpose-built ICON and FAVICON tiles, already composed on
+    # navy by the designer. Use them rather than re-deriving from the hero mark:
+    # the hero sits on a white field that reaches the dog's muzzle through the
+    # gap at its chin, so flood-filling the background removes the muzzle with it
+    # and the face comes out wrong. These need no keying at all.
+    cw, ch, icon = crop(w, h, px, *ICON_BOX)
+    # Clear the sheet background outside the squircle — an app icon with opaque
+    # white corners shows them as a square halo behind every OS rounding.
+    icon = defringe(cw, ch, clear_border_white(cw, ch, icon, thresh=232))
+    write_png("brand/app-icon.png", 1024, 1024, upscale(cw, ch, icon, 1024, 1024))
 
-    # Square app icon: the badge on brand navy, with margin so an OS mask does
-    # not clip the ears.
-    write_png("brand/app-icon.png", 1024, 1024,
-              composite(w, h, px, 1024, NAVY, margin=0.06))
-    print("wrote brand/mark.png and brand/app-icon.png")
+    # Square the FAVICON box on its own centre before masking, so the circle is
+    # concentric with the crop rather than clipped on the long axis.
+    fx0, fy0, fx1, fy1 = FAVICON_BOX
+    side = max(fx1 - fx0, fy1 - fy0)
+    ccx, ccy = (fx0 + fx1) // 2, (fy0 + fy1) // 2
+    fw, fh, fav = crop(w, h, px, ccx - side // 2, ccy - side // 2,
+                       ccx + side // 2, ccy + side // 2)
+    fav = circle_mask(fw, fh, fav)
+    write_png("brand/mark.png", 512, 512, upscale(fw, fh, fav, 512, 512))
+    write_png("web/public/momo-mark-64.png", 64, 64, upscale(fw, fh, fav, 64, 64))
+    write_png("web/public/favicon.png", 64, 64, upscale(fw, fh, fav, 64, 64))
+
+    # Horizontal lockup, for docs and the README.
+    lw, lh, lock = crop(w, h, px, *LOCKUP_BOX)
+    lock = clear_border_white(lw, lh, lock, thresh=240)
+    tw = 1200
+    write_png("brand/lockup.png", tw, int(tw * lh / lw),
+              upscale(lw, lh, lock, tw, int(tw * lh / lw)))
+
+    print("wrote brand/{app-icon,mark,lockup}.png and web/public/{momo-mark-64,favicon}.png")
