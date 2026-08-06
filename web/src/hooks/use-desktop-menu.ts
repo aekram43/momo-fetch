@@ -17,6 +17,7 @@ import { useUiStore } from "@/stores/ui-store";
 export function useDesktopMenu() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const toggleDetail = useUiStore((s) => s.toggleDetail);
+  const openSettings = useUiStore((s) => s.openSettings);
   const push = useToastStore((s) => s.push);
 
   useEffect(() => {
@@ -27,6 +28,9 @@ export function useDesktopMenu() {
           break;
         case "toggle-detail":
           toggleDetail();
+          break;
+        case "settings":
+          openSettings();
           break;
         case "interrupt": {
           const { turnId } = useChatStore.getState();
@@ -43,10 +47,10 @@ export function useDesktopMenu() {
           // its confirmation live in the UI, not in the menu handler.
           push({
             tone: "info",
-            message: "Open a project from the Files panel to re-root the agent.",
+            message: "Open a project from Customization → Files to re-root the agent.",
           });
           break;
       }
     });
-  }, [toggleSidebar, toggleDetail, push]);
+  }, [toggleSidebar, toggleDetail, openSettings, push]);
 }

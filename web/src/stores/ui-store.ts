@@ -27,6 +27,9 @@ export type TurnPhase = "idle" | "running" | "awaiting-approval";
  */
 export type MobileDrawer = "sessions" | "detail" | null;
 
+/** Which section of the settings dialog is showing. */
+export type SettingsTab = "models" | "api-keys" | "permissions" | "appearance";
+
 interface UiState {
   sidebarOpen: boolean;
   detailOpen: boolean;
@@ -34,6 +37,17 @@ interface UiState {
   theme: ThemeChoice;
   turnPhase: TurnPhase;
   mobileDrawer: MobileDrawer;
+  /** The Customization group in the left rail (F28 view state). */
+  customizationOpen: boolean;
+  /**
+   * The settings dialog.
+   *
+   * Configuration is a modal rather than a panel because it is a place you go,
+   * finish, and leave. Left in a column it competes for width with the work,
+   * and it is the part of the UI a user touches least.
+   */
+  settingsOpen: boolean;
+  settingsTab: SettingsTab;
   /**
    * Bumped whenever this tab changes something the gateway owns.
    *
@@ -48,6 +62,9 @@ interface UiState {
   hydrated: boolean;
   toggleSidebar: () => void;
   toggleDetail: () => void;
+  toggleCustomization: () => void;
+  openSettings: (tab?: SettingsTab) => void;
+  closeSettings: () => void;
   openDrawer: (which: MobileDrawer) => void;
   /** Call after any successful mutation of gateway state. */
   bumpServerState: () => void;
@@ -59,13 +76,17 @@ interface UiState {
 
 /** Persist just the view state — see the note in `lib/preferences.ts`. */
 function persist(
-  s: Pick<UiState, "sidebarOpen" | "detailOpen" | "soundEnabled" | "theme">,
+  s: Pick<
+    UiState,
+    "sidebarOpen" | "detailOpen" | "soundEnabled" | "theme" | "customizationOpen"
+  >,
 ) {
   savePreferences({
     sidebarOpen: s.sidebarOpen,
     detailOpen: s.detailOpen,
     soundEnabled: s.soundEnabled,
     theme: s.theme,
+    customizationOpen: s.customizationOpen,
   });
 }
 
@@ -78,6 +99,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   // Always starts closed: a drawer the user did not open should never be
   // covering the chat on load.
   mobileDrawer: null,
+  // Never open on load: a dialog the user did not ask for is in the way.
+  settingsOpen: false,
+  settingsTab: "models",
   serverStateNonce: 0,
   hydrated: false,
 
@@ -89,6 +113,15 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((s) => ({ detailOpen: !s.detailOpen }));
     persist(get());
   },
+  toggleCustomization: () => {
+    set((s) => ({ customizationOpen: !s.customizationOpen }));
+    persist(get());
+  },
+  // Opening with a tab is how the deep links work — "add a key" from the model
+  // panel should land on API keys, not on whatever was open last time.
+  openSettings: (tab) =>
+    set((s) => ({ settingsOpen: true, settingsTab: tab ?? s.settingsTab })),
+  closeSettings: () => set({ settingsOpen: false }),
   toggleSound: () => {
     set((s) => ({ soundEnabled: !s.soundEnabled }));
     persist(get());

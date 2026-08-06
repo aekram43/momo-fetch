@@ -8,6 +8,7 @@ import { DeepLinkPrompt } from "@/components/chat/deep-link-prompt";
 import { DetailPanel } from "@/components/detail/detail-panel";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
+import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { Toaster } from "@/components/shared/toaster";
 import { TurnRail } from "@/components/shared/turn-rail";
 import { useDesktopMenu } from "@/hooks/use-desktop-menu";
@@ -119,6 +120,7 @@ export function AppShell() {
       {/* Modal at every breakpoint, outside every collapsible panel — a narrow
           viewport must never be able to strand a turn (spec §6). */}
       <ApprovalDialog />
+      <SettingsDialog />
       <DeepLinkPrompt />
       <Toaster />
     </div>

@@ -657,7 +657,7 @@ The same-origin step was added during WP-3 after testing against G9: the gateway
 | G6 | File read endpoints | Gateway | — | `GET /v2/files`, `/v2/files/tree`. Sandbox-enforced, ignore-filtered. |
 | F16 | Files tab | Frontend | G6, F2 | Lazy-loading tree; click to preview; binary/truncated states rendered explicitly. |
 | G7 | Settings endpoint | Gateway | — | `GET /v2/settings`, `POST /v2/settings/permission`, optional clear-approved-tools. |
-| F17 | Settings panel | Frontend | G7, F2 | Permission mode (strict/auto/yolo) with a plain-language warning on `yolo`; approved-tools list with clear button. |
+| F17 | Settings dialog | Frontend | G7, F2 | Modal with four sections — models, API keys, permissions, appearance. Permission mode (strict/auto/yolo) with a plain-language warning on `yolo`; approved-tools list with clear button. |
 | F18 | Cost display | Frontend | F2, G10 | Header badge from `GET /v1/cost` + live `usage` events. Click for breakdown. |
 | F19 | Connection status | Frontend | F2, G12 | Poll `/health` (10 s). Green/red dot; degraded state when `turn_active` is true but no local stream. |
 | F20 | Keyboard shortcuts | Frontend | F5, G13 | Ctrl+N new session, Ctrl+K palette, Ctrl+B sidebar, **Esc → interrupt (G13)**. |
@@ -834,34 +834,53 @@ Note the two things v1 got wrong and this diagram makes explicit: the stream **e
 ### Desktop Layout (>1024px)
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ ◉ MOMO WORK          anthropic/claude-sonnet   💰 $0.04   🟢 Connected│
-├──────────┬──────────────────────────────────┬────────────────────────┤
-│ Sessions │         CHAT PANEL               │  Progress & Details   │
-│──────────│                                  │────────────────────────│
-│ 💬 Sess 1│  ┌──────────────────────────┐   │  ◉ Steps (this turn)  │
-│ 💬 Sess 2│  │ 🤖 Assistant            │   │  ✓ Read src/main.rs   │
-│ 💬 Sess 3│  │ Let me analyze the code │   │  ✓ Search for tests   │
-│          │  │ ...                     │   │  ⏳ Write test file    │
-│──────────│  │ 📎 file_read           │   │                        │
-│ Agents   │  │   path: src/main.rs    │   │────────────────────────│
-│ 🤖 Def   │  │   → 142 lines         │   │  📄 Artifacts          │
-│ 🤖 Sales │  │ 📎 file_write          │   │  ├─ test_main.rs  NEW  │
-│          │  │   path: tests/...      │   │  └─ summary.md   MOD   │
-│──────────│  │   → Created            │   │                        │
-│ Models   │  │                         │   │────────────────────────│
-│ Anthropic│  │ 👤 You                  │   │  🔍 Memory              │
-│  └ Sonnet│  │ Run the tests please   │   │  [Search memories... ]  │
-│  └ Opus  │  │                         │   │                        │
-│──────────│  └──────────────────────────┘   │────────────────────────│
-│ Tools    │                                  │  📁 Files              │
-│ 🟢 mcp-1 │  ┌──────────────────────────┐   │  ├─ src/               │
-│ 🟢 mcp-2 │  │ Type a message...   ↵  │   │  ├─ tests/             │
-│ 🟡 mcp-3 │  └──────────────────────────┘   │  └─ Cargo.toml        │
-├──────────┴──────────────────────────────────┴────────────────────────┤
-│ /help │ Permission: strict │ Session: abc123 │ Context: 42%          │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ ▤ ◉ MOMO WORK   anthropic/claude-sonnet     $0.04  ● connected  ⚙ ▥ │
+├───────────────┬───────────────────────────────┬──────────────────────┤
+│ SESSIONS  +new│          CHAT PANEL           │  THIS TURN           │
+│  139bea1b     │  ┌─────────────────────────┐  │  ✓ read src/main.rs  │
+│  7fbb23c6     │  │ assistant               │  │  ✓ search tests      │
+│  fefd4e73     │  │ Let me analyse the code │  │  ⏳ write test file   │
+│               │  │  ▸ file_read            │  │                      │
+│ ▾ CUSTOMIZATION  │    path: src/main.rs    │  │──────────────────────│
+│ │ AGENTS      │  │    → 142 lines          │  │  ARTIFACTS           │
+│ │  default    │  │  ▸ file_write           │  │   tests/test_main.rs │
+│ │ TOOLS   4/4 │  │    path: tests/…        │  │   summary.md         │
+│ │  ● web-read │  │    → created            │  │                      │
+│ │  ● zread    │  │                         │  │                      │
+│ │ MEMORY   27 │  │ you                     │  │                      │
+│ │  [search…]  │  │ Run the tests please    │  │                      │
+│ │ FILES       │  └─────────────────────────┘  │                      │
+│ │  ▸ src/     │  ┌─────────────────────────┐  │                      │
+│ │  ▸ tests/   │  │ Ask the agent…      ↵   │  │                      │
+├───────────────┴──┴─────────────────────────┴──┴──────────────────────┤
+│ session abc123 │ context 42% │ $0.0412              awaiting approval │
+└──────────────────────────────────────────────────────────────────────┘
+
+  ⚙ / Cmd+, → SETTINGS (modal)
+  ┌──────────────┬──────────────────────────────────┐
+  │ SETTINGS     │  MODELS                    close │
+  │  Models      │  provider [ openrouter        ▾] │
+  │  API keys    │  model    [ claude-sonnet-5   ▾] │
+  │  Permissions │                                  │
+  │  Appearance  │                                  │
+  └──────────────┴──────────────────────────────────┘
 ```
+
+**Three homes, three questions.** The left rail answers *what does this agent
+have to work with* — sessions, plus one collapsible **Customization** group over
+agents, tools, memory and files. The right panel answers *what is it doing right
+now*, and nothing else. Configuration answers *how is it set up* and lives in a
+modal, because it is a place you go, change one thing, and leave.
+
+The four Customization registers were previously split across both panels, so
+the answer to one question was in two places and neither was complete. The four
+settings sections were interleaved with them, which pushed the live turn — the
+thing this product exists to show — into a column shared with a theme switch.
+
+**Settings opens from ⚙ in the header, `Cmd/Ctrl+,`, or File → Settings… in the
+desktop app.** Escape closes it and must *not* also interrupt the turn; the
+approval dialog still outranks both and owns Escape as "deny".
 
 **Artifacts tab derivation:** there is no artifact-tracking API. The tab is derived client-side from `tool_call_start` events for write-shaped tools (`file_write`, `file_edit`, …) observed during the turn. It is therefore turn-scoped and lost on reload unless reconstructed from G8's tool-call history. Say so in the UI rather than implying a filesystem diff.
 
@@ -871,8 +890,8 @@ Note the two things v1 got wrong and this diagram makes explicit: the stream **e
 
 | Width | Layout |
 |-------|--------|
-| >1280px | 3-panel: sidebar (240px) + chat (flex) + detail (320px) |
-| 1024–1280px | 3-panel: sidebar (200px) + chat (flex) + detail (280px) |
+| >1280px | 3-panel: sidebar (288px) + chat (flex) + detail (320px) |
+| 1024–1280px | 2-panel: sidebar + chat. Detail panel as overlay. |
 | 768–1024px | 2-panel: sidebar (collapsible) + chat. Detail panel as overlay. |
 | <768px | 1-column: chat only. Sidebar + detail as drawers/sheets. |
 

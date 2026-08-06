@@ -16,8 +16,10 @@ import { useToastStore } from "@/stores/toast-store";
  * API keys, for people who would rather not edit a dotfile.
  *
  * Desktop only — it needs the shell to reach the OS keychain, and there is no
- * browser equivalent. In a browser this renders nothing and `.env` remains the
- * way.
+ * browser equivalent. In a browser it says so and points at `.env`, rather than
+ * rendering nothing: as a section in a panel an absence was fine, but as a tab
+ * in the settings dialog an empty pane is a dead end for the one person who
+ * came looking for where to put a key.
  *
  * Two rules this component exists to honour:
  *
@@ -29,7 +31,7 @@ import { useToastStore } from "@/stores/toast-store";
  *    saying so, "I have a key in .env and the app is using a different one" is
  *    unexplainable.
  */
-export function SecretsTab() {
+export function ApiKeysPanel() {
   const [rows, setRows] = useState<SecretStatus[] | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [value, setValue] = useState("");
@@ -53,7 +55,18 @@ export function SecretsTab() {
     };
   }, []);
 
-  if (!isDesktop()) return null;
+  if (!isDesktop()) {
+    return (
+      <PanelSection title="API keys">
+        <Hint>
+          Keychain storage needs the desktop app — a browser has no way to reach
+          the OS keychain. Set keys in the workspace{" "}
+          <code className="font-mono">.env</code> instead, then restart the
+          gateway.
+        </Hint>
+      </PanelSection>
+    );
+  }
 
   async function save(provider: string) {
     if (busy || !value.trim()) return;

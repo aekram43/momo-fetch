@@ -1,26 +1,45 @@
 "use client";
 
+import { CollapsibleGroup } from "@/components/shared/collapsible-group";
 import { AgentPicker } from "@/components/sidebar/agent-picker";
-import { ModelSelector } from "@/components/sidebar/model-selector";
+import { FilesTab } from "@/components/detail/files-tab";
+import { MemoryTab } from "@/components/detail/memory-tab";
 import { SessionList } from "@/components/sidebar/session-list";
 import { ToolStatus } from "@/components/sidebar/tool-status";
+import { useUiStore } from "@/stores/ui-store";
 
 /**
- * Left rail: sessions, agents, models, tools.
+ * Left rail: your sessions, and everything the agent can draw on.
+ *
+ * The four registers under "Customization" — agents, tools, memory, files —
+ * answer one question between them: *what does this agent have to work with?*
+ * They were split across both side panels, so the answer was in two places and
+ * neither was complete. Now they are one group behind one control, which leaves
+ * the right panel free to do its own job: what the agent is doing right now.
  *
  * Sections are labelled but not numbered — these are parallel registers, not a
  * sequence, and numbering would imply an order that does not exist.
  */
 export function Sidebar() {
+  const customizationOpen = useUiStore((s) => s.customizationOpen);
+  const toggleCustomization = useUiStore((s) => s.toggleCustomization);
+
   return (
     <nav
-      aria-label="Sessions, agents, models and tools"
-      className="flex w-56 shrink-0 flex-col gap-5 overflow-y-auto border-r border-rule bg-panel px-3 py-4"
+      aria-label="Sessions and customization"
+      className="flex w-72 shrink-0 flex-col gap-5 overflow-y-auto border-r border-rule bg-panel px-3 py-4"
     >
       <SessionList />
-      <AgentPicker />
-      <ModelSelector />
-      <ToolStatus />
+      <CollapsibleGroup
+        title="Customization"
+        open={customizationOpen}
+        onToggle={toggleCustomization}
+      >
+        <AgentPicker />
+        <ToolStatus />
+        <MemoryTab />
+        <FilesTab />
+      </CollapsibleGroup>
     </nav>
   );
 }

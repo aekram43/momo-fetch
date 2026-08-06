@@ -1,18 +1,17 @@
 "use client";
 
-import { FilesTab } from "@/components/detail/files-tab";
-import { MemoryTab } from "@/components/detail/memory-tab";
-import { SecretsTab } from "@/components/detail/secrets-tab";
-import { SettingsTab } from "@/components/detail/settings-tab";
 import { Hint, PanelSection } from "@/components/shared/panel-section";
 import { ToolCallCard } from "@/components/chat/tool-call-card";
 import { useChatStore } from "@/stores/chat-store";
 
 /**
- * Right panel: what the agent did this turn, and what it can reach.
+ * Right panel: what the agent is doing, right now.
  *
- * "This turn" is first and largest deliberately — it answers the question this
- * product exists to answer: what is the agent doing to my machine right now.
+ * Only that. Memory, files and the settings sections used to live here too, and
+ * they pushed the live turn — the one thing this product exists to show — into
+ * a column shared with configuration. Memory and files moved to the left rail's
+ * Customization group; models, keys, permissions and appearance moved into the
+ * settings dialog.
  */
 export function DetailPanel() {
   const messages = useChatStore((s) => s.messages);
@@ -71,10 +70,6 @@ export function DetailPanel() {
         )}
       </PanelSection>
 
-      <MemoryTab />
-      <FilesTab />
-      <SecretsTab />
-      <SettingsTab />
     </aside>
   );
 }

@@ -120,6 +120,7 @@ export type MenuAction =
   | "open-project"
   | "toggle-sidebar"
   | "toggle-detail"
+  | "settings"
   | "interrupt";
 
 /**

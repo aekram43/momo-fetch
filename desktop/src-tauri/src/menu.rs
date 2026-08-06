@@ -24,6 +24,7 @@ fn install_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let toggle_sidebar = MenuItem::with_id(app, "toggle-sidebar", "Toggle Sessions Panel", true, Some("CmdOrCtrl+B"))?;
     let toggle_detail = MenuItem::with_id(app, "toggle-detail", "Toggle Detail Panel", true, Some("CmdOrCtrl+J"))?;
     let interrupt = MenuItem::with_id(app, "interrupt", "Interrupt Turn", true, Some("Escape"))?;
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
 
     let file = Submenu::with_items(
         app,
@@ -32,6 +33,11 @@ fn install_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         &[
             &new_session,
             &open_project,
+            &PredefinedMenuItem::separator(app)?,
+            // Settings belongs in the app menu on macOS, but Tauri's app menu
+            // is built by the platform; File is where it is reachable without
+            // rebuilding that. The Cmd+, accelerator is the part users use.
+            &settings,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::close_window(app, None)?,
         ],

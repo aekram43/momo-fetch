@@ -26,6 +26,7 @@ export function Header({ onToggleSidebar, onToggleDetail }: {
   const liveCost = useChatStore((s) => s.sessionCost);
   const localTurn = useChatStore((s) => s.turnId);
   const serverStateNonce = useUiStore((s) => s.serverStateNonce);
+  const openSettings = useUiStore((s) => s.openSettings);
 
   // F19 — poll /health every 10 s. Auth-exempt (G12), so this works before a
   // token is entered.
@@ -90,6 +91,9 @@ export function Header({ onToggleSidebar, onToggleDetail }: {
           ${(liveCost || cost?.total_cost || 0).toFixed(4)}
         </span>
         <ConnectionDot reachable={reachable} />
+        <PanelButton label="Settings" onClick={() => openSettings()}>
+          ⚙
+        </PanelButton>
         <PanelButton label="Toggle detail panel" onClick={onToggleDetail}>
           ▥
         </PanelButton>

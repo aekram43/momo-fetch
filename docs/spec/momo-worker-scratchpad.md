@@ -54,6 +54,45 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ Settings dialog + Customization group · 2026-08-06
+
+**Three homes, three questions.** Left rail: *what does this agent have to work
+with* — sessions, plus one collapsible **Customization** group over agents,
+tools, memory and files. Right panel: *what is it doing right now*, and nothing
+else. **Settings** modal: *how is it set up* — models, API keys, permissions,
+appearance.
+
+The four Customization registers were split across both side panels, so the
+answer to one question lived in two places and neither was complete. The four
+settings sections were interleaved with them, which pushed the live turn — the
+one thing this product exists to show — into a column shared with a theme
+switch.
+
+Settings opens from ⚙ in the header, `Cmd/Ctrl+,`, or File → Settings… in the
+desktop app. A tab rail rather than one long sheet: the four have nothing to do
+with each other, and a rail lets the model panel deep-link "add a key" straight
+to API keys.
+
+**Escape precedence had to be made explicit.** Escape reaches the harness as
+"interrupt the turn" (G13). Dismissing a dialog is not a request to stop the
+agent, so the settings dialog handles Escape in the capture phase and stops it;
+the approval dialog still outranks both and owns Escape as "deny".
+
+**Two things fixed on the way:**
+
+- Theme and sound were nested inside the branch that renders only after
+  `/v2/settings` loads, so an unreachable gateway meant you could not change the
+  theme — the one setting that never needed the gateway. Split into its own
+  panel.
+- The API keys panel returned `null` in a browser (the keychain needs the
+  desktop shell). As a section that was a fine absence; as a *tab* it is an
+  empty pane and a dead end for the one person who came looking for where to put
+  a key. It now says so and points at `.env`.
+
+Files moved into `components/settings/` — a path that says `sidebar/` for a
+component only the settings dialog renders is a maintenance cost, so the moves
+went through `git mv` and history follows.
+
 ### ✅ Model panel: two dropdowns, short list · 2026-08-06
 
 **Provider and model are one decision made twice, so they read as two stacked

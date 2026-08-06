@@ -18,7 +18,7 @@ import { useUiStore } from "@/stores/ui-store";
  * keyboard.
  */
 export function useShortcuts() {
-  const { toggleSidebar, toggleDetail } = useUiStore();
+  const { toggleSidebar, toggleDetail, openSettings } = useUiStore();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -27,6 +27,10 @@ export function useShortcuts() {
       if (e.key === "Escape") {
         const { turnId, pendingApproval } = useChatStore.getState();
         if (pendingApproval) return; // the dialog handles it
+        // The settings dialog also handles its own Escape, in the capture
+        // phase, and stops it here — but check anyway rather than relying on
+        // ordering for something that would otherwise stop the agent.
+        if (useUiStore.getState().settingsOpen) return;
         if (turnId) {
           e.preventDefault();
           void interrupt(turnId);
@@ -46,6 +50,11 @@ export function useShortcuts() {
           e.preventDefault();
           toggleDetail();
           break;
+        // Cmd/Ctrl+, is the settings shortcut on every platform that has one.
+        case ",":
+          e.preventDefault();
+          openSettings();
+          break;
         default:
           break;
       }
@@ -53,5 +62,5 @@ export function useShortcuts() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [toggleSidebar, toggleDetail]);
+  }, [toggleSidebar, toggleDetail, openSettings]);
 }

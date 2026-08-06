@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { ModelPicker } from "@/components/sidebar/model-picker";
+import { ModelPicker } from "@/components/settings/model-picker";
 import { Hint, PanelSection } from "@/components/shared/panel-section";
 import { SkeletonRows } from "@/components/shared/skeleton";
 import { ApiError, getProviders, switchProvider } from "@/lib/api-client";
@@ -47,10 +47,11 @@ function unavailableTag(name: string): string {
  * gateway returns them (`list_all`, spec G3) precisely so the UI can explain
  * itself — "where did Anthropic go?" is worse than "anthropic — no key".
  */
-export function ModelSelector() {
+export function ModelPanel() {
   const { data, error, reload } = useGatewayResource(getProviders);
   const [busy, setBusy] = useState(false);
   const bump = useUiStore((s) => s.bumpServerState);
+  const openSettings = useUiStore((s) => s.openSettings);
   const [conflict, setConflict] = useState(false);
 
   async function choose(name: string) {
@@ -123,8 +124,14 @@ export function ModelSelector() {
       {data?.providers.some((p) => !p.available && p.name !== "ollama") && (
         <p className="mt-1.5 text-[10px] leading-relaxed text-faint">
           Providers without a key are listed but not selectable. Add one in{" "}
-          <span className="text-dim">API keys</span>, or set it in{" "}
-          <code className="font-mono">.env</code>.
+          <button
+            type="button"
+            onClick={() => openSettings("api-keys")}
+            className="text-dim underline underline-offset-2 hover:text-ink"
+          >
+            API keys
+          </button>
+          , or set it in <code className="font-mono">.env</code>.
         </p>
       )}
       {conflict && (

@@ -12,19 +12,12 @@ import {
 } from "@/lib/api-client";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
 import { useUiStore } from "@/stores/ui-store";
-import type { ThemeChoice } from "@/lib/preferences";
 import type { PermissionMode } from "@/lib/types";
 
 const MODES: { value: PermissionMode; label: string; blurb: string }[] = [
   { value: "strict", label: "strict", blurb: "Asks before anything that changes your machine." },
   { value: "auto", label: "auto", blurb: "Asks only for destructive commands." },
   { value: "yolo", label: "yolo", blurb: "Runs everything without asking." },
-];
-
-const THEMES: { value: ThemeChoice; label: string; blurb: string }[] = [
-  { value: "dark", label: "dark", blurb: "Always dark." },
-  { value: "light", label: "light", blurb: "Always light." },
-  { value: "auto", label: "auto", blurb: "Follow the system setting." },
 ];
 
 /**
@@ -37,16 +30,12 @@ const THEMES: { value: ThemeChoice; label: string; blurb: string }[] = [
  * `yolo` gets a confirm step because it disables the confirmation boundary
  * entirely — spec §9.5.
  */
-export function SettingsTab() {
+export function PermissionsPanel() {
   const { data, error, reload } = useGatewayResource(getSettings);
   const [busy, setBusy] = useState(false);
   const bump = useUiStore((s) => s.bumpServerState);
   const [conflict, setConflict] = useState(false);
   const [confirmYolo, setConfirmYolo] = useState(false);
-  const soundEnabled = useUiStore((s) => s.soundEnabled);
-  const toggleSound = useUiStore((s) => s.toggleSound);
-  const theme = useUiStore((s) => s.theme);
-  const setTheme = useUiStore((s) => s.setTheme);
 
   async function choose(mode: PermissionMode) {
     if (busy) return;
@@ -173,47 +162,6 @@ export function SettingsTab() {
               </>
             )}
           </div>
-          {/* Theme — spec §6 / Q7. `auto` is the default: someone who already
-              told their OS they want light has told us too. */}
-          <div className="mt-3">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-dim">
-              Appearance
-            </p>
-            <div
-              role="radiogroup"
-              aria-label="Appearance"
-              className="flex gap-1"
-            >
-              {THEMES.map((t) => (
-                <button
-                  key={t.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={theme === t.value}
-                  onClick={() => setTheme(t.value)}
-                  title={t.blurb}
-                  className={`flex-1 rounded border px-1.5 py-1 font-mono text-[10px] transition-colors ${
-                    theme === t.value
-                      ? "border-signal/50 bg-signal/10 text-signal"
-                      : "border-rule text-dim hover:text-ink"
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* F27 — off by default; a cue only helps if the user asked for it. */}
-          <label className="mt-3 flex cursor-pointer items-center gap-2 text-[11px] text-dim">
-            <input
-              type="checkbox"
-              checked={soundEnabled}
-              onChange={toggleSound}
-              className="accent-signal"
-            />
-            Sound on approval, completion and errors
-          </label>
         </>
       )}
       {conflict && (
