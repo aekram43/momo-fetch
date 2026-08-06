@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import { getSettings } from "@/lib/api-client";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
 import { useUiStore } from "@/stores/ui-store";
@@ -22,10 +24,21 @@ import { useUiStore } from "@/stores/ui-store";
  * `yolo` outranks the count and says so persistently, which spec §9.5 requires
  * and nothing implemented until now: in yolo the approved list is irrelevant
  * because *nothing* asks.
+ *
+ * **It polls.** Permission mode is global harness state (spec §2.3) — the REPL,
+ * another tab, or a deep link can change it, and a badge whose whole purpose is
+ * to be trusted at a glance cannot show what this tab last happened to fetch.
+ * Same ten seconds as the header's `/health` poll, plus an immediate refetch on
+ * `serverStateNonce` whenever this tab is the one that changed something.
  */
 export function StandingPermissions() {
-  const { data } = useGatewayResource(getSettings);
+  const { data, reload } = useGatewayResource(getSettings);
   const openSettings = useUiStore((s) => s.openSettings);
+
+  useEffect(() => {
+    const id = setInterval(reload, 10_000);
+    return () => clearInterval(id);
+  }, [reload]);
 
   if (!data) return null;
 
