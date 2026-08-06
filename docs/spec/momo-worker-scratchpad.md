@@ -54,6 +54,39 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ Theming — dark / light / auto · 2026-08-06
+
+Spec §6 and Q7 both asked for this; I had shipped dark-only. Now three-way,
+defaulting to `auto`.
+
+**Light is a re-derivation, not an inversion.** The identity has to survive: same
+cool cast, and amber still meaning "the agent wants something from you". Straight
+inversion breaks the second one — `#ffb454` on white is ~1.7:1 and reads as
+decoration, the one job amber must not do. Every signal colour is darkened until
+it clears 4.5:1 (light: signal 4.96, consent 5.54, halt 6.03).
+
+**Measuring light found a bug in the dark palette I had already shipped:** `--dim`
+was 4.28:1 — under AA for the secondary text it carries everywhere. Now 4.81,
+moved along the same hue rather than desaturated.
+
+Two mechanics worth remembering:
+
+- **Tailwind v4 needs `@theme inline`.** Without `inline` the utilities bake in
+  the literal at build time and flipping `data-theme` does nothing.
+- **The theme must be stamped before first paint**, by an inline `<head>` script.
+  The export is prerendered, so React state is too late and a light-mode user
+  gets a dark flash on every launch. That script cannot import from
+  `preferences.ts`, so the storage key exists twice — `preferences.test.ts`
+  asserts they agree, because drift would silently disable the stored theme.
+
+**🔴 Trap that cost real time here: `cargo tauri build` can ship stale frontend
+assets.** After rebuilding, the app showed `light` selected while the stored
+preference was `auto`, and the same build in a browser was correct. Tauri embeds
+`web/out` into the binary at compile time, and with no Rust changes cargo skips
+the rebuild — so the old assets stay embedded. `touch src/lib.rs` and rebuild
+fixed it. **If a UI change is not showing up in the app, rule this out before
+debugging the UI.** Documented in the install guide.
+
 ### ✅ WP-6 — polish (F21–F28) · 2026-08-05 · **Phase 1 complete**
 
 Wave 4. Toasts, skeletons, responsive drawers, Shiki, file attach, empty states, sounds, preferences. Verified at 1600×1000, 900×800 and 420×780; no console errors.

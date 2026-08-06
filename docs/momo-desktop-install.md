@@ -163,6 +163,20 @@ cd desktop/src-tauri && cargo tauri build
 There is no auto-updater. For a source install `git pull` *is* the update
 mechanism, and it is more transparent than a background download.
 
+> **If the app still shows the old UI after rebuilding, the frontend was not
+> re-embedded.** Tauri compiles `web/out` into the binary, and that only happens
+> when the Rust crate itself rebuilds — change nothing but the UI and cargo can
+> reasonably decide there is nothing to do, leaving the previous assets in
+> place. Force it:
+>
+> ```bash
+> touch desktop/src-tauri/src/lib.rs
+> cargo tauri build
+> ```
+>
+> This is easy to lose an hour to: the app looks broken or half-updated when the
+> source is fine. If a UI change is not showing up, rule this out first.
+
 ---
 
 ## 6. Troubleshooting
@@ -178,6 +192,10 @@ Section 3. The message includes the exact `.env` path to create.
 **The app opens unstyled, plain black text on white.**
 The web UI was built with `npm run build` instead of `npm run build:desktop`.
 Rebuild with the right one and rebuild the app.
+
+**A UI change does not appear after rebuilding.**
+The frontend was not re-embedded — see the note in section 5.
+`touch desktop/src-tauri/src/lib.rs` and rebuild.
 
 **Logs**
 
