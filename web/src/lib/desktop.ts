@@ -78,6 +78,41 @@ export type MenuAction =
   | "toggle-detail"
   | "interrupt";
 
+/**
+ * **T9** — a `momo://open?path=…` link proposing a project directory.
+ *
+ * The shell has already validated the path (absolute, no traversal, exists, is
+ * a directory) — but validation is not authorisation. A deep link can be fired
+ * by any web page, and opening a project re-roots the sandbox, so this only
+ * ever *proposes*. The handler must show the same confirmation the Files panel
+ * uses before calling {@link openProject}.
+ */
+export function onDeepLinkOpenRequest(
+  handler: (path: string) => void,
+): () => void {
+  if (typeof window === "undefined") return () => {};
+  const listener = (e: Event) => {
+    const detail = (e as CustomEvent<{ path?: string }>).detail;
+    if (detail?.path) handler(detail.path);
+  };
+  window.addEventListener("momo:open-project-request", listener);
+  return () =>
+    window.removeEventListener("momo:open-project-request", listener);
+}
+
+/** A link the shell refused, with the reason, so the UI can say why. */
+export function onDeepLinkRejected(
+  handler: (reason: string) => void,
+): () => void {
+  if (typeof window === "undefined") return () => {};
+  const listener = (e: Event) => {
+    const detail = (e as CustomEvent<string>).detail;
+    if (detail) handler(detail);
+  };
+  window.addEventListener("momo:deep-link-rejected", listener);
+  return () => window.removeEventListener("momo:deep-link-rejected", listener);
+}
+
 export function onMenuAction(handler: (action: MenuAction) => void): () => void {
   if (typeof window === "undefined") return () => {};
   const listener = (e: Event) => {

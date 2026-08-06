@@ -13,20 +13,20 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**WP-7/8 · dev · 2026-08-05 · rust 305 · desktop 2 · web 22 · all clean · 🎉 Phase 1 + desktop shell done**
+**Phase 2 · dev · 2026-08-06 · rust 305 · desktop 8 · web 22 · all clean · 🎉 ทุกอย่างที่ทำได้เอง เสร็จหมด**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
 | **Frontend** (F1–F29) | **29** | **0** | ██████████████████ **100%** ✅ |
-| **Desktop** (T1–T13) | 10 | 3 | ██████████████░░░░ 77% |
+| **Desktop** (T1–T13) | **11** | 2 | ███████████████░░░ 85% |
 | **Phase 1** (gateway + frontend) | **43** | **0** | ██████████████████ **100%** ✅ |
-| **ทั้งโปรเจกต์** | 53 | 3 | █████████████████░ 95% |
+| **ทั้งโปรเจกต์** | **54** | 2 | █████████████████░ 96% |
 
-**🎉 แอป desktop รันได้จริงแล้ว** — `.app` เปิดขึ้นมา spawn gateway เอง โหลด UI ครบ ปิดแอปแล้ว gateway ตายตาม เหลือแต่ signing/updater ที่ต้องใช้ credential
+**🎉 แอป desktop รันได้จริง + deep link ปลอดภัย** — `.app` spawn gateway เอง, single-instance, ปิดแล้ว gateway ตายตาม, `momo://` ผ่านการ validate + ต้องกดยืนยัน เหลือแต่ signing/updater ที่ต้องใช้ credential
 
-**เหลือ: T11 auto-updater · T13 code signing** (ต้องใช้ credential ของคน) · T9 deep links (ยังไม่ทำ)
+**เหลือแค่ 2 อย่าง ที่ต้องใช้ credential ของคุณ: T13 code signing → T11 auto-updater** — ขั้นตอนอยู่ใน `desktop/RELEASING.md`
 
 **✅ งานค้างทั้ง 3 อย่าง เคลียร์หมดแล้ว**
 

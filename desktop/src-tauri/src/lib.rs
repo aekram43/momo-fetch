@@ -4,6 +4,7 @@
 //! The web UI is byte-identical to the browser build — everything
 //! desktop-specific lives here.
 
+mod deeplink;
 mod gateway;
 mod menu;
 
@@ -218,16 +219,24 @@ pub fn run() {
     // the existing window instead of starting a second shell.
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
             }
+            // On Windows and Linux a deep link opened while the app is already
+            // running arrives as argv on the *second* instance, which this
+            // callback receives. Without handling it here, momo:// links only
+            // work on a cold start.
+            if let Some(url) = argv.iter().find(|a| a.starts_with("momo://")) {
+                deeplink::dispatch(app, url);
+            }
         }));
     }
 
     builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         // **T8** — remember size, position and maximised state.
         .plugin(tauri_plugin_window_state::Builder::default().build())
@@ -244,6 +253,18 @@ pub fn run() {
             open_project,
         ])
         .setup(|app| {
+            // T9 — links delivered while the app is running (macOS) come
+            // through here.
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        deeplink::dispatch(&handle, url.as_str());
+                    }
+                });
+            }
+
             // Menus and the tray are best-effort: a tray icon failure must not
             // take down the app, and previously it would have — `?` here turned
             // any menu error into a failed setup.

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import { ApprovalDialog } from "@/components/chat/approval-dialog";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { DeepLinkPrompt } from "@/components/chat/deep-link-prompt";
 import { DetailPanel } from "@/components/detail/detail-panel";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -118,6 +119,7 @@ export function AppShell() {
       {/* Modal at every breakpoint, outside every collapsible panel — a narrow
           viewport must never be able to strand a turn (spec §6). */}
       <ApprovalDialog />
+      <DeepLinkPrompt />
       <Toaster />
     </div>
   );
