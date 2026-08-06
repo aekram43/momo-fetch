@@ -1,9 +1,11 @@
 import { create } from "zustand";
 
 import {
+  applyTheme,
   defaultPreferences,
   loadPreferences,
   savePreferences,
+  type ThemeChoice,
 } from "@/lib/preferences";
 
 /**
@@ -29,6 +31,7 @@ interface UiState {
   sidebarOpen: boolean;
   detailOpen: boolean;
   soundEnabled: boolean;
+  theme: ThemeChoice;
   turnPhase: TurnPhase;
   mobileDrawer: MobileDrawer;
   /** True once stored preferences have been applied (F28). */
@@ -37,16 +40,20 @@ interface UiState {
   toggleDetail: () => void;
   openDrawer: (which: MobileDrawer) => void;
   toggleSound: () => void;
+  setTheme: (theme: ThemeChoice) => void;
   setTurnPhase: (phase: TurnPhase) => void;
   hydrate: () => void;
 }
 
 /** Persist just the view state — see the note in `lib/preferences.ts`. */
-function persist(s: Pick<UiState, "sidebarOpen" | "detailOpen" | "soundEnabled">) {
+function persist(
+  s: Pick<UiState, "sidebarOpen" | "detailOpen" | "soundEnabled" | "theme">,
+) {
   savePreferences({
     sidebarOpen: s.sidebarOpen,
     detailOpen: s.detailOpen,
     soundEnabled: s.soundEnabled,
+    theme: s.theme,
   });
 }
 
@@ -73,6 +80,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((s) => ({ soundEnabled: !s.soundEnabled }));
     persist(get());
   },
+  setTheme: (theme) => {
+    set({ theme });
+    applyTheme(theme);
+    persist(get());
+  },
   // Opening one drawer closes the other — there is only room for one.
   openDrawer: (mobileDrawer) =>
     set((s) => ({
@@ -81,6 +93,20 @@ export const useUiStore = create<UiState>((set, get) => ({
   setTurnPhase: (turnPhase) => set({ turnPhase }),
   hydrate: () => {
     if (get().hydrated) return;
-    set({ ...loadPreferences(), hydrated: true });
+    const prefs = loadPreferences();
+    set({ ...prefs, hydrated: true });
+    // The pre-paint script in `layout.tsx` already stamped this; re-applying is
+    // cheap and keeps the store the single source of truth afterwards.
+    applyTheme(prefs.theme);
+
+    // Follow the OS while the choice is `auto`. Without this, "auto" only means
+    // "whatever the OS said at load" and a machine that switches at sunset
+    // leaves the app on the wrong theme until reload.
+    if (typeof window !== "undefined") {
+      const mq = window.matchMedia("(prefers-color-scheme: light)");
+      mq.addEventListener("change", () => {
+        if (get().theme === "auto") applyTheme("auto");
+      });
+    }
   },
 }));

@@ -880,7 +880,7 @@ At every breakpoint the approval dialog is a focus-trapped modal — it must nev
 
 ### Color Scheme
 
-Dark mode default (matches terminal aesthetic). Light mode available; follow `prefers-color-scheme` on first load.
+Three-way: **dark / light / auto**, defaulting to `auto` (follow `prefers-color-scheme`). Shipped — see the note after the palette.
 
 - Background: `zinc-950` / `white`
 - Sidebar: `zinc-900` / `zinc-50`
@@ -888,6 +888,10 @@ Dark mode default (matches terminal aesthetic). Light mode available; follow `pr
 - Assistant bubble: `zinc-800` / `zinc-100`
 - Tool call card: `zinc-800/50`, left border by status (blue=running, green=done, red=error, amber=awaiting approval)
 - Approval dialog: amber accent, Approve (green) / Deny (red)
+
+**Light mode is a re-derivation, not an inversion.** The identity has to survive the switch: the same cool cast, and amber still meaning "the agent wants something from you". Inverting breaks that — `#ffb454` on white measures ~1.7:1 and reads as decoration, which is the one job amber must not do here. Every signal colour is darkened until it clears 4.5:1 on the page background. Measured: light signal 4.96, consent 5.54, halt 6.03; dark signal 10.65, consent 8.71, halt 4.80.
+
+The theme is stamped on `<html data-theme>` by an inline script in `<head>` before the bundle loads. React state cannot do this — the export is prerendered, so a light-mode user would get a dark flash on every launch, which is the opposite of the point.
 
 **Accessibility:** status is never conveyed by colour alone — every status dot and card border pairs with an icon or text label (colour-blind users, and the MCP amber/green distinction in particular). Target WCAG AA contrast in both themes.
 
@@ -1025,7 +1029,7 @@ Resolved or narrowed by the code audit:
 4. **Real-time session sync between tabs** — *Revised:* v1's "each tab is independent" is unsafe (see C4). Tabs share one global harness. Phase 1: the 409 guard prevents concurrent turns; the UI displays the gateway's actual `current_session_id`. Proper multi-tab support is out of scope.
 5. **Memory vault write from UI** — Search/read only in Phase 1.
 6. **MCP server management from UI** — View status only in Phase 1, though `add_server`/`remove_server`/`start_server`/`stop_server` all exist (`src/mcp/mod.rs:217-247`) and would be cheap to expose later.
-7. **Theming** — Dark + light, system preference auto-detect. No custom accent colours in Phase 1.
+7. **Theming** — *Done.* Dark + light + auto, resolved before first paint. No custom accent colours in Phase 1.
 8. **Tauri vs Electron** — *Confirmed:* Tauri v2 (smaller binary, Rust-native, better security posture).
 
 Still genuinely open:

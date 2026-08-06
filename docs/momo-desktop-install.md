@@ -141,6 +141,9 @@ To point it at real work, use **Files → open another project…** in the right
 panel. It confirms first, because re-rooting moves the sandbox, the memory vault
 and the session history together, and restarts the agent.
 
+**Appearance** is in the same panel: dark, light, or auto (follows the OS, and
+keeps following it if you change the system setting while the app is open).
+
 The app starts in **strict** permission mode: it asks before anything that
 changes your machine. When it asks, read the dialog — approving a tool grants it
 for the rest of the session, by tool name, and the dialog says so.

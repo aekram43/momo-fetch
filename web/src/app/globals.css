@@ -17,27 +17,77 @@
  *      you. The two never swap.
  */
 
-@theme {
-  /* Base — cold blue-slate, deliberately not pure black. Pure black plus one
-     bright accent is the house style of every AI-generated dark UI; the blue
-     cast reads as instrument housing instead. */
-  --color-void: #0f1216;
-  --color-panel: #161b22;
-  --color-raised: #1c232c;
-  --color-rule: #232b36;
-
-  /* Text */
-  --color-ink: #c9d4e0;
-  --color-dim: #6b7a8c;
-  --color-faint: #414c5a;
-
-  /* State signals. Amber is load-bearing; the other two are verdicts. */
-  --color-signal: #ffb454;
-  --color-consent: #5bc490;
-  --color-halt: #e5484d;
+/*
+ * Tokens are indirected through plain custom properties so the theme can be
+ * swapped at runtime. `@theme inline` makes Tailwind emit
+ * `color: var(--ink)` rather than baking the literal into every utility —
+ * without `inline` the generated CSS is frozen at build time and a
+ * `data-theme` switch does nothing.
+ */
+@theme inline {
+  --color-void: var(--void);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-rule: var(--rule);
+  --color-ink: var(--ink);
+  --color-dim: var(--dim);
+  --color-faint: var(--faint);
+  --color-signal: var(--signal);
+  --color-consent: var(--consent);
+  --color-halt: var(--halt);
 
   --font-sans: var(--font-plex), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
+}
+
+/* Dark — the design's home key. Cold blue-slate, deliberately not pure black:
+   pure black plus one bright accent is the house style of every AI-generated
+   dark UI, and the blue cast reads as instrument housing instead. */
+:root,
+:root[data-theme="dark"] {
+  --void: #0f1216;
+  --panel: #161b22;
+  --raised: #1c232c;
+  --rule: #232b36;
+
+  --ink: #c9d4e0;
+  /* Was #6b7a8c, which measured 4.28:1 — under AA for the secondary text it
+     carries. Nudged along the same hue rather than desaturated, so the cool
+     cast survives. */
+  --dim: #748296;
+  --faint: #414c5a;
+
+  --signal: #ffb454;
+  --consent: #5bc490;
+  --halt: #e5484d;
+
+  color-scheme: dark;
+}
+
+/* Light — a re-derivation, not an inversion.
+ *
+ * The identity has to survive: the same cool cast (instrument housing in
+ * daylight rather than warm paper), and amber still meaning "the agent wants
+ * something from you". A straight inversion breaks that — #ffb454 on white is
+ * roughly 1.7:1 and reads as decoration, exactly the job amber must not do
+ * here. Every signal colour is darkened until it carries at least 4.5:1 on the
+ * page background, so a state stays a state.
+ */
+:root[data-theme="light"] {
+  --void: #f4f6f8;
+  --panel: #ffffff;
+  --raised: #e9edf2;
+  --rule: #d3dae3;
+
+  --ink: #161d26;
+  --dim: #55636f;
+  --faint: #8b98a6;
+
+  --signal: #a2570b;
+  --consent: #10714f;
+  --halt: #b4232a;
+
+  color-scheme: light;
 }
 
 html,

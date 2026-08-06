@@ -14,10 +14,14 @@
 
 const KEY = "momo-worker.prefs.v1";
 
+/** `auto` follows the OS; the other two pin it. */
+export type ThemeChoice = "dark" | "light" | "auto";
+
 export interface Preferences {
   sidebarOpen: boolean;
   detailOpen: boolean;
   soundEnabled: boolean;
+  theme: ThemeChoice;
 }
 
 export const defaultPreferences: Preferences = {
@@ -26,7 +30,29 @@ export const defaultPreferences: Preferences = {
   // Off by default (spec F27) — an app that makes noise unasked is one the user
   // mutes at the OS level, losing the signal entirely.
   soundEnabled: false,
+  // Follow the OS by default. Someone who has already told their machine they
+  // want light has told us too; making them say it twice is the wrong default
+  // even for an app whose home key is dark.
+  theme: "auto",
 };
+
+/** Storage key, exported so the pre-paint script and this module cannot drift. */
+export const PREFERENCES_KEY = KEY;
+
+/** Resolve a choice to the theme actually applied right now. */
+export function resolveTheme(choice: ThemeChoice): "dark" | "light" {
+  if (choice !== "auto") return choice;
+  if (typeof window === "undefined") return "dark";
+  return window.matchMedia("(prefers-color-scheme: light)").matches
+    ? "light"
+    : "dark";
+}
+
+/** Stamp the resolved theme on `<html>`; the CSS keys off `data-theme`. */
+export function applyTheme(choice: ThemeChoice): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.dataset.theme = resolveTheme(choice);
+}
 
 export function loadPreferences(): Preferences {
   if (typeof window === "undefined") return defaultPreferences;

@@ -13,7 +13,7 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**Phase 2 · dev · 2026-08-06 · rust 305 · desktop 8 · web 22 · all clean · 🎉 ทุกอย่างที่ทำได้เอง เสร็จหมด**
+**Theming · dev · 2026-08-06 · rust 305 · desktop 8 · web 24 · all clean · 🎉 ครบทุกอย่าง**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
