@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { Wordmark } from "@/components/shared/wordmark";
 import { getCost, getHealth } from "@/lib/api-client";
 import { useChatStore } from "@/stores/chat-store";
 import type { CostSummary, Health } from "@/lib/types";
@@ -58,9 +59,7 @@ export function Header({ onToggleSidebar, onToggleDetail }: {
         ▤
       </PanelButton>
 
-      <span className="font-mono text-[13px] font-medium tracking-tight text-ink">
-        momo<span className="text-signal">·</span>worker
-      </span>
+      <Wordmark />
 
       <div className="mx-1 h-4 w-px bg-rule" />
 

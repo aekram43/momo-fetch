@@ -1,6 +1,6 @@
-# MoMo Worker — Implementation Scratchpad / Handoff
+# MOMO WORK — Implementation Scratchpad / Handoff
 
-> **Purpose:** Working state for the MoMo Worker build so another agent can continue without re-deriving anything.
+> **Purpose:** Working state for the MOMO WORK build so another agent can continue without re-deriving anything.
 > **Spec:** [`docs/spec/momo-worker.md`](./momo-worker.md) — read §0 (Code Audit) first; it is the load-bearing part.
 > **Dispatch:** spec **§12** is the work plan (packages, model routing, waves). §9 below is now just a pointer into it.
 > **Last updated:** 2026-08-05 · branch `dev` (0.9.1)
@@ -53,6 +53,52 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 ## 0. Wave progress log
 
 Newest first. One entry per work package, added on completion.
+
+### ✅ Brand — MOMO WORK · 2026-08-06
+
+Logo, wordmark, icons and palette, from the supplied art. Product renamed
+**MoMo Worker → MOMO WORK** across the app, bundle, docs and window chrome.
+
+**Colours were sampled, not eyeballed:** navy `#041729`, orange `#f66614`.
+
+**🔴 The brand orange and the design system collided, and the fix is the
+interesting part.** The system reserves exactly one colour to mean *"the agent is
+working, or wants something from you"* — that is what makes an approval
+impossible to miss. The brand also has exactly one accent. Shipping both would
+put two oranges on screen carrying different meanings and blunt the one that
+matters.
+
+So **the brand orange *is* the state colour**. `--signal` is `#f66614` in dark,
+where it clears AA on the navy at 5.89:1 — it can carry meaning, not just
+decorate. `--void` became the brand navy verbatim, so the app and the mark sit in
+the same colour rather than near it.
+
+Two consequences, both deliberate:
+
+- **Light mode darkens the orange to `#bf4605`.** `#f66614` on white is 3.08:1 —
+  fails AA, and a signal that reads as decoration has stopped being a signal.
+- **The in-app wordmark is not orange**, though the brand lockup is. A
+  permanently orange word in the corner is a standing false alarm. The mark keeps
+  its orange bone; the words take ink, which is the brand navy in light anyway.
+  Full-colour lockups belong on the icon and in docs, not in running chrome.
+
+**Two traps hit while wiring it up:**
+
+1. **`next/image` does not prefix `basePath` for unoptimized static assets.** It
+   emitted `/momo-mark.png` while the bundle is mounted at `/ui`, so the logo
+   404'd and rendered as a broken-image box. Switched to a plain `<img>` with a
+   *relative* src, which resolves correctly under both mounts — `/ui/…` on the
+   gateway, `/…` under Tauri — and removes the basePath coupling entirely. Third
+   basePath trap of this project; see also WP-3 and the Tauri build.
+2. **Deriving the icon from `source/mark.png` eats the dog's muzzle.** Its white
+   background reaches the muzzle through the gap at the chin, so a border
+   flood-fill takes both. `brand/make-assets.py` derives from the *circle* asset
+   instead, whose navy ring encloses every interior white.
+
+**Known limit:** the circle asset is 212×198, so the 1024 icon is upscaled and
+soft at the largest sizes. Fine where icons are actually seen. A ≥1024px master
+or an SVG is the one asset worth asking the designer for — noted in
+`brand/README.md`.
 
 ### ✅ API keys in the UI, and the keychain actually works now · 2026-08-06
 

@@ -1,4 +1,4 @@
-//! MoMo Worker desktop shell.
+//! MOMO WORK desktop shell.
 //!
 //! Wraps the exported web UI and supervises a `momo-fetch --gateway` child.
 //! The web UI is byte-identical to the browser build — everything
@@ -420,7 +420,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building MoMo Worker")
+        .expect("error while building MOMO WORK")
         // Shut the gateway down on exit.
         //
         // This was hooked to `WindowEvent::Destroyed` and leaked the child on

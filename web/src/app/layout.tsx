@@ -18,8 +18,9 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MoMo Worker",
+  title: "MOMO WORK",
   description: "Supervise a momo-fetch agent: chat, tools, memory, approvals.",
+  icons: { icon: "favicon.png" },
 };
 
 /**

@@ -40,52 +40,60 @@
   --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
 }
 
-/* Dark — the design's home key. Cold blue-slate, deliberately not pure black:
-   pure black plus one bright accent is the house style of every AI-generated
-   dark UI, and the blue cast reads as instrument housing instead. */
+/* Dark — the brand navy, verbatim.
+ *
+ * `--void` is `#041729`, the exact navy from the logo, so the app and the mark
+ * sit in the same colour rather than merely near each other. The panels above it
+ * are that navy lifted, keeping the hue.
+ *
+ * **`--signal` is the brand orange.** That is the resolution of what would
+ * otherwise be a clash: the design system reserves one colour to mean "the agent
+ * is working, or wants something from you", and the brand also has exactly one
+ * accent. Running both would put two oranges on screen with different meanings.
+ * Instead the brand colour *is* the state colour — it clears AA on the navy
+ * (5.89:1), so it can carry meaning rather than only decorate.
+ */
 :root,
 :root[data-theme="dark"] {
-  --void: #0f1216;
-  --panel: #161b22;
-  --raised: #1c232c;
-  --rule: #232b36;
+  --void: #041729;
+  --panel: #0b1f33;
+  --raised: #12293f;
+  --rule: #1d3450;
 
-  --ink: #c9d4e0;
-  /* Was #6b7a8c, which measured 4.28:1 — under AA for the secondary text it
-     carries. Nudged along the same hue rather than desaturated, so the cool
-     cast survives. */
-  --dim: #748296;
-  --faint: #414c5a;
+  --ink: #ccd9e8;
+  --dim: #7d90a6;
+  --faint: #46586d;
 
-  --signal: #ffb454;
-  --consent: #5bc490;
-  --halt: #e5484d;
+  --signal: #f66614;
+  --consent: #4ec38c;
+  --halt: #f0555c;
 
   color-scheme: dark;
 }
 
 /* Light — a re-derivation, not an inversion.
  *
- * The identity has to survive: the same cool cast (instrument housing in
- * daylight rather than warm paper), and amber still meaning "the agent wants
- * something from you". A straight inversion breaks that — #ffb454 on white is
- * roughly 1.7:1 and reads as decoration, exactly the job amber must not do
- * here. Every signal colour is darkened until it carries at least 4.5:1 on the
- * page background, so a state stays a state.
+ * The identity has to survive the switch: the brand navy becomes the *text*
+ * colour rather than the ground, so the palette still reads as this product.
+ *
+ * The brand orange cannot come along unchanged — `#f66614` on white is 3.08:1,
+ * which fails AA and, worse, turns the one colour that means "attend to this"
+ * into decoration. Darkened to `#bf4605` (4.83:1) it keeps the hue and keeps the
+ * meaning. Same reasoning for the other two signals.
  */
 :root[data-theme="light"] {
-  --void: #f4f6f8;
+  --void: #f7f8fa;
   --panel: #ffffff;
-  --raised: #e9edf2;
-  --rule: #d3dae3;
+  --raised: #eceff4;
+  --rule: #d5dce6;
 
-  --ink: #161d26;
-  --dim: #55636f;
-  --faint: #8b98a6;
+  --ink: #041729;
+  --dim: #4e5f72;
+  --faint: #8695a6;
 
-  --signal: #a2570b;
-  --consent: #10714f;
-  --halt: #b4232a;
+  --signal: #bf4605;
+  --consent: #0f6f4d;
+  --halt: #b02128;
 
   color-scheme: light;
 }

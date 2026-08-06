@@ -1,4 +1,4 @@
-# MoMo Worker — Web UI & Desktop App Spec
+# MOMO WORK — Web UI & Desktop App Spec
 
 > **Status:** v3 — reconciled against code at `a218c19` (0.9.1), pushed to `origin/dev`.
 > **Progress:** Sprint-1 gateway slab **landed** · **Wave 0 complete** (verification + R1 + B0–B4) · Waves 1–3 ready to start in parallel · frontend not started.
@@ -733,7 +733,7 @@ momo-worker/  (Tauri project root)
 | T9 | Deep link protocol | Desktop | T1, T4 | Register `momo://`; validate and confirm paths. |
 | T10 | Build pipeline | Desktop | T1 | CI: `next build` → copy `out/` → `tauri build` for macOS (.dmg), Windows (.msi), Linux (.deb/.AppImage). Bundle the `momo-fetch` binary as a Tauri sidecar per target triple. |
 | T11 | Auto-updater | Desktop | T10, T13 | `tauri-plugin-updater`; check on startup. |
-| T12 | App icon & branding | Desktop | T1 | .icns / .ico / .png, app name "MoMo Worker". |
+| T12 | App icon & branding | Desktop | T1 | .icns / .ico / .png, app name "MOMO WORK". |
 | T13 | Code signing | Desktop | T10 | Apple notarization, Windows signing, updater signing key. Blocks T11. |
 
 ---
@@ -835,7 +835,7 @@ Note the two things v1 got wrong and this diagram makes explicit: the stream **e
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ ◉ MoMo Worker          anthropic/claude-sonnet   💰 $0.04   🟢 Connected│
+│ ◉ MOMO WORK          anthropic/claude-sonnet   💰 $0.04   🟢 Connected│
 ├──────────┬──────────────────────────────────┬────────────────────────┤
 │ Sessions │         CHAT PANEL               │  Progress & Details   │
 │──────────│                                  │────────────────────────│

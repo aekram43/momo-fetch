@@ -1,4 +1,4 @@
-# Releasing MoMo Worker
+# Releasing MOMO WORK
 
 > **Installing it, not shipping it?** See
 > [`docs/momo-desktop-install.md`](../docs/momo-desktop-install.md). Nothing on

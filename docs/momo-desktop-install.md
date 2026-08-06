@@ -1,6 +1,6 @@
-# Installing MoMo Worker from source
+# Installing MOMO WORK from source
 
-MoMo Worker is the desktop app for the momo-fetch agent: chat, tool approvals,
+MOMO WORK is the desktop app for the momo-fetch agent: chat, tool approvals,
 memory search and sandboxed file access in one window. It starts and supervises
 its own gateway — there is no server to run separately.
 
@@ -81,7 +81,7 @@ The bundle lands in `desktop/src-tauri/target/release/bundle/`:
 
 | Platform | Artifact |
 |---|---|
-| macOS | `macos/MoMo Worker.app`, `dmg/*.dmg` |
+| macOS | `macos/MOMO WORK.app`, `dmg/*.dmg` |
 | Windows | `msi/*.msi`, `nsis/*.exe` |
 | Linux | `deb/*.deb`, `appimage/*.AppImage` |
 
@@ -219,7 +219,7 @@ The frontend was not re-embedded — see the note in section 5.
 
 | Platform | Path |
 |---|---|
-| macOS | `~/Library/Logs/com.createder.momo-worker/MoMo Worker.log` |
+| macOS | `~/Library/Logs/com.createder.momo-worker/MOMO WORK.log` |
 | Linux | `~/.local/share/com.createder.momo-worker/logs/` |
 | Windows | `%LOCALAPPDATA%\com.createder.momo-worker\logs\` |
 
