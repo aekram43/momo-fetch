@@ -34,11 +34,23 @@ interface UiState {
   theme: ThemeChoice;
   turnPhase: TurnPhase;
   mobileDrawer: MobileDrawer;
+  /**
+   * Bumped whenever this tab changes something the gateway owns.
+   *
+   * Panels poll on their own schedule — the header every 10 s — which is fine
+   * for drift but wrong right after a deliberate action: switch a model and the
+   * header keeps showing the old one for up to ten seconds, which reads as the
+   * switch having failed. Every reader of server state watches this and
+   * refetches at once.
+   */
+  serverStateNonce: number;
   /** True once stored preferences have been applied (F28). */
   hydrated: boolean;
   toggleSidebar: () => void;
   toggleDetail: () => void;
   openDrawer: (which: MobileDrawer) => void;
+  /** Call after any successful mutation of gateway state. */
+  bumpServerState: () => void;
   toggleSound: () => void;
   setTheme: (theme: ThemeChoice) => void;
   setTurnPhase: (phase: TurnPhase) => void;
@@ -66,6 +78,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   // Always starts closed: a drawer the user did not open should never be
   // covering the chat on load.
   mobileDrawer: null,
+  serverStateNonce: 0,
   hydrated: false,
 
   toggleSidebar: () => {
@@ -90,6 +103,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((s) => ({
       mobileDrawer: s.mobileDrawer === mobileDrawer ? null : mobileDrawer,
     })),
+  bumpServerState: () => set((s) => ({ serverStateNonce: s.serverStateNonce + 1 })),
   setTurnPhase: (turnPhase) => set({ turnPhase }),
   hydrate: () => {
     if (get().hydrated) return;

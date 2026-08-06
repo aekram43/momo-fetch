@@ -1,6 +1,7 @@
 mod auth;
 mod files;
 mod handlers;
+mod models;
 mod turn;
 mod types;
 mod v2_handlers;
@@ -260,6 +261,11 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
         .route("/v2/agents/switch", post(v2_handlers::v2_agents_switch))
         .route("/v2/agents/default", post(v2_handlers::v2_agents_default))
         .route("/v2/providers", get(v2_handlers::v2_providers))
+        .route(
+            "/v2/providers/{provider}/models",
+            get(models::v2_provider_models)
+                .delete(models::v2_provider_models_refresh),
+        )
         .route("/v2/switch-model", post(v2_handlers::v2_switch_model))
         .route("/v2/switch-provider", post(v2_handlers::v2_switch_provider))
         .route("/v2/switch", post(v2_handlers::v2_switch))

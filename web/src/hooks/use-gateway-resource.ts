@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { useUiStore } from "@/stores/ui-store";
+
 /**
  * Fetch a gateway resource once on mount, with a manual `reload`.
  *
@@ -18,6 +20,9 @@ export function useGatewayResource<T>(
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  // Refetch when any component reports that gateway state changed, so a switch
+  // made in one panel is reflected in all of them immediately.
+  const serverStateNonce = useUiStore((s) => s.serverStateNonce);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
@@ -39,7 +44,7 @@ export function useGatewayResource<T>(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, ...deps]);
+  }, [nonce, serverStateNonce, ...deps]);
 
   return { data, error, reload };
 }

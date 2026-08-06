@@ -54,6 +54,36 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ Model picker — finishing F13 · 2026-08-06
+
+**I had marked F13 done with only half of it built.** The spec says "provider →
+model dropdown"; WP-5 shipped provider switching, and `switchModel()` sat in the
+API client with no component calling it. Switching model needed curl or a
+`settings.json` edit. Caught by being asked how to do it.
+
+**The catalogue is queried, not hardcoded.** A baked-in list of model names is
+wrong the week after it is written, and a stale list is worse than none because
+the UI offers something the API rejects. `GET /v2/providers/{provider}/models`
+asks each provider: OpenRouter through the client already in the tree (the one
+feeding context windows), Ollama via `/api/tags`, Anthropic and Gemini through
+their own shapes, and everything else through the OpenAI-compatible
+`GET {base}/models`. Cached 30 min, with `DELETE` to clear.
+
+**Failure returns 200, deliberately.** No key, provider down, no catalogue API —
+those come back `available:false` with the reason and the current model, and the
+picker swaps the list for a text field. A directory lookup failing must never
+leave someone unable to change models. Verified: openrouter → 340 real models;
+anthropic without a key and ollama not running → both degrade with a readable
+reason rather than an error.
+
+**Found and fixed while testing: up to 10 s of stale UI after any switch.** The
+header polls `/health` on a 10 s timer, so a model change looked like it had
+failed until the next tick. Added `serverStateNonce` to the ui-store: any
+component that mutates gateway state bumps it, and `useGatewayResource` plus the
+header watch it, so every panel refetches at once. Applies to agent, provider
+and permission switches too — they all had the same lag. Measured: header now
+reflects a switch in ~2.5 s, and that is network, not polling.
+
 ### ✅ Brand v2 — rebuilt from the artwork sheet · 2026-08-06
 
 Replaced the first pass with assets cut from the proper brand sheet

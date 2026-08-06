@@ -173,6 +173,15 @@ export interface Agent {
   is_orchestrator: boolean;
 }
 
+export interface ProviderModels {
+  provider: string;
+  models: string[];
+  /** False when the catalogue could not be fetched — the UI offers free text. */
+  available: boolean;
+  cached: boolean;
+  error: string | null;
+}
+
 export interface Provider {
   name: string;
   is_current: boolean;

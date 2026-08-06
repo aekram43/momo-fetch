@@ -10,6 +10,7 @@ import {
   resetToDefaultAgent,
   switchAgent,
 } from "@/lib/api-client";
+import { useUiStore } from "@/stores/ui-store";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
 
 /**
@@ -22,6 +23,7 @@ import { useGatewayResource } from "@/hooks/use-gateway-resource";
 export function AgentPicker() {
   const { data, error, reload } = useGatewayResource(getAgents);
   const [busy, setBusy] = useState(false);
+  const bump = useUiStore((s) => s.bumpServerState);
   const [conflict, setConflict] = useState(false);
 
   async function choose(name: string | null) {
@@ -30,6 +32,7 @@ export function AgentPicker() {
     setConflict(false);
     try {
       await (name === null ? resetToDefaultAgent() : switchAgent(name));
+      bump();
       reload();
     } catch (err) {
       if (err instanceof ApiError && err.isTurnConflict) setConflict(true);

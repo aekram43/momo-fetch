@@ -18,6 +18,7 @@ import type {
   MemoryStats,
   PermissionMode,
   Provider,
+  ProviderModels,
   SessionInfo,
   SessionMessages,
   Settings,
@@ -210,6 +211,25 @@ export const resetToDefaultAgent = () =>
 
 export const getProviders = () =>
   request<{ providers: Provider[] }>("/v2/providers");
+
+/**
+ * The model catalogue for one provider, queried from the provider itself.
+ *
+ * Returns 200 even when the list could not be fetched — `available:false` with
+ * a reason. A directory lookup failing must not stop someone switching models,
+ * so the UI falls back to a text field.
+ */
+export const getProviderModels = (provider: string) =>
+  request<ProviderModels>(
+    `/v2/providers/${encodeURIComponent(provider)}/models`,
+  );
+
+/** Drop the cached catalogue so the next read refetches. */
+export const refreshProviderModels = (provider: string) =>
+  request<{ cleared: string }>(
+    `/v2/providers/${encodeURIComponent(provider)}/models`,
+    { method: "DELETE" },
+  );
 
 export const switchModel = (model: string) =>
   post<{ provider: string; model: string }>("/v2/switch-model", { model });

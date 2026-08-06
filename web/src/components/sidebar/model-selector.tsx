@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 
+import { ModelPicker } from "@/components/sidebar/model-picker";
 import { Dot, Hint, PanelSection } from "@/components/shared/panel-section";
 import { SkeletonRows } from "@/components/shared/skeleton";
 import { ApiError, getProviders, switchProvider } from "@/lib/api-client";
+import { useUiStore } from "@/stores/ui-store";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
 
 /**
@@ -32,6 +34,7 @@ function unavailableReason(name: string): string {
 export function ModelSelector() {
   const { data, error, reload } = useGatewayResource(getProviders);
   const [busy, setBusy] = useState(false);
+  const bump = useUiStore((s) => s.bumpServerState);
   const [conflict, setConflict] = useState(false);
 
   async function choose(name: string) {
@@ -40,6 +43,7 @@ export function ModelSelector() {
     setConflict(false);
     try {
       await switchProvider(name);
+      bump();
       reload();
     } catch (err) {
       if (err instanceof ApiError && err.isTurnConflict) setConflict(true);
@@ -83,6 +87,11 @@ export function ModelSelector() {
                   </span>
                 )}
               </button>
+              {/* The model picker only makes sense for the provider in use —
+                  switching model on an inactive provider has nothing to act on. */}
+              {p.is_current && (
+                <ModelPicker provider={p.name} current={p.current_model} />
+              )}
             </li>
           ))}
         </ul>

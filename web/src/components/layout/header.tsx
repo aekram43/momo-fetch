@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Wordmark } from "@/components/shared/wordmark";
 import { getCost, getHealth } from "@/lib/api-client";
 import { useChatStore } from "@/stores/chat-store";
+import { useUiStore } from "@/stores/ui-store";
 import type { CostSummary, Health } from "@/lib/types";
 
 /**
@@ -24,6 +25,7 @@ export function Header({ onToggleSidebar, onToggleDetail }: {
   // Live figure from `usage` events; falls back to the polled total between turns.
   const liveCost = useChatStore((s) => s.sessionCost);
   const localTurn = useChatStore((s) => s.turnId);
+  const serverStateNonce = useUiStore((s) => s.serverStateNonce);
 
   // F19 — poll /health every 10 s. Auth-exempt (G12), so this works before a
   // token is entered.
@@ -47,7 +49,7 @@ export function Header({ onToggleSidebar, onToggleDetail }: {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [serverStateNonce]);
 
   // The gateway says a turn is running but this tab isn't the one driving it —
   // another tab, or the REPL. Say so rather than looking idle (spec F19).

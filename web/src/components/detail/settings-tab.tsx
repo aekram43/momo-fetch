@@ -40,6 +40,7 @@ const THEMES: { value: ThemeChoice; label: string; blurb: string }[] = [
 export function SettingsTab() {
   const { data, error, reload } = useGatewayResource(getSettings);
   const [busy, setBusy] = useState(false);
+  const bump = useUiStore((s) => s.bumpServerState);
   const [conflict, setConflict] = useState(false);
   const [confirmYolo, setConfirmYolo] = useState(false);
   const soundEnabled = useUiStore((s) => s.soundEnabled);
@@ -57,6 +58,7 @@ export function SettingsTab() {
     setConflict(false);
     try {
       await setPermissionMode(mode);
+      bump();
       reload();
     } catch (err) {
       if (err instanceof ApiError && err.isTurnConflict) setConflict(true);

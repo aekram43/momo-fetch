@@ -649,7 +649,7 @@ The same-origin step was added during WP-3 after testing against G9: the gateway
 | # | Task | Type | Depends On | Description |
 |---|------|------|------------|-------------|
 | F12 | Agent picker | Frontend | G2, F2 | Sidebar list from `GET /v2/agents`; switch; highlight current; show capabilities as tooltips. |
-| F13 | Model selector | Frontend | G3, F2 | Provider → model dropdown. Grey out providers with `available:false` and say why. |
+| F13 | Model selector | Frontend | G3, F2 | Provider list + per-provider model picker, fed by `GET /v2/providers/{p}/models` which queries the provider. Grey out providers with `available:false` and say why. |
 | G4 | MCP status endpoint | Gateway | — | `GET /v2/mcp/servers`. |
 | F14 | Tool status panel | Frontend | G4, F2 | Status dots + error tooltip. Render `tool_count:null` as "—", never "0". |
 | G5 | Memory search endpoint | Gateway | — | `GET /v2/memory/search`, `/v2/memory/stats`. |
@@ -910,7 +910,9 @@ The theme is stamped on `<html data-theme>` by an inline script in `<head>` befo
 | GET | `/v2/agents` | List available agents | read | Bearer |
 | POST | `/v2/agents/switch` | Switch agent personality | **write** | Bearer |
 | POST | `/v2/agents/default` | Reset to default agent | **write** | Bearer |
-| GET | `/v2/providers` | List providers + models | read | Bearer |
+| GET | `/v2/providers` | List providers | read | Bearer |
+| GET | `/v2/providers/{provider}/models` | Model catalogue, queried from the provider | read | Bearer |
+| DELETE | `/v2/providers/{provider}/models` | Drop the cached catalogue | none | Bearer |
 | POST | `/v2/switch-model` | Switch model | **write** | Bearer |
 | POST | `/v2/switch-provider` | Switch provider | **write** | Bearer |
 | POST | `/v2/switch` | Switch provider + model | **write** | Bearer |
