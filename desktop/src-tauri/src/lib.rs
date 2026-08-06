@@ -330,7 +330,7 @@ pub fn run() {
                             );
                         }
                     }
-                    Err(e) => set_error(&state, e.to_string()),
+                    Err(e) => set_error(&state, explain(&e.to_string(), &project)),
                 }
             });
 
@@ -360,6 +360,22 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Add the one thing a first-run failure is always missing: *where* to fix it.
+///
+/// The harness reports "Secret not found for 'openrouter'. Set
+/// OPENROUTER_API_KEY…" — correct, and useless in a GUI, because the user has
+/// no idea which directory `.env` is read from. The shell does know, so it says.
+fn explain(error: &str, project: &std::path::Path) -> String {
+    if error.contains("Secret not found") || error.contains("API_KEY") {
+        format!(
+            "{error}\n\nThe desktop app reads .env from its workspace:\n\n               {}/.env\n\nCreate that file with one line, e.g.\n\n               OPENROUTER_API_KEY=sk-or-...\n\nthen reopen the app.",
+            project.display()
+        )
+    } else {
+        error.to_string()
+    }
 }
 
 fn set_error(state: &State<'_, AppState>, message: String) {

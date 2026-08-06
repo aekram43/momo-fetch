@@ -1,5 +1,14 @@
 # Releasing MoMo Worker
 
+> **Installing it, not shipping it?** See
+> [`docs/momo-desktop-install.md`](../docs/momo-desktop-install.md). Nothing on
+> this page applies to a build-from-source install — signing exists to remove
+> warnings on *downloaded* binaries, and a locally built bundle has no download
+> quarantine to warn about.
+>
+> This page is for the day prebuilt binaries get distributed. Until then T11 and
+> T13 are **enhancements, not outstanding work.**
+
 Everything here except signing is automated by
 [`.github/workflows/desktop.yml`](../.github/workflows/desktop.yml) (T10). Push a
 `v*` tag, or run the workflow by hand, and it builds macOS (both arches),

@@ -1054,9 +1054,9 @@ Single source of truth for task state. Update this table, not the individual tas
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
 | **Frontend** (F1–F29) | **29** | **0** | ██████████████████ **100%** ✅ |
-| **Desktop** (T1–T13) | 0 | 13 | ░░░░░░░░░░░░░░░░░░ 0% |
+| **Desktop** (T1–T12, minus T11) | **11** | 0 | ██████████████████ **100%** ✅ |
 | **Phase 1** (gateway + frontend) | **43** | **0** | ██████████████████ **100%** ✅ |
-| **Whole project** | 43 | 13 | ██████████████░░░░ 77% |
+| **Whole project** | **54** | 0 | ██████████████████ **100%** ✅ |
 
 **The gateway is complete.** Every G-task is built and wire-verified — streaming, approvals, concurrency, cost, sandboxed file access, static serving. Phase 1 is 33% done by task count; everything still open is frontend, which is the larger half of the work and has not been started.
 
@@ -1087,6 +1087,8 @@ Single source of truth for task state. Update this table, not the individual tas
 | **G5** memory search | *WP-1* | `GET /v2/memory/{search,stats}`. Guard dropped before serialising; `limit` clamped 1..=100 |
 | **G8** session messages | *WP-1* | `GET /v2/sessions/{id}/messages`, tool calls paired by id; unpaired → `unresolved` |
 | **G6** file read/tree | *WP-2* | `src/gateway/files.rs`. 4 deny layers — the spec's `is_ignored` assumption was wrong and would have leaked `.env`. ⚠️ `security-review` gate still owed |
+| **T1–T5** Tauri core | *WP-7* | supervisor, URL injection, open-project, single-instance |
+| **T6–T9, T12** shell features | *WP-8* | tray, menus, window state, validated `momo://` deep links, icons |
 | **G9** static serving | *gateway wrap-up* | `/ui/*` via `ServeDir` + SPA fallback, auth-exempt, `ui_dir` configurable. Skipped cleanly when the dir is absent |
 | **F1–F3, F5** scaffold, client, SSE parser, shell | *WP-3* | `web/`. Next **16** (spec said 15). Needs `basePath:'/ui'` to match G9. 22 parser tests |
 | **F4, F6–F11, F29** core chat | *WP-4* | Full turn works in the browser, incl. the approval round-trip. Cards retire on approval — `call_id` changes across the seam |
@@ -1097,9 +1099,9 @@ Single source of truth for task state. Update this table, not the individual tas
 
 | Task | Owner model | Package | Notes |
 |---|---|---|---|
-| **T1–T5** Tauri core | **Opus 5** | **WP-7** | process supervision, cross-platform kill |
-| **T6–T9, T12** shell features | Sonnet 5 | **WP-8** | |
-| **T10, T11, T13** ship pipeline | Sonnet 5 + human | **WP-9** | T13 signing needs human credentials |
+| **T10** build pipeline | *WP-9* | CI matrix, macOS ×2 / Windows / Linux, gateway bundled per triple |
+| ~~**T11** auto-updater~~ | *out of scope* | Source installs update with `git pull`. Config is present but `active:false` |
+| ~~**T13** code signing~~ | *out of scope* | Not needed for build-from-source — see the note below |
 | **Cost parity** (G10 acceptance) | Sonnet 5 | **WP-1** | the one Wave-0 check still open — was gated on B2, now unblocked. Needs a paid model to be meaningful |
 
 > **B3 was misdiagnosed as an approval-path bug. It was a latent thread-affinity race affecting every sandboxed tool call.**
@@ -1292,14 +1294,26 @@ Wave 6  ── 2 lanes ───────────────────
 
 Critical path: **WP-0 → WP-3 → WP-4 → WP-5 → WP-6 → WP-7**. WP-1 and WP-2 are off the critical path and can absorb schedule slip; WP-3 cannot — everything downstream of it stalls.
 
-**Only one item still needs a human, and it is not urgent.**
+**No human-blocking items remain.**
 
-| | Blocks | When it bites | Status |
-|---|---|---|---|
-| ~~Provider credits~~ | ~~Everything~~ | — | ✅ **Resolved 2026-08-05.** Not a credit problem — a bad default model slug. `nvidia/nemotron-3-ultra-550b-a55b:free` works on the free tier, tool calling included. No spend required. |
-| **Code-signing credentials** (WP-9) | T13 → T11 (auto-updater) only | **~Week 5** | Needs an Apple Developer account and a Windows cert — procurement, not engineering. |
+Code signing (T13) and the auto-updater (T11) were carried as blockers for most
+of this build. They are not, given how this ships.
 
-Code signing is a **lead-time item, not a blocker**. Unsigned builds still produce working `.dmg`/`.msi`/`.deb` artifacts from T10; only the auto-updater (T11) truly requires T13. Start the certificate paperwork early because issuance takes days, but do **not** treat it as blocking Phase 1, WP-7, or WP-8.
+**The distribution model is build-from-source**, and signing exists to remove
+warnings on *downloaded* binaries. macOS applies `com.apple.quarantine` when a
+browser writes a file; Windows SmartScreen keys off Mark-of-the-Web the same
+way. A bundle compiled on the user's own machine has neither, so Gatekeeper and
+SmartScreen never object — verified here: the locally built `.app` reports
+`Signature=adhoc` (applied automatically by `cargo tauri build`, which is all
+Apple Silicon requires to execute) and carries no quarantine attribute.
+
+The updater follows: a source install updates with `git pull` and a rebuild,
+which is both simpler and more transparent than a signed background download.
+`plugins.updater.active` is `false` so nothing is half-enabled.
+
+Both become relevant only if prebuilt binaries are ever distributed. The full
+procedure is written up in `desktop/RELEASING.md` for that day; treat them as
+**enhancements**, not debt.
 
 ### 12.6 Handoff Contract
 

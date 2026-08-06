@@ -138,7 +138,7 @@ function BootScreen({ error, stderr }: { error?: string; stderr?: string }) {
         <p className="font-mono text-xs uppercase tracking-[0.14em] text-faint">
           {error ? "Could not start" : "Starting"}
         </p>
-        <h1 className="mt-2 text-lg font-medium text-ink">
+        <h1 className="mt-2 whitespace-pre-wrap text-lg font-medium text-ink">
           {error ?? "Bringing up the agent…"}
         </h1>
         {!error && (

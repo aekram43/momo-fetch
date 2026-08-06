@@ -20,13 +20,21 @@
 | **Gateway** (G1–G13 + R1) | **14** | **0** | ██████████████████ **100%** ✅ |
 | **Wave-0 bugs** (B0–B4) | 5 | 0 | ██████████████████ 100% |
 | **Frontend** (F1–F29) | **29** | **0** | ██████████████████ **100%** ✅ |
-| **Desktop** (T1–T13) | **11** | 2 | ███████████████░░░ 85% |
+| **Desktop** (T1–T11, T12) | **11** | 0 | ██████████████████ **100%** ✅ |
 | **Phase 1** (gateway + frontend) | **43** | **0** | ██████████████████ **100%** ✅ |
-| **ทั้งโปรเจกต์** | **54** | 2 | █████████████████░ 96% |
+| **ทั้งโปรเจกต์** | **54** | 0 | ██████████████████ **100%** ✅ |
 
 **🎉 แอป desktop รันได้จริง + deep link ปลอดภัย** — `.app` spawn gateway เอง, single-instance, ปิดแล้ว gateway ตายตาม, `momo://` ผ่านการ validate + ต้องกดยืนยัน เหลือแต่ signing/updater ที่ต้องใช้ credential
 
-**เหลือแค่ 2 อย่าง ที่ต้องใช้ credential ของคุณ: T13 code signing → T11 auto-updater** — ขั้นตอนอยู่ใน `desktop/RELEASING.md`
+**T13 (code signing) / T11 (auto-updater) — ตัดออกจาก scope แล้ว ไม่ใช่งานค้าง**
+
+Distribution model คือ **build จาก source** ซึ่งไม่ต้องใช้ signing เลย: ไฟล์ที่ build บนเครื่องตัวเองไม่มี `com.apple.quarantine` (flag นี้ browser เป็นคนติดตอนดาวน์โหลด) Gatekeeper จึงไม่ถาม และ SmartScreen ดูจาก Mark-of-the-Web ซึ่งก็ไม่มีเหมือนกัน `cargo tauri build` เซ็น ad-hoc ให้อยู่แล้ว — พอสำหรับรันบน Apple Silicon (ยืนยันบนเครื่องนี้: `Signature=adhoc`, ไม่มี quarantine)
+
+Auto-update ก็ไม่เกี่ยว — source install อัปเดตด้วย `git pull` + rebuild
+
+ถ้าวันหนึ่งจะแจก prebuilt binary ค่อยหยิบขึ้นมาทำ ขั้นตอนอยู่ใน `desktop/RELEASING.md` ครบแล้ว
+
+**คู่มือติดตั้ง: [`docs/momo-desktop-install.md`](../momo-desktop-install.md)**
 
 **✅ งานค้างทั้ง 3 อย่าง เคลียร์หมดแล้ว**
 
