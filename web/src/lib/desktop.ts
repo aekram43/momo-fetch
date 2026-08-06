@@ -50,6 +50,50 @@ export async function resolveDesktopGatewayUrl(): Promise<string | null> {
   return url;
 }
 
+/** Per-provider key status. Note there is no "get key" — by design. */
+export interface SecretStatus {
+  provider: string;
+  env_var: string;
+  configured: boolean;
+  also_in_env_file: boolean;
+}
+
+export const getSecretStatus = () => invoke<SecretStatus[]>("secret_status");
+
+/**
+ * Store an API key in the OS keychain and restart the gateway.
+ *
+ * Desktop only. The key goes over Tauri IPC to the shell process — never over
+ * HTTP, and never to the gateway, which receives it as an environment variable
+ * when the shell respawns it.
+ *
+ * There is deliberately no way to read a key back out.
+ */
+export async function setSecret(
+  provider: string,
+  key: string,
+): Promise<string | null> {
+  const fn = window.__TAURI__?.core?.invoke;
+  if (!fn) return "Not running in the desktop app.";
+  try {
+    await fn("set_secret", { provider, key });
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+export async function deleteSecret(provider: string): Promise<string | null> {
+  const fn = window.__TAURI__?.core?.invoke;
+  if (!fn) return "Not running in the desktop app.";
+  try {
+    await fn("delete_secret", { provider });
+    return null;
+  } catch (e) {
+    return String(e);
+  }
+}
+
 /** Startup failure from the shell — the gateway never came up. */
 export const getStartupError = () => invoke<string | null>("startup_error");
 

@@ -102,6 +102,12 @@ key is present. The boot screen names the exact file; it is here:
 | Linux | `~/.local/share/com.createder.momo-worker/workspace/.env` |
 | Windows | `%APPDATA%\com.createder.momo-worker\workspace\.env` |
 
+> **Or set it in the app instead.** The desktop app has an **API keys** panel
+> (right panel, under Settings) that stores keys in the OS keychain — no file
+> editing. It only appears in the desktop app, and it needs the app to start
+> once first, so if you are stuck at the boot screen use `.env` for the first
+> key and switch later if you prefer.
+
 Create `.env` there with one line:
 
 ```
@@ -121,10 +127,22 @@ ZAI_API_KEY=...
 
 Then reopen the app.
 
-> **The OS keychain is not wired up.** `momo-fetch secrets set` looks like it
-> should work and does not — nothing registers a keyring backend, so every
-> keychain lookup fails. `.env` (or a real environment variable) is the only
-> working path today.
+### Which key wins
+
+A secret is resolved per *variable*, not per file, so different providers can
+come from different places at the same time. For one variable:
+
+| | CLI / browser | Desktop app |
+|---|---|---|
+| 1 | exported environment variable | key set in the app (injected by the shell) |
+| 2 | `.env` | exported environment variable |
+| 3 | OS keychain | `.env` |
+
+The desktop app inverts the usual order on purpose: the shell reads the keychain
+and hands the key to the agent as an environment variable when it starts it, so
+what you typed into the app is what it uses. The panel says so when a `.env`
+also defines that variable, because otherwise "I changed my key and nothing
+happened" has no visible explanation.
 
 Pick the model in the app's **Models** panel. Providers you have no key for are
 listed but greyed out, with the reason.

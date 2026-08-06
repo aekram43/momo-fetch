@@ -32,6 +32,25 @@ tauri-plugin-dialog = "2"
 [dependencies.tauri-plugin-deep-link]
 version = "2"
 
+[dev-dependencies]
+tempfile = "3"
+
+# The shell is the only binary that touches the keychain — see src/secrets.rs.
+[target.'cfg(target_os = "macos")'.dependencies.keyring]
+version = "3"
+default-features = false
+features = ["apple-native"]
+
+[target.'cfg(target_os = "windows")'.dependencies.keyring]
+version = "3"
+default-features = false
+features = ["windows-native"]
+
+[target.'cfg(target_os = "linux")'.dependencies.keyring]
+version = "3"
+default-features = false
+features = ["sync-secret-service", "crypto-rust"]
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"

@@ -59,7 +59,11 @@ impl Supervisor {
     /// else on the machine can take it. `--gateway-port 0` lets the kernel
     /// allocate, and the child reports what it got on a single machine-readable
     /// stdout line (G11). We parse that rather than guessing.
-    pub fn start(binary: &PathBuf, project: &PathBuf) -> Result<Self, GatewayError> {
+    pub fn start(
+        binary: &PathBuf,
+        project: &PathBuf,
+        env: &std::collections::HashMap<String, String>,
+    ) -> Result<Self, GatewayError> {
         let mut cmd = Command::new(binary);
         cmd.arg("--gateway")
             .arg("--gateway-port")
@@ -85,6 +89,12 @@ impl Supervisor {
             .current_dir(project)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        // Keys from the keychain, handed over as environment variables. The
+        // gateway checks env before its own keychain lookup, so this is what
+        // makes a key set in the UI take effect — and it means the child never
+        // touches the keychain itself (see secrets.rs for why that matters).
+        cmd.envs(env);
 
         // On Unix, put the child in its own process group. Without this a
         // Ctrl-C in a terminal-launched app is delivered to the child too, and

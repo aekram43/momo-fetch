@@ -7,6 +7,7 @@
 mod deeplink;
 mod gateway;
 mod menu;
+mod secrets;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -182,7 +183,8 @@ async fn open_project(
     }
 
     let binary = resolve_binary(&app).ok_or("Could not find the momo-fetch binary.")?;
-    let sup = Supervisor::start(&binary, &dir).map_err(|e| e.to_string())?;
+    let sup = Supervisor::start(&binary, &dir, &secrets::env_overrides())
+        .map_err(|e| e.to_string())?;
     let url = sup.url.clone();
 
     if !gateway::await_ready(&url, Duration::from_secs(30)) {
@@ -206,6 +208,84 @@ async fn open_project(
     }
 
     Ok(url)
+}
+
+/// Where the gateway is currently rooted, for the `.env` overlap check.
+fn current_workspace(app: &tauri::AppHandle) -> PathBuf {
+    default_project_dir(app).unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Per-provider key status. **Never returns a key** — only whether one is set.
+#[tauri::command]
+fn secret_status(app: tauri::AppHandle) -> Vec<secrets::SecretStatus> {
+    secrets::status(&current_workspace(&app))
+}
+
+/// Store a key and restart the gateway so it picks it up.
+///
+/// The harness resolves secrets while building, not per request, so a running
+/// gateway would keep using the old value. Restarting is the honest way to make
+/// "saved" mean "in effect".
+#[tauri::command]
+async fn set_secret(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    provider: String,
+    key: String,
+) -> Result<(), String> {
+    secrets::set(&provider, &key)?;
+    restart_gateway(&app, &state).await
+}
+
+#[tauri::command]
+async fn delete_secret(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    provider: String,
+) -> Result<(), String> {
+    secrets::delete(&provider)?;
+    restart_gateway(&app, &state).await
+}
+
+/// Stop the gateway and start a fresh one at the same project.
+async fn restart_gateway(
+    app: &tauri::AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    let project = current_workspace(app);
+
+    if let Ok(mut guard) = state.supervisor.lock() {
+        if let Some(mut old) = guard.take() {
+            old.shutdown();
+        }
+    }
+
+    let binary = resolve_binary(app).ok_or("Could not find the momo-fetch binary.")?;
+    let sup = Supervisor::start(&binary, &project, &secrets::env_overrides())
+        .map_err(|e| e.to_string())?;
+    let url = sup.url.clone();
+
+    if !gateway::await_ready(&url, Duration::from_secs(30)) {
+        return Err("The gateway restarted but never became ready.".into());
+    }
+
+    if let Ok(mut guard) = state.supervisor.lock() {
+        *guard = Some(sup);
+    }
+    if let Ok(mut guard) = state.url.lock() {
+        *guard = Some(url.clone());
+    }
+    if let Ok(mut guard) = state.startup_error.lock() {
+        *guard = None;
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.eval(format!(
+            "window.__GATEWAY_URL__ = {}; window.location.reload();",
+            serde_json::to_string(&url).unwrap_or_default()
+        ));
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -251,6 +331,9 @@ pub fn run() {
             startup_error,
             gateway_stderr,
             open_project,
+            secret_status,
+            set_secret,
+            delete_secret,
         ])
         .setup(|app| {
             // T9 — links delivered while the app is running (macOS) come
@@ -310,7 +393,7 @@ pub fn run() {
                     );
                 };
 
-                match Supervisor::start(&binary, &project) {
+                match Supervisor::start(&binary, &project, &secrets::env_overrides()) {
                     Ok(sup) => {
                         let url = sup.url.clone();
                         log::info!("gateway listening on {url}");

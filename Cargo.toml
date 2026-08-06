@@ -49,7 +49,7 @@ tempfile = "3"
 reqwest = { version = "0.13", features = ["json", "rustls"] }
 
 # Configuration & secrets
-keyring-core = "1.0"
+# Keychain: see the per-target `keyring` entries near the bottom of this file.
 dotenvy = "0.15"
 dirs = "6"
 
@@ -86,3 +86,23 @@ opt-level = 1
 # return this for notifications instead of 202 Accepted).
 [patch.crates-io]
 rmcp = { path = "patches/rmcp-1.6.0" }
+
+# OS keychain.
+#
+# `keyring`, not `keyring-core`. keyring-core is the abstract half and ships
+# only `mock` and `sample` stores — with it every `Entry::new` failed with
+# "No default store has been set", so the keychain never worked at all and
+# `.env` was the only path that did. keyring 3.x bundles the real platform
+# backends.
+#
+# Split per target rather than enabling every backend at once: the Linux
+# feature pulls dbus, which has no business being a macOS build dependency.
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }

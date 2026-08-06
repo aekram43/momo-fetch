@@ -54,6 +54,44 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ API keys in the UI, and the keychain actually works now · 2026-08-06
+
+**B4 was misdiagnosed.** I had recorded it as "nothing calls `set_default_store`"
+and fixed it by degrading the error. The real cause is that the project depends
+on **`keyring-core`**, which is the abstract half of the crate and ships only
+`mock` and `sample` stores — there is no OS backend in it at all. Swapped to
+**`keyring` 3.x** (per-target features, so the Linux D-Bus backend is not a macOS
+build dependency) and the keychain works for the first time.
+
+**The shell owns the keychain; the gateway never touches it.** macOS attaches an
+ACL to each keychain item listing the binaries allowed to read it, so an item
+written by `momo-worker` and read by `momo-fetch` is a cross-binary read — macOS
+prompts, and a spawned child with no UI either confuses the user or hangs. Only
+the shell reads and writes; stored keys reach the gateway as **environment
+variables injected at spawn**. Windows and Linux then behave identically instead
+of each having their own story.
+
+**That inverts precedence, deliberately.** The gateway resolves env → keychain
+and `dotenvy` does not override existing env, so an injected key beats the
+workspace `.env`. In a GUI the thing you typed into the app should be the thing
+it uses. But it has to be *said*: `secret_status` reports `also_in_env_file` per
+provider and the panel explains which one is in effect, because otherwise "I
+changed my key and nothing happened" is unexplainable.
+
+**Write-only by construction.** There is no `get_secret` command. The UI knows
+"set" or "not set" and nothing more, so a key cannot be lifted back out through
+anything that reaches the app. Saving restarts the gateway, because the harness
+resolves secrets while building rather than per request.
+
+**Verified end to end**, with the workspace `.env` moved aside so only the
+keychain could work: app fails with no key anywhere → key stored → gateway
+starts → `openrouter available=true` → a real turn streams `keychain-works`.
+Environment restored and the test keychain item deleted afterwards.
+
+*Note for testing:* store test items with `security add-generic-password -T
+<binary>` or the cross-binary ACL prompt will hang a headless run. The unit test
+uses a per-process account name for the same reason.
+
 ### ✅ Theming — dark / light / auto · 2026-08-06
 
 Spec §6 and Q7 both asked for this; I had shipped dark-only. Now three-way,

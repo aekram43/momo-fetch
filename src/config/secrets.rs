@@ -1,6 +1,6 @@
 /// OS keychain secret management with .env fallback.
 ///
-/// Uses `keyring-core` for secure storage on macOS (Keychain),
+/// Uses `keyring` for secure storage on macOS (Keychain),
 /// Linux (Secret Service/libsecret), and Windows (Credential Manager).
 /// Falls back to environment variables for CI environments.
 
@@ -65,16 +65,14 @@ impl SecretStore {
             return Ok(key);
         }
 
-        // Try OS keychain.
+        // Then the OS keychain.
         //
-        // `keyring-core` needs a concrete store registered before any entry can
-        // be created. When none is (the current state of this binary), every
-        // `Entry::new` fails with "No default store has been set" — which is a
-        // *configuration* fact, not a lookup failure. Reporting it as
-        // `NotFound` keeps availability checks honest (`available: false`) and
-        // points the user at the env var that actually works, instead of
-        // surfacing an opaque keychain error through the API.
-        let entry = match keyring_core::Entry::new(SERVICE_NAME, provider) {
+        // A keychain that is unavailable — no backend on this platform, a
+        // locked login keyring, a headless box with no D-Bus — is reported as
+        // `NotFound` rather than as an error. It is not a lookup failure, and
+        // the useful thing to tell the user is which env var to set, not that
+        // some keyring API returned a code.
+        let entry = match keyring::Entry::new(SERVICE_NAME, provider) {
             Ok(entry) => entry,
             Err(e) => {
                 tracing::debug!(
@@ -90,7 +88,7 @@ impl SecretStore {
 
         match entry.get_password() {
             Ok(key) => Ok(key),
-            Err(keyring_core::Error::NoEntry) => Err(SecretError::NotFound {
+            Err(keyring::Error::NoEntry) => Err(SecretError::NotFound {
                 provider: provider.to_string(),
                 env_var,
             }),
@@ -101,9 +99,14 @@ impl SecretStore {
     }
 
     /// Store a secret in the OS keychain.
+    ///
+    /// Note the asymmetry with [`get`]: a value written here is only *used* if
+    /// no environment variable shadows it, because env is checked first. A UI
+    /// that saves a key must say so when a shadow exists, or the user changes
+    /// the key and nothing happens.
     pub fn set(provider: &str, key: &str) -> Result<(), SecretError> {
         let entry =
-            keyring_core::Entry::new(SERVICE_NAME, provider).map_err(|e| {
+            keyring::Entry::new(SERVICE_NAME, provider).map_err(|e| {
                 SecretError::KeyringError(format!("Failed to create keychain entry: {e}"))
             })?;
 
@@ -117,14 +120,14 @@ impl SecretStore {
     /// Delete a secret from the OS keychain.
     pub fn delete(provider: &str) -> Result<(), SecretError> {
         let entry =
-            keyring_core::Entry::new(SERVICE_NAME, provider).map_err(|e| {
+            keyring::Entry::new(SERVICE_NAME, provider).map_err(|e| {
                 SecretError::KeyringError(format!("Failed to create keychain entry: {e}"))
             })?;
 
         entry
             .delete_credential()
             .map_err(|e| match e {
-                keyring_core::Error::NoEntry => SecretError::NotSet {
+                keyring::Error::NoEntry => SecretError::NotSet {
                     provider: provider.to_string(),
                 },
                 _ => SecretError::KeyringError(format!(
@@ -150,7 +153,7 @@ impl SecretStore {
             }
 
             let in_env = std::env::var(env_var).is_ok();
-            let in_keychain = keyring_core::Entry::new(SERVICE_NAME, provider)
+            let in_keychain = keyring::Entry::new(SERVICE_NAME, provider)
                 .and_then(|e| e.get_password())
                 .is_ok();
 

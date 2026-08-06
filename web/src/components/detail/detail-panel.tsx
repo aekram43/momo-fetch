@@ -2,6 +2,7 @@
 
 import { FilesTab } from "@/components/detail/files-tab";
 import { MemoryTab } from "@/components/detail/memory-tab";
+import { SecretsTab } from "@/components/detail/secrets-tab";
 import { SettingsTab } from "@/components/detail/settings-tab";
 import { Hint, PanelSection } from "@/components/shared/panel-section";
 import { ToolCallCard } from "@/components/chat/tool-call-card";
@@ -72,6 +73,7 @@ export function DetailPanel() {
 
       <MemoryTab />
       <FilesTab />
+      <SecretsTab />
       <SettingsTab />
     </aside>
   );
