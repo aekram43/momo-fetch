@@ -185,9 +185,13 @@ pub async fn v2_provider_models(
 
     match fetch_models(&provider).await {
         Ok(mut models) => {
+            // Front, not sorted in: providers return their catalogue in an
+            // order that means something — OpenRouter leads with the popular
+            // models — and the picker pads its short list from the head of it.
+            // Re-sorting only in this branch would make that padding depend on
+            // whether the current model happened to be listed.
             if !models.iter().any(|m| *m == current) {
-                models.push(current);
-                models.sort();
+                models.insert(0, current);
             }
             if let Ok(mut c) = cache().lock() {
                 c.insert(

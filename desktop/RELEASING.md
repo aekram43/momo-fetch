@@ -88,10 +88,12 @@ remove the first-launch friction; they are not prerequisites for shipping.
 
 ```bash
 cd web && npm run build:desktop      # basePath "" — Tauri serves at /
-cargo build --release                # from the repo root
-cp target/release/momo-fetch desktop/src-tauri/binaries/
 cd desktop/src-tauri && cargo tauri build --bundles app
 ```
+
+`beforeBuildCommand` rebuilds `momo-fetch` and stages it into `binaries/`, so the
+bundled gateway always matches the tree. Do not stage it by hand — that was the
+old flow and it shipped a stale gateway.
 
 **`build:desktop`, not `build`.** The gateway serves the UI at `/ui` and needs
 `basePath: "/ui"`; Tauri serves it at `/` and must not have one. Use the wrong

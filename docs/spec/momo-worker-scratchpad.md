@@ -54,6 +54,40 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 
 Newest first. One entry per work package, added on completion.
 
+### ✅ Model panel: two dropdowns, short list · 2026-08-06
+
+**Provider and model are one decision made twice, so they read as two stacked
+controls now.** The panel used to list all seven providers as rows with the
+model picker nested under whichever was active — the two choices sat at
+different levels and the section ran ten rows tall. Now: a provider select, then
+a model control beneath it, in the order the choices are made.
+
+**The two controls are deliberately not the same.** Seven providers is a native
+`<select>` — free keyboard and screen-reader behaviour. Three hundred models is
+not; a select there is a scrollbar with no way in. Control follows the size of
+the set, not a wish for symmetry.
+
+**The model list shows five rows until you type**: the current model, then the
+four this browser switched to most recently (`localStorage`), padded from the
+head of the provider's catalogue on a fresh install. Typing opens all 340. A
+wall of alphabetised model IDs is not a choice offered, it is a search problem
+handed over. Recents are local view state — never the current model, which
+always comes from `/health` per F28.
+
+**Two bugs found while verifying, both fixed:**
+
+- **The logo 404'd at `/ui`.** The UI uses relative asset URLs on purpose — the
+  one form that works both under the gateway at `/ui` and under Tauri at `/` —
+  but a browser resolves them against the last path segment, so from `/ui`
+  (no trailing slash) `momo-mark-64.png` became `/momo-mark-64.png`. The gateway
+  now 307s `/ui` → `/ui/`. Temporary, not permanent: a cached 308 on a locally
+  served UI is a nasty thing to debug for the sake of one localhost round trip.
+- **The desktop bundle staged its gateway by hand and it went stale.** The app
+  shipped a UI calling `/v2/providers/{p}/models` beside a gateway seven hours
+  older with no such route — working in the browser, 404 in the app, nothing on
+  screen to say the halves differed. `beforeBuildCommand` now rebuilds and
+  copies the gateway during `cargo tauri build`.
+
 ### ✅ Model picker — finishing F13 · 2026-08-06
 
 **I had marked F13 done with only half of it built.** The spec says "provider →

@@ -313,6 +313,27 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
             project_path.join(configured)
         }
     };
+    /// Redirect a bare `/ui` to `/ui/`; pass everything else through.
+    ///
+    /// Reads `OriginalUri` because the path a nested service sees has had its
+    /// prefix stripped — by then `/ui` and `/ui/` are indistinguishable, which
+    /// is precisely the distinction that matters here.
+    async fn canonicalise_ui_path(
+        req: axum::extract::Request,
+        next: middleware::Next,
+    ) -> axum::response::Response {
+        use axum::response::IntoResponse;
+        let path = req
+            .extensions()
+            .get::<axum::extract::OriginalUri>()
+            .map(|u| u.0.path().to_string())
+            .unwrap_or_else(|| req.uri().path().to_string());
+        if path == "/ui" {
+            return axum::response::Redirect::temporary("/ui/").into_response();
+        }
+        next.run(req).await
+    }
+
     if ui_dir.is_dir() {
         use tower_http::services::{ServeDir, ServeFile};
         // SPA fallback: client-side routes like /ui/settings have no file on
@@ -320,7 +341,22 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
         // router take over. Without this, a refresh on any sub-route 404s.
         let index = ui_dir.join("index.html");
         let serve = ServeDir::new(&ui_dir).fallback(ServeFile::new(&index));
-        public = public.nest_service("/ui", serve);
+        public = public
+            .nest_service("/ui", serve)
+            // Canonicalise `/ui` to `/ui/`.
+            //
+            // Both already served the page, but a browser resolves relative
+            // URLs against the last path segment: from `/ui` the logo's
+            // `momo-mark-64.png` resolves to `/momo-mark-64.png` and 404s, while
+            // from `/ui/` it correctly becomes `/ui/momo-mark-64.png`. The UI
+            // uses relative asset URLs on purpose — they are the one form that
+            // works both here and under Tauri, which serves the same bundle at
+            // `/` — so the mount point has to end in a slash.
+            //
+            // Temporary rather than permanent: a 308 is cached hard by browsers,
+            // and on a locally served UI a stale redirect is a confusing thing
+            // to debug for the sake of one round trip on localhost.
+            .layer(middleware::from_fn(canonicalise_ui_path));
         tracing::info!("🖥️  Serving UI from {} at /ui", ui_dir.display());
     } else {
         // Not an error: the gateway is useful headless, and the frontend may

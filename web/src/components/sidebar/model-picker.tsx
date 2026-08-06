@@ -8,6 +8,11 @@ import {
   refreshProviderModels,
   switchModel,
 } from "@/lib/api-client";
+import {
+  loadRecentModels,
+  recordRecentModel,
+  shortlistModels,
+} from "@/lib/recent-models";
 import { useUiStore } from "@/stores/ui-store";
 import { useToastStore } from "@/stores/toast-store";
 import type { ProviderModels } from "@/lib/types";
@@ -21,8 +26,10 @@ import type { ProviderModels } from "@/lib/types";
  * the select is replaced by a text field: type the name, switch, done. The
  * provider is the authority on whether the name is valid either way.
  *
- * OpenRouter returns several hundred models, so the list is filterable rather
- * than a bare `<select>` a user has to scroll.
+ * OpenRouter returns several hundred models, so the closed list is five rows —
+ * the current model and the four this browser reached for most recently — and
+ * the full catalogue appears as soon as a filter is typed. Showing all of them
+ * up front is not a choice offered, it is a search problem handed over.
  */
 export function ModelPicker({
   provider,
@@ -36,6 +43,7 @@ export function ModelPicker({
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [recent, setRecent] = useState<string[]>([]);
   const push = useToastStore((s) => s.push);
   const bump = useUiStore((s) => s.bumpServerState);
 
@@ -62,6 +70,7 @@ export function ModelPicker({
     setBusy(true);
     try {
       await switchModel(model.trim());
+      recordRecentModel(provider, model.trim());
       bump();
       setOpen(false);
       setFilter("");
@@ -90,22 +99,34 @@ export function ModelPicker({
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        className="mt-1 w-full truncate rounded border border-rule px-1.5 py-1 text-left font-mono text-[10px] text-dim transition-colors hover:text-ink"
+        onClick={() => {
+          // Read history here rather than in an effect: opening is an event,
+          // and React 19 rejects a synchronous setState from an effect body.
+          setRecent(loadRecentModels(provider));
+          setOpen(true);
+        }}
+        className="flex w-full items-center gap-1 rounded border border-rule bg-void py-1 pl-1.5 pr-1.5 text-left font-mono text-[11px] text-ink transition-colors hover:border-signal"
         title={current ?? undefined}
       >
-        {current ?? "choose a model"} ▾
+        <span className="min-w-0 flex-1 truncate">
+          {current ?? "choose a model"}
+        </span>
+        <span aria-hidden className="shrink-0 text-[10px] text-faint">
+          ▾
+        </span>
       </button>
     );
   }
 
-  const matches =
-    data?.models.filter((m) =>
-      m.toLowerCase().includes(filter.trim().toLowerCase()),
-    ) ?? [];
+  const query = filter.trim().toLowerCase();
+  // Empty filter shows the shortlist; typing opens the whole catalogue.
+  const matches = query
+    ? (data?.models.filter((m) => m.toLowerCase().includes(query)) ?? [])
+    : shortlistModels(data?.models ?? [], current, recent);
+  const hidden = query ? 0 : (data?.models.length ?? 0) - matches.length;
 
   return (
-    <div className="mt-1 rounded border border-rule bg-raised p-1.5">
+    <div className="rounded border border-rule bg-raised p-1.5">
       {!data ? (
         <p className="text-[10px] text-faint">Loading models…</p>
       ) : data.available ? (
@@ -140,9 +161,14 @@ export function ModelPicker({
               <li className="px-1.5 py-1 text-[10px] text-faint">No match.</li>
             )}
           </ul>
-          {matches.length > 200 && (
+          {query && matches.length > 200 && (
             <p className="mt-1 text-[10px] text-faint">
               Showing 200 of {matches.length}. Keep typing to narrow it.
+            </p>
+          )}
+          {hidden > 0 && (
+            <p className="mt-1 text-[10px] text-faint">
+              {hidden} more. Type to search them.
             </p>
           )}
         </>
