@@ -3,8 +3,8 @@
 > **Purpose:** Working state for the MOMO WORK build so another agent can continue without re-deriving anything.
 > **Spec:** [`docs/spec/momo-worker.md`](./momo-worker.md) — read §0 (Code Audit) first; it is the load-bearing part.
 > **Dispatch:** spec **§12** is the work plan (packages, model routing, waves). §9 below is now just a pointer into it.
-> **Last updated:** 2026-08-05 · branch `dev` (0.9.1)
-> **Build state:** `cargo check --all-targets` clean (warnings only) · rust **305 passed** · web **22 passed**, tsc + eslint clean
+> **Last updated:** 2026-08-06 · branch `dev` (0.9.1)
+> **Build state:** rust **308 passed** · web **31 passed** · desktop **8 passed**, tsc + eslint clean
 
 ---
 
@@ -13,7 +13,7 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**Theming · dev · 2026-08-06 · rust 305 · desktop 8 · web 24 · all clean · 🎉 ครบทุกอย่าง**
+**UX pass (settings dialog · customization · permissions badge) · dev · 2026-08-06 · rust 308 · desktop 8 · web 31 · all clean · 🎉 ครบทุกอย่าง**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
@@ -44,7 +44,9 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 | ✅ | cost parity (G10 acceptance) | พิสูจน์แล้วบน paid model (zai) ทั้ง 3 path ตรงสูตรเป๊ะ |
 | ✅ | `/v1/sessions` `event_count: 0` | เปลี่ยนเป็น `Option` → `null` (ไม่รู้) แทนที่จะโกหกว่า 0 |
 
-**Human item เดียวที่เหลือ:** code-signing (T13 → T11) อยู่ ~สัปดาห์ 5 ไม่บล็อกอะไรตอนนี้ — build unsigned จาก T10 ใช้งานได้ปกติ
+**เหลืองานเดียวจริงๆ: T10 (CI build matrix)** — ไม่บล็อกการใช้งาน เพราะ distribution คือ build จาก source อยู่แล้ว
+
+**งาน UX หลัง Phase 2** ไม่ได้ออก task ID ใหม่ ดูที่ §0 wave log: model picker (ปิด F13 ที่ทำไม่ครบ) · settings dialog · customization group · permissions badge · `/ui/` redirect · beforeBuildCommand
 
 ⚠️ **`ZAI_API_KEY` หลุดเข้า terminal transcript ระหว่าง session นี้ — ควร rotate**
 

@@ -996,7 +996,9 @@ Absent from v1 and non-optional, since this UI exposes shell execution and files
 2. **CORS is same-origin by default** — *changed after the WP-2 security review.* `cors_origins` now defaults to `[]`, and the gateway **refuses to start** on `["*"]` unless `auth.enabled` is true. The old permissive default plus the new `/v2` surface meant any page the user merely visited could read the working tree through `/v2/files`, flip permission mode to `yolo`, and run shell commands — loopback is no defence, because the browser is already inside it. The bundled UI at `/ui` is same-origin and needs no entry. Note that `permissive` + bearer auth is still a mitigation only if the token isn't stored where a hostile origin can read it — keep it in memory, not `localStorage`.
 3. **Bearer token storage.** In Tauri, keep the token in the Rust side and inject per-request; in the browser, in-memory only, re-entered on reload.
 4. **Approval is the security boundary.** Everything in [2.4](#24-approval-flow-corrected) matters: sticky-by-tool-name approval means one "Approve" on `shell_exec` disarms confirmation for the rest of the process. The dialog must say so, and G7 must let the user inspect and clear `approved_tools`.
-5. **`yolo` mode** (`ToolConfirmationPolicy::Never`) executes everything unattended. Behind a confirm-once dialog in F17, and shown persistently in the status bar while active.
+5. **`yolo` mode** (`ToolConfirmationPolicy::Never`) executes everything unattended. Behind a confirm-once dialog in F17, and shown persistently in the status bar while active — *implemented*: `● yolo · nothing asks`, in the halt colour, at every breakpoint.
+
+6. **Standing approvals are shown, not just stored.** Approval is per tool *name* for the life of the process (C2), so one grant on `shell_exec` silences every later shell command — including in sessions opened afterwards. The status bar carries `● N auto-run` whenever the set is non-empty, clickable through to the list and a revoke. A standing grant that is only visible inside a settings dialog is a grant nobody checks.
 6. **File endpoints** are the classic traversal target — see G6's hardening list. Symlinks that resolve outside root, `.gitignore`d secrets, and 404-vs-403 information leaks are all in scope.
 7. **Deep links** (`momo://open?path=…`) re-root the sandbox from untrusted input. Validate and confirm.
 8. **Rate limiting exists** (`src/gateway/auth.rs`) but is keyed per API key; with auth disabled there is no limit. Fine on loopback, dangerous otherwise.
@@ -1070,7 +1072,7 @@ This section is the dispatch document. §1–§11 say *what* to build; this says
 
 Single source of truth for task state. Update this table, not the individual task sections.
 
-**As of WP-5 · 2026-08-05 · pushed to `origin/dev` · `cargo test` 303 passed · web 22 passed**
+**As of post-Phase-2 UX work · 2026-08-06 · pushed to `origin/dev` · `cargo test` 308 passed · web 31 passed**
 
 > The same numbers are mirrored at the top of [`momo-worker-scratchpad.md`](./momo-worker-scratchpad.md) for a quick look. Update both together.
 
@@ -1083,9 +1085,20 @@ Single source of truth for task state. Update this table, not the individual tas
 | **Phase 1** (gateway + frontend) | **43** | **0** | ██████████████████ **100%** ✅ |
 | **Whole project** | **54** | 0 | ██████████████████ **100%** ✅ |
 
-**The gateway is complete.** Every G-task is built and wire-verified — streaming, approvals, concurrency, cost, sandboxed file access, static serving. Phase 1 is 33% done by task count; everything still open is frontend, which is the larger half of the work and has not been started.
+**Both phases are complete and running.** Gateway, web UI and the Tauri shell are built, wired and verified against a live agent. What has continued since is UX work on top of a finished feature set, tracked in the scratchpad's wave log rather than as new task IDs — it changes how the same capabilities are reached, not what exists.
 
-**Three things are outstanding and easy to lose track of:** the `security-review` gate on WP-2 has not been run, cost parity cannot be measured on a free model, and `GET /v1/sessions` reports `event_count: 0` for every session.
+Landed after the ledger's task list closed:
+
+| Change | Why it is here |
+|---|---|
+| `GET`/`DELETE /v2/providers/{p}/models` + model picker | **F13 was marked done with half of it built** — provider switching shipped, `switchModel()` had no caller. The catalogue is queried from the provider, never baked in |
+| Settings dialog (⚙ / `Cmd+,`) | Models, API keys, permissions and appearance left the side panels for a modal — see [§6](#6-ui-layout-specification) |
+| Customization group | Agents, tools, memory and files were split across both panels; now one collapsible group in the left rail |
+| Standing-permissions badge | Closes the [§9.5](#9-security-considerations) requirement that `yolo` be shown persistently in the status bar, and surfaces the approved-tools count that was visible only inside a dialog |
+| `/ui` → `/ui/` redirect | Relative asset URLs — the one form that works both under the gateway and under Tauri — resolve wrongly without the trailing slash |
+| `beforeBuildCommand` stages the gateway | The bundled binary was copied by hand and shipped stale: a UI calling an endpoint its own gateway did not have |
+
+**One task is genuinely open: T10, the CI build matrix.** Everything else on the original list is landed, including all three items that were the standing backlog — the `security-review` gate, cost parity, and `event_count`.
 
 #### ✅ Done
 
@@ -1119,15 +1132,19 @@ Single source of truth for task state. Update this table, not the individual tas
 | **F4, F6–F11, F29** core chat | *WP-4* | Full turn works in the browser, incl. the approval round-trip. Cards retire on approval — `call_id` changes across the seam |
 | **F12–F20** management panels | *WP-5* | agents · models · MCP · memory · files · settings · cost · connection · shortcuts |
 | **F21–F28** polish | *WP-6* | toasts · skeletons · responsive drawers · Shiki · file attach · empty states · sounds · prefs |
+| **security-review** gate on WP-2 | *gateway wrap-up* | Ran. Two real findings, both fixed: `cors_origins:["*"]` with auth off was RCE from any visited page (default is now `[]`, and that combination refuses to start); `.gitignore` was read only at the repo root |
+| **Cost parity** (G10 acceptance) | *gateway wrap-up* | Proven on a **paid** model — a free one reads 0 on both sides and proves nothing. Identical prompt accounting (8964 both), both matching the formula. Found on the way: `momo-fetch -p` recorded **nothing** — the spec said "REPL and gateway" and there are three callers |
+| **event_count** | *gateway wrap-up* | `SessionInfo::event_count` is `Option<usize>`, `None` from list — the list query never loaded events, and `0` claimed a fact it had not checked |
+| **F13 completion** + settings dialog + customization group + permissions badge | *2026-08-06* | Post-phase UX work. See the wave log in [`momo-worker-scratchpad.md`](./momo-worker-scratchpad.md) |
 
 #### ⬜ Open
 
-| Task | Owner model | Package | Notes |
-|---|---|---|---|
-| **T10** build pipeline | *WP-9* | CI matrix, macOS ×2 / Windows / Linux, gateway bundled per triple |
+| Task | Package | Notes |
+|---|---|---|
+| **T10** build pipeline | *WP-9* | CI matrix, macOS ×2 / Windows / Linux, gateway bundled per triple. Not blocking: distribution is build-from-source, and `cargo tauri build` now stages the gateway itself |
 | ~~**T11** auto-updater~~ | *out of scope* | Source installs update with `git pull`. Config is present but `active:false` |
 | ~~**T13** code signing~~ | *out of scope* | Not needed for build-from-source — see the note below |
-| **Cost parity** (G10 acceptance) | Sonnet 5 | **WP-1** | the one Wave-0 check still open — was gated on B2, now unblocked. Needs a paid model to be meaningful |
+
 
 > **B3 was misdiagnosed as an approval-path bug. It was a latent thread-affinity race affecting every sandboxed tool call.**
 >

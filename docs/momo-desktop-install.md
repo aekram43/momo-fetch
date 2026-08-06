@@ -104,9 +104,9 @@ key is present. The boot screen names the exact file; it is here:
 | Linux | `~/.local/share/com.createder.momo-worker/workspace/.env` |
 | Windows | `%APPDATA%\com.createder.momo-worker\workspace\.env` |
 
-> **Or set it in the app instead.** The desktop app has an **API keys** panel
-> (right panel, under Settings) that stores keys in the OS keychain — no file
-> editing. It only appears in the desktop app, and it needs the app to start
+> **Or set it in the app instead.** The desktop app has an **API keys** section
+> in Settings (⚙ in the header, or `Cmd+,`) that stores keys in the OS keychain
+> — no file editing. It only appears in the desktop app, and it needs the app to start
 > once first, so if you are stuck at the boot screen use `.env` for the first
 > key and switch later if you prefer.
 
@@ -157,16 +157,57 @@ The default workspace is **not** your home directory — it is the dedicated
 folder above. That is deliberate: the project root *is* the agent's sandbox, so
 a fresh install should not be able to read everything you own.
 
-To point it at real work, use **Files → open another project…** in the right
-panel. It confirms first, because re-rooting moves the sandbox, the memory vault
-and the session history together, and restarts the agent.
-
-**Appearance** is in the same panel: dark, light, or auto (follows the OS, and
-keeps following it if you change the system setting while the app is open).
+To point it at real work, use **Customization → Files → open another project…**
+in the left panel. It confirms first, because re-rooting moves the sandbox, the
+memory vault and the session history together, and restarts the agent.
 
 The app starts in **strict** permission mode: it asks before anything that
 changes your machine. When it asks, read the dialog — approving a tool grants it
 for the rest of the session, by tool name, and the dialog says so.
+
+### Finding your way around
+
+Three regions, and each answers one question.
+
+| Where | Question it answers |
+|-------|--------------------|
+| **Left panel** | What does this agent have to work with? Sessions, plus a collapsible **Customization** group over agents, tools, memory and files. |
+| **Right panel** | What is it doing *right now*? The current turn's tool calls, and the files this turn wrote. |
+| **Settings** (⚙ / `Cmd+,`) | How is it set up? Models, API keys, permissions, appearance. |
+
+**Models** — a provider dropdown, then a model list for that provider. The model
+list is queried from the provider itself, so it is what your account can
+actually reach rather than a list baked into the app. It shows five entries —
+the current model plus the four you last switched to — and the whole catalogue
+as soon as you type. Providers with no key stay in the list, disabled, labelled
+with why.
+
+**Appearance** — dark, light, or auto (follows the OS, and keeps following it if
+you change the system setting while the app is open). The sound toggle is here
+too; it is off by default.
+
+**The status bar tells you what is standing.** Bottom right, next to the turn
+phase:
+
+- `● N auto-run` — N tools will run without asking. Click it to see which, or
+  revoke them.
+- `● yolo · nothing asks` — you are in yolo. Nothing will be confirmed at all.
+
+Nothing appears there when nothing is granted. **The badge exists because
+approval is by tool name and lasts until you quit the app** — one "Approve" on
+`shell_exec` means every later shell command runs silently, in this session and
+any session you open afterwards. Quitting clears it; nothing is written to disk.
+
+### Keyboard
+
+| Key | Action |
+|-----|--------|
+| `Cmd/Ctrl+,` | Settings |
+| `Cmd/Ctrl+B` | Toggle the left panel |
+| `Cmd/Ctrl+J` | Toggle the right panel |
+| `Cmd/Ctrl+N` | New session |
+| `Cmd/Ctrl+O` | Open a project |
+| `Esc` | Interrupt the running turn — or close Settings, or deny a pending approval. The approval dialog owns it first, then Settings; only then does it reach the agent. |
 
 ---
 
@@ -174,10 +215,15 @@ for the rest of the session, by tool name, and the dialog says so.
 
 ```bash
 git pull
-cargo build --release
 cd web && npm ci && npm run build:desktop && cd ..
 cd desktop/src-tauri && cargo tauri build
 ```
+
+`cargo tauri build` rebuilds the gateway and stages it into the bundle itself,
+so the app can never ship a gateway older than the source you built it from.
+That copy used to be a manual step and it went stale exactly as you would
+expect — a UI calling an endpoint the bundled gateway did not have yet, working
+in the browser and 404ing in the app.
 
 There is no auto-updater. For a source install `git pull` *is* the update
 mechanism, and it is more transparent than a background download.
@@ -212,6 +258,13 @@ Section 3. The message includes the exact `.env` path to create.
 The web UI was built with `npm run build` instead of `npm run build:desktop`.
 Rebuild with the right one and rebuild the app.
 
+**The model list says it could not list them.**
+Not a failure you have to fix to keep working. The catalogue is fetched from the
+provider, and no key, an unreachable provider or one with no catalogue API all
+end up here — the reason is printed, and the picker turns into a text field so
+you can type a model name and carry on. `refresh` re-asks; the answer is cached
+for 30 minutes.
+
 **A UI change does not appear after rebuilding.**
 The frontend was not re-embedded — see the note in section 5.
 `touch desktop/src-tauri/src/lib.rs` and rebuild.
@@ -244,7 +297,13 @@ cd .. && cargo run --release -- --gateway
 ```
 
 Then open <http://localhost:3000/ui>. The gateway serves the UI from its own
-origin, so nothing else needs configuring.
+origin, so nothing else needs configuring, and it redirects to `/ui/` — the
+trailing slash matters, because assets are referenced relatively so that one
+build works both here and at `/` inside the app.
+
+Two things are desktop-only, and the browser says so rather than hiding them:
+**API keys** (keychain storage needs the shell — use `.env` in a browser) and
+**open another project**.
 
 Do **not** widen `cors_origins` to `"*"` to make a separate dev server work
 against it. With authentication off, that lets any website you visit read your

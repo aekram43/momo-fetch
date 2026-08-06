@@ -1385,11 +1385,36 @@ momo-fetch --gateway --project ~/my-app --permission auto
 
 # Start with a specific provider/model
 momo-fetch --gateway --provider anthropic --model claude-sonnet-4-20250514
+
+# Let the OS pick a free port, and print it on startup
+momo-fetch --gateway --gateway-port 0
 ```
 
 The gateway starts the full harness (tools, memory vault, MCP servers, skills) and wraps it in an HTTP API.
 
+| Flag | What it does |
+|------|--------------|
+| `--gateway-port <PORT>` | Overrides the configured port. `0` lets the OS choose; the chosen port is printed as `MOMO_GATEWAY_LISTENING <url>`. |
+| `--gateway-bind <IP>` | Interface to bind. **Anything other than loopback requires `auth.enabled`** — the gateway refuses to start otherwise, because it can execute shell commands. |
+| `--gateway-allow-origin <ORIGIN>` | Grants one CORS origin for this run only, without editing `gateway.json`. This is how the desktop app admits its own webview (`tauri://localhost`). |
+| `--project <DIR>` | Roots the sandbox. Required when the launcher's working directory is not the project — a macOS `.app` starts in `/`. |
+
+### The bundled web UI
+
+If a frontend build exists (`web/out` by default, `ui_dir` in `gateway.json`), the gateway serves it at **`/ui`** on its own origin. Same origin means it needs no CORS entry.
+
+```bash
+cd web && npm run build      # basePath /ui — the gateway build
+momo-fetch --gateway         # → http://localhost:3000/ui/
+```
+
+`/ui` redirects to `/ui/`. The trailing slash is load-bearing: assets are referenced relatively so the same bundle works under the gateway at `/ui` *and* under the desktop shell at `/`, and a browser resolves relative URLs against the last path segment.
+
+Building for the desktop app is a different command — `npm run build:desktop`, which sets no basePath. Use the wrong one and every asset 404s. See [`docs/momo-desktop-install.md`](momo-desktop-install.md).
+
 ### Endpoints
+
+**v1 — OpenAI-compatible.** Stable surface for scripts, SDKs and the Discord bot.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -1402,7 +1427,52 @@ The gateway starts the full harness (tools, memory vault, MCP servers, skills) a
 | `POST` | `/v1/sessions/:id/compact` | Compact (summarize) a session |
 | `GET` | `/v1/models` | List current model info |
 | `GET` | `/v1/cost` | Cost tracking for current session |
-| `GET` | `/health` | Health check |
+| `GET` | `/health` | Health check — **unauthenticated**, so a readiness probe works before a key is configured. Exposes no session content. |
+
+**v2 — the rich surface.** What the web UI and desktop app are built on: tool-level streaming, an approval round trip, and live control over provider, model, agent and permissions.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v2/chat/stream` | Streaming turn with per-tool events (see the v2 event list below) |
+| `POST` | `/v2/chat/approve` | Approve a pending tool call |
+| `POST` | `/v2/chat/deny` | Deny a pending tool call |
+| `POST` | `/v2/chat/interrupt` | Stop the running turn |
+| `GET` | `/v2/agents` | Configured agent personalities |
+| `POST` | `/v2/agents/switch` | Switch the active agent |
+| `POST` | `/v2/agents/default` | Return to the default agent |
+| `GET` | `/v2/providers` | Providers, with availability and *why* an unavailable one is unavailable |
+| `GET` | `/v2/providers/:provider/models` | **Model catalogue, queried live from the provider.** Cached 30 minutes |
+| `DELETE` | `/v2/providers/:provider/models` | Drop the cached catalogue so the next read refetches |
+| `POST` | `/v2/switch-model` | Change model within the current provider |
+| `POST` | `/v2/switch-provider` | Change provider |
+| `POST` | `/v2/switch` | Change both at once |
+| `GET` | `/v2/settings` | Permission mode + the approved-tools set |
+| `POST` | `/v2/settings/permission` | Set `strict` \| `auto` \| `yolo` |
+| `DELETE` | `/v2/settings/approved-tools` | Revoke every standing approval |
+| `GET` | `/v2/mcp/servers` | MCP server status |
+| `GET` | `/v2/memory/search` | Search the memory vault |
+| `GET` | `/v2/memory/stats` | Vault counts |
+| `GET` | `/v2/files` | Read one sandboxed file |
+| `GET` | `/v2/files/tree` | List a sandboxed directory |
+| `GET` | `/v2/sessions/:id/messages` | Replay a session's messages |
+
+#### Model catalogue
+
+`/v2/providers/:provider/models` asks the provider itself rather than returning a baked-in list, which would be wrong the week after it was written. OpenRouter, Ollama, Anthropic and Gemini each have their own shape; everything else is queried as OpenAI-compatible `GET {base}/models`.
+
+**A failure here is a `200`, not an error.** No key, provider unreachable, or no catalogue API at all comes back as `available: false` with the reason and the model currently in use, so a UI can fall back to letting someone type a name. A directory lookup failing must never leave you unable to change models.
+
+```bash
+curl http://localhost:3000/v2/providers/openrouter/models
+# {"provider":"openrouter","models":[...],"available":true,"cached":false,"error":null}
+
+curl http://localhost:3000/v2/providers/ollama/models
+# {"provider":"ollama","models":["llama3.2"],"available":false,...,"error":"Ollama is not running."}
+```
+
+#### Files are sandboxed, and denials are 403
+
+`/v2/files` and `/v2/files/tree` refuse anything outside the project root, anything matched by `.agentignore` or any `.gitignore` between the root and the file, and an unconditional deny-list of secret-shaped paths (`.env`, keys, credentials) that applies even if you un-ignore them. Denials return **403, never 404** — a 404 would leak whether the path exists.
 
 ### Chat Completions (Non-Streaming)
 
