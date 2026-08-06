@@ -89,8 +89,9 @@ export function ModelSelector() {
       )}
       {data?.providers.some((p) => !p.available && p.name !== "ollama") && (
         <p className="mt-1.5 text-[10px] leading-relaxed text-faint">
-          Greyed providers need a key in{" "}
-          <code className="font-mono">.env</code>. The OS keychain is not wired.
+          Greyed providers need a key. Add one in{" "}
+          <span className="text-dim">API keys</span>, or set it in{" "}
+          <code className="font-mono">.env</code>.
         </p>
       )}
       {conflict && (
