@@ -61,14 +61,16 @@ npm ci
 npm run build:desktop
 cd ..
 
-# 3. stage the gateway so the app bundles it
-mkdir -p desktop/src-tauri/binaries
-cp target/release/momo-fetch desktop/src-tauri/binaries/     # .exe on Windows
-
-# 4. the app
+# 3. the app — this rebuilds the gateway and stages it automatically
 cd desktop/src-tauri
 cargo tauri build
 ```
+
+Step 3 runs `cargo build --release --bin momo-fetch` and copies the result into
+`desktop/src-tauri/binaries/` before bundling, so the app can never ship a
+gateway older than the source you built it from. That copy used to be a manual
+step, and it went stale in exactly the way you would expect: a UI calling an
+endpoint the bundled gateway did not have yet.
 
 > **`npm run build:desktop`, not `npm run build`.**
 > Next.js writes absolute asset URLs, so the bundle has to know where it will be
@@ -174,7 +176,6 @@ for the rest of the session, by tool name, and the dialog says so.
 git pull
 cargo build --release
 cd web && npm ci && npm run build:desktop && cd ..
-cp target/release/momo-fetch desktop/src-tauri/binaries/
 cd desktop/src-tauri && cargo tauri build
 ```
 

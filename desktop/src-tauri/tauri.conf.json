@@ -5,7 +5,8 @@
   "identifier": "com.createder.momo-worker",
   "build": {
     "frontendDist": "../../web/out",
-    "devUrl": "http://localhost:3000"
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": "sh -c 'cd \"$(git rev-parse --show-toplevel)\" && cargo build --release --bin momo-fetch && cp target/release/momo-fetch desktop/src-tauri/binaries/'"
   },
   "app": {
     "windows": [
