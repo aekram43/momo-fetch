@@ -102,6 +102,11 @@ pub struct StreamDelta {
 pub struct SessionInfo {
     pub id: String,
     pub created_at: String,
+    /// Human-readable label, or `null` for an untitled session.
+    ///
+    /// `null` is not an error state: the UI falls back to the id, which is what
+    /// every session showed before titles existed.
+    pub title: Option<String>,
     pub event_count: Option<usize>,
 }
 

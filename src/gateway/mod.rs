@@ -288,6 +288,10 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
             "/v2/sessions/{session_id}/messages",
             get(v2_handlers::v2_session_messages),
         )
+        .route(
+            "/v2/sessions/{session_id}",
+            axum::routing::patch(v2_handlers::v2_session_rename),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), auth::auth_middleware));
 
     // `/health` stays unauthenticated: it is the readiness probe the desktop

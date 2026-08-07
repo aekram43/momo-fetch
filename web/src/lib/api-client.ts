@@ -273,6 +273,17 @@ export const listSessions = () =>
 export const createSession = () =>
   post<{ session_id: string }>("/v1/sessions");
 
+/** Rename a session. The gateway trims and clips; it returns what it kept. */
+export const renameSession = (id: string, title: string) =>
+  request<{ id: string; title: string | null }>(
+    `/v2/sessions/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    },
+  );
+
 export const deleteSession = (id: string) =>
   request<{ deleted: boolean }>(`/v1/sessions/${encodeURIComponent(id)}`, {
     method: "DELETE",

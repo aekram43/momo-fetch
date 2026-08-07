@@ -1458,6 +1458,7 @@ Building for the desktop app is a different command — `npm run build:desktop`,
 | `GET` | `/v2/files` | Read one sandboxed file |
 | `GET` | `/v2/files/tree` | List a sandboxed directory |
 | `GET` | `/v2/sessions/:id/messages` | Replay a session's messages |
+| `PATCH` | `/v2/sessions/:id` | Rename a session — `{"title": "..."}` |
 
 #### Model catalogue
 
@@ -1471,6 +1472,24 @@ curl http://localhost:3000/v2/providers/openrouter/models
 
 curl http://localhost:3000/v2/providers/ollama/models
 # {"provider":"ollama","models":["llama3.2"],"available":false,...,"error":"Ollama is not running."}
+```
+
+#### Session titles
+
+`GET /v1/sessions` returns a `title` for each session. The gateway names a
+session from the first line of its first prompt, clipped to 60 characters; a
+title set through `PATCH /v2/sessions/{id}` is **locked**, so auto-naming never
+overwrites a name a person chose. `title` is `null` for a session that has never
+had a turn — clients should fall back to the id rather than invent a label.
+
+The title lives in the session's own state, so listing it costs no extra query.
+One consequence worth knowing: writing a title touches the session, so a rename
+moves that session to the top of the most-recently-updated ordering.
+
+```bash
+curl -X PATCH http://localhost:3000/v2/sessions/$SID \
+  -H 'content-type: application/json' -d '{"title":"refactor the parser"}'
+# {"id":"...","title":"refactor the parser"}
 ```
 
 #### Files are sandboxed, and denials are 403

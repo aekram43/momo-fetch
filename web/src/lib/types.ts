@@ -294,6 +294,15 @@ export interface SessionInfo {
   id: string;
   created_at: string;
   /**
+   * Human-readable label, or `null` for an untitled session.
+   *
+   * The gateway names a session from its first prompt, and a title someone
+   * types is locked against that. `null` is the honest answer for a session
+   * that has never had a turn — the UI shows the id, which is what every
+   * session showed before titles existed.
+   */
+  title: string | null;
+  /**
    * `null` from the list endpoint — it is a metadata-only query that does not
    * load events, so no count is available. Render as unknown, never as 0.
    * `GET /v2/sessions/{id}/messages` has the real number.

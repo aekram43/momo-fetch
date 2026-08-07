@@ -3,12 +3,41 @@ use std::path::Path;
 use std::sync::Arc;
 
 use adk_session::{
-    CreateRequest, DeleteRequest, GetRequest, ListRequest, Session, SessionService,
+    CreateRequest, DeleteRequest, Event, GetRequest, ListRequest, Session, SessionService,
     SqliteSessionService,
 };
 
 const APP_NAME: &str = "momo-fetch";
 const DEFAULT_USER: &str = "default-user";
+
+/// Session-state key holding the human-readable title.
+const TITLE_KEY: &str = "momo.title";
+
+/// Session-state flag: the title was typed by a person, so auto-titling must
+/// leave it alone. Without this, the first message of the *next* turn would
+/// silently overwrite a name someone chose.
+const TITLE_LOCKED_KEY: &str = "momo.title_locked";
+
+/// Titles are a sidebar label, not a summary. Long enough to tell two
+/// conversations apart, short enough not to wrap in a 288px rail.
+const TITLE_MAX: usize = 60;
+
+/// First line of `text`, trimmed and clipped to [`TITLE_MAX`].
+///
+/// A prompt is often a paragraph; the first line is almost always the ask.
+/// Clipping mid-word is fine — this is a label, and the full text is one click
+/// away in the transcript.
+pub fn title_from_prompt(text: &str) -> Option<String> {
+    let first = text.lines().find(|l| !l.trim().is_empty())?.trim();
+    if first.is_empty() {
+        return None;
+    }
+    let mut out: String = first.chars().take(TITLE_MAX).collect();
+    if first.chars().count() > TITLE_MAX {
+        out.push('…');
+    }
+    Some(out)
+}
 
 /// Manages session persistence using adk-session SQLite backend.
 ///
@@ -99,6 +128,13 @@ impl SessionManager {
             .map(|s| SessionInfo {
                 id: s.id().to_string(),
                 updated_at: s.last_update_time(),
+                // Free: `SessionService::list` selects the `state` column even
+                // though it skips events, so the title costs no extra query and
+                // there is no N+1 here.
+                title: s
+                    .state()
+                    .get(TITLE_KEY)
+                    .and_then(|v| v.as_str().map(str::to_string)),
                 // Not `s.events().len()` — see the field docs. `list` does not
                 // load events, so that expression is always 0.
                 event_count: None,
@@ -107,6 +143,67 @@ impl SessionManager {
         // Most recently updated first
         infos.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(infos)
+    }
+
+    /// Write a session's title into its persisted state.
+    ///
+    /// The only way to persist state through `SessionService` is a `state_delta`
+    /// on an appended event, which the SQLite backend merges into the sessions
+    /// row. The event carries no content, and `/v2/sessions/{id}/messages` skips
+    /// content-free events, so this never shows up in a transcript. It does add
+    /// one to the event count returned by `get_session` — worth knowing, not
+    /// worth a schema of our own to avoid.
+    async fn write_title(
+        &self,
+        session_id: &str,
+        title: &str,
+        locked: bool,
+    ) -> anyhow::Result<()> {
+        // The invocation id is bookkeeping for a turn; this event is not one, so
+        // it gets a name that says what it is if anyone reads the table.
+        let mut event = Event::new("momo-title");
+        event
+            .actions
+            .state_delta
+            .insert(TITLE_KEY.to_string(), serde_json::json!(title));
+        if locked {
+            event
+                .actions
+                .state_delta
+                .insert(TITLE_LOCKED_KEY.to_string(), serde_json::json!(true));
+        }
+        self.service.append_event(session_id, event).await?;
+        Ok(())
+    }
+
+    /// Set a title chosen by a person. Locks it against auto-titling.
+    pub async fn rename_session(&self, session_id: &str, title: &str) -> anyhow::Result<()> {
+        let title = title.trim();
+        if title.is_empty() {
+            anyhow::bail!("A session title cannot be empty.");
+        }
+        let clipped: String = title.chars().take(TITLE_MAX).collect();
+        self.write_title(session_id, &clipped, true).await
+    }
+
+    /// Give a session a title derived from its first prompt, if it has neither
+    /// a title already nor one a person chose.
+    ///
+    /// Called at the start of a turn. Best-effort by design: a session that
+    /// cannot be titled is a cosmetic problem, and failing a turn over a label
+    /// would be absurd.
+    pub async fn auto_title(&self, session_id: &str, prompt: &str) {
+        let Some(title) = title_from_prompt(prompt) else {
+            return;
+        };
+        let Ok(session) = self.get_session(session_id).await else {
+            return;
+        };
+        let state = session.state();
+        if state.get(TITLE_KEY).is_some() || state.get(TITLE_LOCKED_KEY).is_some() {
+            return;
+        }
+        let _ = self.write_title(session_id, &title, false).await;
     }
 
     /// Delete a session by ID.
@@ -128,6 +225,12 @@ impl SessionManager {
 pub struct SessionInfo {
     pub id: String,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Human-readable label, when the session has one.
+    ///
+    /// `None` means untitled — the UI shows the id, which is what every session
+    /// looked like before titles existed. Never invent one here; an id is
+    /// honest, and a made-up name is worse than a hex string.
+    pub title: Option<String>,
     /// `None` when the count is unknown.
     ///
     /// [`SessionManager::list_sessions`] cannot fill this in: the backing
@@ -200,6 +303,7 @@ mod tests {
         let info = SessionInfo {
             id: "abc-123".to_string(),
             updated_at: chrono::Utc::now(),
+            title: None,
             event_count: Some(5),
         };
         let display = format!("{info}");
@@ -210,6 +314,7 @@ mod tests {
         let unknown = SessionInfo {
             id: "abc-123".to_string(),
             updated_at: chrono::Utc::now(),
+            title: None,
             event_count: None,
         };
         let display = format!("{unknown}");
@@ -251,5 +356,46 @@ mod tests {
         let sessions = mgr.list_sessions().await.unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "persist-test");
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn takes_the_first_non_blank_line() {
+        assert_eq!(
+            title_from_prompt("\n\n  fix the login bug  \nand then deploy"),
+            Some("fix the login bug".to_string())
+        );
+    }
+
+    #[test]
+    fn clips_long_prompts_and_marks_the_cut() {
+        let long = "a".repeat(200);
+        let t = title_from_prompt(&long).unwrap();
+        assert_eq!(t.chars().count(), TITLE_MAX + 1, "60 chars plus the ellipsis");
+        assert!(t.ends_with('…'));
+    }
+
+    #[test]
+    fn a_prompt_exactly_at_the_limit_is_not_marked() {
+        let exact = "b".repeat(TITLE_MAX);
+        assert_eq!(title_from_prompt(&exact), Some(exact));
+    }
+
+    #[test]
+    fn counts_characters_not_bytes() {
+        // Clipping by byte would split a multi-byte char and panic.
+        let thai = "ทดสอบ".repeat(40);
+        let t = title_from_prompt(&thai).unwrap();
+        assert_eq!(t.chars().count(), TITLE_MAX + 1);
+    }
+
+    #[test]
+    fn nothing_to_title_yields_none() {
+        assert_eq!(title_from_prompt(""), None);
+        assert_eq!(title_from_prompt("   \n\t\n  "), None);
     }
 }

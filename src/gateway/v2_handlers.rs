@@ -122,6 +122,17 @@ pub async fn v2_chat_stream(
         }
     }
 
+    // Name the session from its first prompt, before the turn starts, so the
+    // sidebar stops being a list of hex ids. Only ever fills a blank — a title
+    // someone typed is locked and never overwritten. Best-effort: a session
+    // that cannot be labelled is cosmetic, and failing a turn over it would be
+    // absurd.
+    {
+        let harness = state.harness.read().await;
+        let session_id = harness.current_session_id().to_string();
+        harness.session_mgr().auto_title(&session_id, &prompt).await;
+    }
+
     let (tx, mut rx) = mpsc::channel::<V2StreamEvent>(EVENT_CHANNEL_CAPACITY);
 
     // The turn runs in its own task and owns the lease. Dropping the SSE body
@@ -1240,5 +1251,50 @@ mod tests {
         });
         assert_eq!(done.name(), "done");
         assert_eq!(done.data(), r#"{"turn_id":"t_1","stop_reason":"complete"}"#);
+    }
+}
+
+/// `PATCH /v2/sessions/{id}` — rename a session.
+///
+/// A title typed here is locked: auto-titling only ever fills a blank, so the
+/// next turn will not quietly replace a name someone chose.
+pub async fn v2_session_rename(
+    State(state): State<GatewayState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    Json(req): Json<serde_json::Value>,
+) -> Response {
+    let Some(title) = req.get("title").and_then(|v| v.as_str()) else {
+        return v2_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Expected a JSON body with a `title` string.",
+            None,
+        );
+    };
+
+    let harness = state.harness.read().await;
+    match harness.session_mgr().rename_session(&session_id, title).await {
+        Ok(()) => {
+            // Read it back rather than echoing the input: the stored title is
+            // trimmed and clipped, and the caller should see what was kept.
+            let stored = harness
+                .session_mgr()
+                .list_sessions()
+                .await
+                .ok()
+                .and_then(|all| all.into_iter().find(|s| s.id == session_id))
+                .and_then(|s| s.title);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "id": session_id, "title": stored })),
+            )
+                .into_response()
+        }
+        Err(e) => v2_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!("{e}"),
+            None,
+        ),
     }
 }

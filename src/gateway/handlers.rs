@@ -277,6 +277,7 @@ pub async fn list_sessions(
         .map(|s| SessionInfo {
             id: s.id,
             created_at: s.updated_at.to_string(),
+            title: s.title,
             event_count: s.event_count,
         })
         .collect();
