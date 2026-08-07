@@ -39,8 +39,13 @@ The agent's file tools can only read and write inside the **project directory** 
 To point the agent at a real project:
 
 1. Open **Customization → Files → open another project…** in the left panel
-2. The app will ask for confirmation — this re-roots the sandbox, memory vault, and session database all at once
-3. Choose the directory and confirm
+2. The app asks for confirmation — this re-roots the sandbox, memory vault and session database at once
+3. Click **choose folder**; a native folder picker opens
+4. Pick the directory. The gateway restarts under the new root and the window reloads
+
+The Files tree never shows anything above the project root. That is the sandbox
+boundary, and it applies to the agent's own file tools too — re-rooting is the
+only way to move it.
 
 The app will then restart the gateway with the new project root. You can switch projects as often as you need; each switch resets the session history and moves the memory vault.
 

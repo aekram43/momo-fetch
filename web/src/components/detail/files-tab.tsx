@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { Hint, PanelSection } from "@/components/shared/panel-section";
-import { isDesktop, openProject } from "@/lib/desktop";
+import { isDesktop, openProject, pickDirectory } from "@/lib/desktop";
 import { SkeletonRows } from "@/components/shared/skeleton";
 import { ApiError, readFile, readTree } from "@/lib/api-client";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
@@ -37,8 +37,30 @@ export function FilesTab() {
    * is no browser equivalent of choosing a folder on the host.
    */
   async function reroot() {
-    const path = window.prompt("Project directory to open:");
-    if (!path) return;
+    // The button says "choose folder", so it has to open one.
+    //
+    // It used to call `window.prompt` — which asks you to *type* an absolute
+    // path, not choose a folder, and which does nothing at all here. wry's
+    // `WKUIDelegate` implements only `runOpenPanelWithParameters`, media
+    // capture and new-window handling; it has no
+    // `runJavaScriptTextInputPanelWithPrompt`, and WebKit silently returns null
+    // for a prompt the delegate does not handle. So on macOS the button was
+    // dead: click it, nothing appears, nothing happens, no error.
+    let path: string | null = null;
+    try {
+      path = await pickDirectory("Choose a project directory");
+    } catch {
+      push({
+        tone: "error",
+        message: "Could not open the folder picker.",
+      });
+      setConfirmRoot(false);
+      return;
+    }
+    if (!path) {
+      setConfirmRoot(false);
+      return;
+    }
     const url = await openProject(path);
     if (url) {
       push({ tone: "info", message: "Reopening at the new project…" });

@@ -170,8 +170,13 @@ folder above. That is deliberate: the project root *is* the agent's sandbox, so
 a fresh install should not be able to read everything you own.
 
 To point it at real work, use **Customization → Files → open another project…**
-in the left panel. It confirms first, because re-rooting moves the sandbox, the
-memory vault and the session history together, and restarts the agent.
+in the left panel. It confirms first — re-rooting moves the sandbox, the memory
+vault and the session history together and restarts the agent — and then opens a
+native folder picker.
+
+**The Files tree only ever shows the project root and below.** That is the
+sandbox, not a limitation of the browser: the agent cannot read outside it
+either. Re-rooting is how you point both at somewhere else.
 
 The app starts in **strict** permission mode: it asks before anything that
 changes your machine. When it asks, read the dialog — approving a tool grants it

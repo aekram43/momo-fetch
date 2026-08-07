@@ -111,6 +111,31 @@ export const openProject = (path: string) =>
   invoke<string>("open_project", { path });
 
 /**
+ * Native folder picker. Returns the chosen absolute path, or `null` if the user
+ * cancelled or the dialog is unavailable.
+ *
+ * Goes through `plugin:dialog|open` on the core `invoke` rather than through
+ * `@tauri-apps/plugin-dialog`. `withGlobalTauri` exposes the core API on
+ * `window.__TAURI__`, not the plugin JS packages — reaching a plugin command by
+ * name is the form that works without adding a frontend dependency for one
+ * call. `dialog:allow-open` is granted in `capabilities/default.json`.
+ *
+ * The response for a single-directory pick is the path string, or `null` on
+ * cancel; older shapes returned an object with a `path`, so both are handled.
+ */
+export async function pickDirectory(title: string): Promise<string | null> {
+  const picked = await invoke<unknown>("plugin:dialog|open", {
+    options: { directory: true, multiple: false, recursive: false, title },
+  });
+  if (typeof picked === "string") return picked;
+  if (picked && typeof picked === "object" && "path" in picked) {
+    const p = (picked as { path?: unknown }).path;
+    if (typeof p === "string") return p;
+  }
+  return null;
+}
+
+/**
  * Menu and tray actions (T6/T7) arrive as one `momo:menu` CustomEvent carrying
  * the item id, so a given action has a single implementation regardless of
  * whether it came from a menu, the tray, or a keystroke.
