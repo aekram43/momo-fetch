@@ -238,9 +238,22 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
             .collect();
         use axum::http::{Method, HeaderValue};
         use tower_http::cors::{Any, AllowOrigin};
+        // **This list must cover every method the router serves.** A method
+        // missing here fails only cross-origin, which means it works in the
+        // browser at `/ui` (same origin, no preflight) and fails silently in
+        // the desktop app, whose webview origin is `tauri://localhost`. PATCH
+        // was added to the router and not here, and session rename saved fine
+        // in a browser while doing nothing in the app. `cors_covers_every_routed_method`
+        // below fails the build if it happens again.
         CorsLayer::new()
             .allow_origin(AllowOrigin::list(origins))
-            .allow_methods([Method::GET, Method::POST, Method::OPTIONS, Method::DELETE])
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PATCH,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
             .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
     };
 
@@ -411,3 +424,51 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
 }
 
 
+
+#[cfg(test)]
+mod cors_tests {
+    /// Every HTTP method the router serves must be in the CORS allow-list.
+    ///
+    /// Reads this file rather than the router because axum exposes no way to
+    /// enumerate a `Router`'s methods. Crude, but it catches the exact failure
+    /// it exists for: a route added with a verb nobody remembered to allow,
+    /// which then works same-origin and dies in the desktop app.
+    #[test]
+    fn cors_covers_every_routed_method() {
+        let src = include_str!("mod.rs");
+
+        let mut routed: Vec<String> = Vec::new();
+        for verb in ["get", "post", "patch", "delete", "put", "head"] {
+            // `get(handler)`, `.delete(handler)`, `axum::routing::patch(handler)`
+            let patterns = [
+                format!("{verb}("),
+                format!(".{verb}("),
+                format!("routing::{verb}("),
+            ];
+            if patterns.iter().any(|pat| src.contains(pat.as_str())) {
+                routed.push(verb.to_uppercase());
+            }
+        }
+        assert!(
+            routed.contains(&"GET".to_string()),
+            "the scan found no routes at all — it has stopped working"
+        );
+
+        // The allow-list, read back out of the `allow_methods([…])` call.
+        let start = src
+            .find(".allow_methods([")
+            .expect("allow_methods list not found");
+        let end = src[start..].find("])").expect("unterminated allow_methods") + start;
+        let allowed = &src[start..end];
+
+        for method in &routed {
+            assert!(
+                allowed.contains(&format!("Method::{method}")),
+                "the router serves {method} but CORS does not allow it. \
+                 Cross-origin callers — the desktop app — will fail on it while \
+                 same-origin callers see nothing wrong. Add Method::{method} to \
+                 allow_methods."
+            );
+        }
+    }
+}
