@@ -2,3 +2,8 @@
 .env
 *.tmp
 .claude/
+/memory-vault
+.DS_Store
+/.harness
+/.pi
+/.claude
