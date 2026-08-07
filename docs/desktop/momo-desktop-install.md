@@ -66,6 +66,18 @@ cd desktop/src-tauri
 cargo tauri build
 ```
 
+**Or do all of it with one command**, which is what the rest of this guide's
+warnings amount to:
+
+```bash
+./scripts/build-desktop.sh          # add --open to launch it when it finishes
+```
+
+That script picks the right web build, forces the frontend to be re-embedded,
+bundles, checks the staged gateway really is the one it just built, and puts
+`web/out` back to the gateway shape afterwards. Each of those is a step that
+fails quietly when done by hand — the sections below explain how.
+
 Step 3 runs `cargo build --release --bin momo-fetch` and copies the result into
 `desktop/src-tauri/binaries/` before bundling, so the app can never ship a
 gateway older than the source you built it from. That copy used to be a manual
@@ -215,6 +227,13 @@ any session you open afterwards. Quitting clears it; nothing is written to disk.
 
 ```bash
 git pull
+./scripts/build-desktop.sh
+```
+
+or by hand:
+
+```bash
+git pull
 cd web && npm ci && npm run build:desktop && cd ..
 cd desktop/src-tauri && cargo tauri build
 ```
@@ -267,7 +286,13 @@ for 30 minutes.
 
 **A UI change does not appear after rebuilding.**
 The frontend was not re-embedded — see the note in section 5.
-`touch desktop/src-tauri/src/lib.rs` and rebuild.
+`touch desktop/src-tauri/src/lib.rs` and rebuild, or use
+`./scripts/build-desktop.sh`, which does it every time.
+
+**The gateway serves an unstyled `/ui` after you built the app.**
+The desktop build leaves `web/out` with no basePath. Run `cd web && npm run
+build` to put it back — or use `./scripts/build-desktop.sh`, which restores it
+for you.
 
 **Logs**
 

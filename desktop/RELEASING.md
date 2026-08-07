@@ -87,6 +87,12 @@ remove the first-launch friction; they are not prerequisites for shipping.
 ## Local build
 
 ```bash
+./scripts/build-desktop.sh           # or --dmg for a disk image too
+```
+
+By hand, if you need the steps separately:
+
+```bash
 cd web && npm run build:desktop      # basePath "" — Tauri serves at /
 cd desktop/src-tauri && cargo tauri build --bundles app
 ```

@@ -33,6 +33,12 @@ The harness predates this layout and carries more than the four:
 - **[prd/](prd/)** — the original product requirements. Historical.
 - **[skills/](skills/)** — the handoff skill.
 
+## Scripts
+
+- `scripts/build-desktop.sh` — build the desktop app in one command, with the
+  three easy-to-get-wrong steps handled and asserted
+- `scripts/start-gateway.sh` — gateway plus Cloudflare Tunnel
+
 ## Keeping these honest
 
 The guides cite real paths and real `file:line` locations on purpose: a claim

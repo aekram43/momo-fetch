@@ -182,6 +182,13 @@ The gateway is a child process spawned by `Supervisor::start()`. It communicates
 
 There is no IPC between the shell and gateway. The web UI talks to the gateway over HTTP once it's running.
 
+### Build the app
+
+`./scripts/build-desktop.sh` — one command, and it asserts the things that go
+wrong silently when the build is done by hand. `--open` launches the result,
+`--dmg` also produces a disk image, `--no-restore` leaves `web/out` in its
+desktop shape.
+
 ### Change the bundling or resources
 
 Edit `tauri.conf.json`. The `beforeBuildCommand` runs before every `cargo tauri build` and:
