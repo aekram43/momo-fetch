@@ -4,7 +4,7 @@ set -euo pipefail
 # ── start-gateway.sh ──────────────────────────────────────────────
 # Start MOMO Gateway + Cloudflare Tunnel (Named Tunnel — Option B)
 #
-# Operator script, not part of the build. See docs/user-guide.md §17.
+# Operator script, not part of the build. See docs/harness/user-guide.md §17.
 # Usage:
 #   ./start-gateway.sh                          # defaults
 #   ./start-gateway.sh --port 8080               # custom port

@@ -81,5 +81,5 @@ This skill integrates with the agent-harness system and respects all provider co
 
 ## See Also
 
-- [Skills Documentation](../skills/README.md)
-- [Agent Configuration](../agent-configuration.md)
+- [Harness user guide § Skills](../harness/user-guide.md#9-skills)
+- [Harness settings reference](../harness/settings-quick-reference.md)

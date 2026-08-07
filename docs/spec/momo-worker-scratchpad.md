@@ -35,7 +35,7 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 
 ถ้าวันหนึ่งจะแจก prebuilt binary ค่อยหยิบขึ้นมาทำ ขั้นตอนอยู่ใน `desktop/RELEASING.md` ครบแล้ว
 
-**คู่มือติดตั้ง: [`docs/momo-desktop-install.md`](../momo-desktop-install.md)**
+**คู่มือติดตั้ง: [`docs/desktop/momo-desktop-install.md`](../desktop/momo-desktop-install.md)**
 
 **✅ งานค้างทั้ง 3 อย่าง เคลียร์หมดแล้ว**
 

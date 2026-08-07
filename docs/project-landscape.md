@@ -272,5 +272,7 @@ in `git status` constantly. It is not source.
 
 - [`docs/spec/momo-worker.md`](spec/momo-worker.md) — the build plan, §0 audit, §6 UI layout, §7 endpoints
 - [`docs/spec/momo-worker-scratchpad.md`](spec/momo-worker-scratchpad.md) — current status and the wave log
-- [`docs/user-guide.md`](user-guide.md) — CLI, gateway API, Cloudflare Tunnel
-- [`docs/momo-desktop-install.md`](momo-desktop-install.md) — building and using the desktop app
+- **harness** — [quickstart](harness/quickstart-guide.md) · [user guide](harness/user-guide.md) · [CLI](harness/cli-guide.md) · [code guide](harness/code-guide.md)
+- **desktop** — [install](desktop/momo-desktop-install.md) · [user guide](desktop/user-guide.md) · [code guide](desktop/code-guide.md) · [Tauri](desktop/tauri-guide.md)
+- **web** — [quickstart](web/quickstart-guide.md) · [user guide](web/user-guide.md) · [code guide](web/code-guide.md) · [gateway API](web/gateway-api-guide.md)
+- **brand** — [quickstart](brand/quickstart-guide.md) · [user guide](brand/user-guide.md) · [code guide](brand/code-guide.md) · [make-assets](brand/make-assets-guide.md)

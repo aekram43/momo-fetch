@@ -1,7 +1,7 @@
 # Releasing MOMO WORK
 
 > **Installing it, not shipping it?** See
-> [`docs/momo-desktop-install.md`](../docs/momo-desktop-install.md). Nothing on
+> [`docs/desktop/momo-desktop-install.md`](../docs/desktop/momo-desktop-install.md). Nothing on
 > this page applies to a build-from-source install — signing exists to remove
 > warnings on *downloaded* binaries, and a locally built bundle has no download
 > quarantine to warn about.

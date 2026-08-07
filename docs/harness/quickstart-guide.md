@@ -348,7 +348,7 @@ Check vault status in the REPL with `/mem`.
 
 - [CLI Guide](cli-guide.md) — detailed command reference
 - [User Guide](user-guide.md) — all features explained
-- [Code Guideline](code-guideline.md) — how the codebase works
+- [Code Guideline](code-guide.md) — how the codebase works
 
 ## Troubleshooting
 

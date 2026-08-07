@@ -2,7 +2,7 @@
 
 Everything you need to know to use MOMO Fetch effectively.
 
-> Looking for the code rather than the product? [`project-landscape.md`](project-landscape.md)
+> Looking for the code rather than the product? [`project-landscape.md`](../project-landscape.md)
 > maps the modules and how they depend on each other.
 
 ---
@@ -1413,7 +1413,7 @@ momo-fetch --gateway         # → http://localhost:3000/ui/
 
 `/ui` redirects to `/ui/`. The trailing slash is load-bearing: assets are referenced relatively so the same bundle works under the gateway at `/ui` *and* under the desktop shell at `/`, and a browser resolves relative URLs against the last path segment.
 
-Building for the desktop app is a different command — `npm run build:desktop`, which sets no basePath. Use the wrong one and every asset 404s. See [`docs/momo-desktop-install.md`](momo-desktop-install.md).
+Building for the desktop app is a different command — `npm run build:desktop`, which sets no basePath. Use the wrong one and every asset 404s. See [`docs/desktop/momo-desktop-install.md`](../desktop/momo-desktop-install.md).
 
 ### Endpoints
 
@@ -1959,7 +1959,7 @@ sudo journalctl -u cloudflared -f
 
 ##### Run Gateway + Tunnel Together (script)
 
-The repo ships one: [`scripts/start-gateway.sh`](../scripts/start-gateway.sh).
+The repo ships one: [`scripts/start-gateway.sh`](../../scripts/start-gateway.sh).
 
 ```bash
 ./scripts/start-gateway.sh                        # gateway :3000 + named tunnel
