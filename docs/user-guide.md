@@ -1956,42 +1956,23 @@ sudo journalctl -u cloudflared -f
 
 ##### Run Gateway + Tunnel Together (script)
 
-Save as `start-gateway.sh`:
+The repo ships one: [`scripts/start-gateway.sh`](../scripts/start-gateway.sh).
 
 ```bash
-#!/bin/bash
-set -e
-
-PROJECT_DIR="${1:-.}"
-GATEWAY_PORT="${2:-3000}"
-
-# Start gateway in background
-momo-fetch --gateway --project "$PROJECT_DIR" &
-GATEWAY_PID=$!
-
-# Wait for gateway to be ready
-echo "Waiting for gateway on port $GATEWAY_PORT..."
-for i in $(seq 1 30); do
-  curl -s http://localhost:$GATEWAY_PORT/health > /dev/null 2>&1 && break
-  sleep 1
-done
-
-if ! curl -s http://localhost:$GATEWAY_PORT/health > /dev/null 2>&1; then
-  echo "Gateway failed to start"
-  kill $GATEWAY_PID 2>/dev/null
-  exit 1
-fi
-
-echo "Gateway ready (PID: $GATEWAY_PID)"
-
-# Start tunnel in foreground
-exec cloudflared tunnel run momo-gateway
+./scripts/start-gateway.sh                        # gateway :3000 + named tunnel
+./scripts/start-gateway.sh --port 8080            # different port
+./scripts/start-gateway.sh --gateway-only         # no tunnel, no cloudflared needed
+./scripts/start-gateway.sh --tunnel-only          # tunnel against an already-running gateway
+./scripts/start-gateway.sh --domain api.you.com --tunnel-name momo-gateway
 ```
 
-```bash
-chmod +x start-gateway.sh
-./start-gateway.sh ~/my-app 3000
-```
+It loads the project `.env`, waits for `/health` to answer before bringing the
+tunnel up rather than sleeping and hoping, and kills the tunnel on `Ctrl-C`.
+
+> This guide used to paste its own copy of the script here. Two copies drifted,
+> and both got the gateway's port flag wrong — it is `--gateway-port`, and
+> `--port` has never existed. One script, in the repo, where it can be run and
+> fixed.
 
 ---
 

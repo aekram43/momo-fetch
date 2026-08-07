@@ -3,6 +3,8 @@ set -euo pipefail
 
 # ── start-gateway.sh ──────────────────────────────────────────────
 # Start MOMO Gateway + Cloudflare Tunnel (Named Tunnel — Option B)
+#
+# Operator script, not part of the build. See docs/user-guide.md §17.
 # Usage:
 #   ./start-gateway.sh                          # defaults
 #   ./start-gateway.sh --port 8080               # custom port
@@ -46,7 +48,9 @@ while [[ $# -gt 0 ]]; do
     --domain)       CF_DOMAIN="$2"; shift 2 ;;
     --no-tunnel)    ENABLE_TUNNEL=false; shift ;;
     --tunnel-only)  TUNNEL_ONLY=true; shift ;;
-    --gateway-only) GATEWAY_ONLY=true; shift ;;
+    # Implies --no-tunnel: the whole point of this flag is to run without one,
+    # and the preflight below refuses to start when cloudflared is missing.
+    --gateway-only) GATEWAY_ONLY=true; ENABLE_TUNNEL=false; shift ;;
     -h|--help)
       sed -n '2,/^$/{ s/^# //; s/^#//; p }' "$0"
       exit 0
@@ -56,21 +60,28 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Preflight checks ──────────────────────────────────────────────
-command -v momo-fetch >/dev/null 2>&1 || warn "momo-fetch not found in PATH — trying cargo run"
+command -v momo-fetch >/dev/null 2>&1 || err "momo-fetch not found in PATH. Run 'cargo build --release' and put target/release on PATH."
 command -v cloudflared >/dev/null 2>&1 || { [[ "$ENABLE_TUNNEL" == true ]] && err "cloudflared not installed. Run: brew install cloudflared"; }
 
 if [[ "$TUNNEL_ONLY" == false ]]; then
+  # Load .env *before* checking for a key. The other order warns "no API key"
+  # at a project whose .env has one, which sends people looking for a problem
+  # that is not there.
+  if [[ -f "$PROJECT_DIR/.env" ]]; then
+    log "Loading .env"
+    set -a; # shellcheck disable=SC1091
+    . "$PROJECT_DIR/.env"; set +a
+  fi
+
   HAS_KEY=false
   for VAR in ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY GROQ_API_KEY OPENROUTER_API_KEY ZAI_API_KEY LLM_APIKEY; do
     if [[ -n "${!VAR:-}" ]]; then HAS_KEY=true; break; fi
   done
-  [[ "$HAS_KEY" == true ]] || warn "No LLM provider API key found in env. Gateway may fail."
-
-  [[ -f "$PROJECT_DIR/.env" ]] && { log "Loading .env"; export "$(grep -v '^#' "$PROJECT_DIR/.env" | xargs)"; }
+  [[ "$HAS_KEY" == true ]] || warn "No LLM provider API key in the environment or $PROJECT_DIR/.env. The gateway may fail to answer."
 fi
 
 # ── Build gateway command ──────────────────────────────────────────
-GATEWAY_CMD="momo-fetch --gateway --port $GATEWAY_PORT --project \"$PROJECT_DIR\" --permission $PERMISSION"
+GATEWAY_CMD="momo-fetch --gateway --gateway-port $GATEWAY_PORT --project \"$PROJECT_DIR\" --permission $PERMISSION"
 [[ -n "$PROVIDER" ]] && GATEWAY_CMD="$GATEWAY_CMD --provider $PROVIDER"
 [[ -n "$MODEL" ]] && GATEWAY_CMD="$GATEWAY_CMD --model $MODEL"
 
@@ -123,7 +134,14 @@ elif [[ "$GATEWAY_ONLY" == true ]]; then
 else
   start_gateway &
   GW_PID=$!
-  sleep 2
+  log "Waiting for the gateway to answer /health…"
+  for _ in $(seq 1 30); do
+    curl -sf "http://localhost:$GATEWAY_PORT/health" >/dev/null 2>&1 && break
+    sleep 1
+  done
+  curl -sf "http://localhost:$GATEWAY_PORT/health" >/dev/null 2>&1 \
+    || { kill "$GW_PID" 2>/dev/null; err "Gateway did not become ready on :$GATEWAY_PORT"; }
+  ok "Gateway ready (pid $GW_PID)"
   start_tunnel
   wait
 fi
