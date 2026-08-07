@@ -2234,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "momo-worker"
-version = "0.9.1"
+version = "1.0.0"
 dependencies = [
  "keyring",
  "libc",
