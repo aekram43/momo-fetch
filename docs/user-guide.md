@@ -2,6 +2,9 @@
 
 Everything you need to know to use MOMO Fetch effectively.
 
+> Looking for the code rather than the product? [`project-landscape.md`](project-landscape.md)
+> maps the modules and how they depend on each other.
+
 ---
 
 ## Table of Contents

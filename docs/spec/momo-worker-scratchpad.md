@@ -1,6 +1,7 @@
 # MOMO WORK — Implementation Scratchpad / Handoff
 
 > **Purpose:** Working state for the MOMO WORK build so another agent can continue without re-deriving anything.
+> **Codebase map:** [`docs/project-landscape.md`](../project-landscape.md) — modules, dependency graph, cycles.
 > **Spec:** [`docs/spec/momo-worker.md`](./momo-worker.md) — read §0 (Code Audit) first; it is the load-bearing part.
 > **Dispatch:** spec **§12** is the work plan (packages, model routing, waves). §9 below is now just a pointer into it.
 > **Last updated:** 2026-08-06 · branch `dev` (0.9.1)
