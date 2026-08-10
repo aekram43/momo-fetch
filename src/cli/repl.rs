@@ -614,6 +614,22 @@ async fn run_turn_streaming(
 /// Maximum time to wait for the next stream event before timing out (120 seconds).
 const STREAM_EVENT_TIMEOUT_SECS: u64 = 120;
 
+/// "2m 30s" rather than "150s".
+///
+/// Once a wait is minutes long, seconds are the wrong unit to make someone
+/// convert in their head while deciding whether to keep waiting.
+fn fmt_duration(secs: u64) -> String {
+    if secs < 60 {
+        return format!("{secs}s");
+    }
+    let (m, s) = (secs / 60, secs % 60);
+    if s == 0 {
+        format!("{m}m")
+    } else {
+        format!("{m}m {s}s")
+    }
+}
+
 /// Consume an EventStream with colored output, Ctrl+C cancellation,
 /// stream timeout, and graceful shutdown support.
 ///
@@ -625,6 +641,8 @@ async fn consume_stream(
 ) -> StreamResult {
     let mut result = StreamResult::default();
     let mut in_tool_call = false;
+    // Name of the tool currently running, so a long wait can say what for.
+    let mut current_tool_label: Option<String> = None;
     let mut last_event_was_text = false;
     let mut had_tool_calls = false;
     let mut spinner = ThinkingSpinner::start();
@@ -679,6 +697,7 @@ async fn consume_stream(
                                             summarize_args(args),
                                         );
                                         in_tool_call = true;
+                                        current_tool_label = Some(name.to_string());
                                         last_event_was_text = false;
                                         had_tool_calls = true;
                                         result.tool_calls.push(format!("{}({})", name, summarize_args(args)));
@@ -700,6 +719,7 @@ async fn consume_stream(
                                                 truncated.dimmed(),
                                             );
                                             in_tool_call = false;
+                                            current_tool_label = None;
                                             last_event_was_text = false;
                                         }
                                     }
@@ -758,30 +778,40 @@ async fn consume_stream(
             _ = tokio::time::sleep(std::time::Duration::from_secs(STREAM_EVENT_TIMEOUT_SECS)) => {
                 consecutive_timeouts += 1;
                 spinner.stop();
+                let quiet_for = STREAM_EVENT_TIMEOUT_SECS * u64::from(consecutive_timeouts);
 
-                if consecutive_timeouts >= 2 {
-                    // Two consecutive timeouts — the API is likely stuck
-                    harness.interrupt();
-                    println!(
-                        "\n{} API timeout: no response from {} ({}) for {}s. \
-                         Generation cancelled. You can continue chatting.",
-                        "\u{26a0}".yellow(),
-                        harness.provider_mgr().current_provider(),
+                // **A quiet stream is not a failure, and this no longer cancels.**
+                //
+                // It used to: two silent windows and the turn was killed with
+                // "API timeout … Generation cancelled". That was wrong twice
+                // over. A `task(...)` sub-agent runs entirely inside one tool
+                // call and emits nothing to this stream while it works, so a
+                // sub-agent given `timeout_secs=600` could never reach its own
+                // deadline — this fired at 240s and killed it. And even when
+                // nothing was running, a slow model was reported as a warning,
+                // which reads as broken rather than busy.
+                //
+                // So: say what is happening and keep going. The tool's own
+                // timeout still bounds its work, and Ctrl+C is the way out —
+                // one control, held by the person watching, rather than a
+                // guess made on their behalf.
+                let what = if in_tool_call {
+                    format!(
+                        "{} is still working",
+                        current_tool_label.as_deref().unwrap_or("a tool"),
+                    )
+                } else {
+                    format!(
+                        "still generating on {}",
                         harness.provider_mgr().current_model_name(),
-                        STREAM_EVENT_TIMEOUT_SECS * 2,
-                    );
-                    break;
-                }
-
-                // First timeout — warn and keep waiting
+                    )
+                };
                 println!(
-                    "\n  {} Still waiting for response from {} ({}s elapsed)... \
-                     Press Ctrl+C to cancel.",
-                    "\u{23f3}".yellow(),
-                    harness.provider_mgr().current_model_name(),
-                    STREAM_EVENT_TIMEOUT_SECS,
+                    "  {} running in the background — {} ({} so far). Ctrl+C to stop.",
+                    "\u{23f3}".cyan(),
+                    what,
+                    fmt_duration(quiet_for),
                 );
-                // Restart spinner and keep waiting
                 spinner = ThinkingSpinner::start();
             }
             _ = tokio::signal::ctrl_c() => {
@@ -1109,5 +1139,28 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cmds = list_custom_commands(tmp.path());
         assert!(cmds.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod wait_tests {
+    use super::fmt_duration;
+
+    #[test]
+    fn seconds_below_a_minute() {
+        assert_eq!(fmt_duration(0), "0s");
+        assert_eq!(fmt_duration(59), "59s");
+    }
+
+    #[test]
+    fn whole_minutes_drop_the_seconds() {
+        assert_eq!(fmt_duration(60), "1m");
+        assert_eq!(fmt_duration(240), "4m");
+    }
+
+    #[test]
+    fn minutes_and_seconds() {
+        assert_eq!(fmt_duration(90), "1m 30s");
+        assert_eq!(fmt_duration(605), "10m 5s");
     }
 }
