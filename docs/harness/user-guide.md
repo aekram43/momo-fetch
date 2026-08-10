@@ -1377,6 +1377,36 @@ Clients (Discord bot, Web UI, SDK, curl)
   └──────────────────────────────────┘
 ```
 
+### Logging
+
+`HARNESS_LOG` sets the tracing filter. The default is:
+
+```
+warn,adk_tool::mcp=error,rmcp=error
+```
+
+Two dependency targets are turned down because they report conditions you cannot
+act on mid-turn, repeatedly, straight through the REPL spinner:
+
+- **`adk_tool::mcp`** logs `failed to list tools from server, skipping server`
+  once per broken server *every time the toolset is listed* — which is every
+  turn. One broken server becomes an endless stream of identical lines.
+- **`rmcp`** reports `JoinError::Cancelled` when an SSE task is cancelled during
+  shutdown. That is a teardown, not a fault.
+
+**Errors from both still print**, so a server that fails to start is still
+visible. And the condition itself is not hidden — per-server MCP state is in
+`/status`, and in the Tools panel of the web and desktop UIs, which is where a
+broken server belongs rather than interleaved with a running turn.
+
+To go the other way:
+
+```bash
+HARNESS_LOG=warn momo-fetch                      # the old, noisier default
+HARNESS_LOG=adk_tool::mcp=debug momo-fetch       # debugging one MCP server
+HARNESS_LOG=momo_fetch=debug,warn momo-fetch     # just this crate, verbosely
+```
+
 ### Starting the Gateway
 
 ```bash
