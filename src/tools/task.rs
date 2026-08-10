@@ -3,7 +3,7 @@
 //! Provides a `Task` tool that delegates subtasks to isolated sub-agents
 //! using adk-rust's `SequentialAgent` and `ParallelAgent`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use adk_rust::agent::{LlmAgentBuilder, ParallelAgent, SequentialAgent};
@@ -18,19 +18,48 @@ use serde_json::{Value, json};
 use crate::memory::vault::ObsidianVault;
 use crate::providers::ProviderManager;
 use crate::sandbox::FilesystemSandbox;
+// `create` lives on the trait, not the concrete service.
+use adk_session::SessionService as _;
 
-// ─── Thread-local context for sub-agent dependencies ──────────────
+/// User id every sub-agent runs under.
+///
+/// Sub-agent sessions are throwaway and in-memory; the id only has to be
+/// stable between the `create` and the `run` that follows it.
+const SUB_AGENT_USER: &str = "sub-agent";
 
-thread_local! {
-    static TASK_CTX: std::cell::RefCell<Option<TaskContext>> = std::cell::RefCell::new(None);
-    static STATUS_TX: std::cell::RefCell<Option<crate::cli::status::StatusSender>> = std::cell::RefCell::new(None);
+// ─── Process-global context for sub-agent dependencies ────────────
+//
+// **Not `thread_local!`.** These are set on whichever thread builds the tool
+// registry, but a tool *executes* later on an arbitrary tokio worker — so with
+// a thread-local the lookup succeeded or failed depending on which worker
+// picked up the task. For `TASK_CTX` that surfaced as `task context not
+// initialized` and made `task(...)` unusable; the same bug was fixed across the
+// other five tool modules as B3 and these two were missed.
+//
+// A process-global is correct here for the same reason it was there: the
+// harness has exactly one sandbox, vault and provider by construction. `get_*`
+// clones out of the lock, so no guard is ever held across an `await`.
+
+static TASK_CTX: RwLock<Option<TaskContext>> = RwLock::new(None);
+static STATUS_TX: RwLock<Option<crate::cli::status::StatusSender>> = RwLock::new(None);
+
+/// Set the status sender for the process (called from the REPL).
+pub fn set_status_sender(sender: crate::cli::status::StatusSender) {
+    if let Ok(mut tx) = STATUS_TX.write() {
+        *tx = Some(sender);
+    }
 }
 
-/// Set the status sender for the current thread (called from REPL).
-pub fn set_status_sender(sender: crate::cli::status::StatusSender) {
-    STATUS_TX.with(|tx| {
-        *tx.borrow_mut() = Some(sender);
-    });
+/// Run `f` with the status sender, if one is installed.
+///
+/// Takes a closure so the read guard is dropped before the caller does anything
+/// else — the sender is only ever used for a synchronous notify.
+fn with_status(f: impl FnOnce(&crate::cli::status::StatusSender)) {
+    if let Ok(tx) = STATUS_TX.read() {
+        if let Some(sender) = tx.as_ref() {
+            f(sender);
+        }
+    }
 }
 
 /// Maximum recursion depth for sub-agents.
@@ -46,36 +75,41 @@ pub struct TaskContext {
     pub depth: u32,
 }
 
-/// Set the task context for the current thread.
+/// Set the task context for the process.
 pub fn set_task_context(ctx: TaskContext) {
-    TASK_CTX.with(|c| *c.borrow_mut() = Some(ctx));
+    if let Ok(mut c) = TASK_CTX.write() {
+        *c = Some(ctx);
+    }
 }
 
-/// Clear the task context for the current thread.
+/// Clear the task context.
 #[allow(dead_code)]
 pub fn clear_task_context() {
-    TASK_CTX.with(|c| *c.borrow_mut() = None);
+    if let Ok(mut c) = TASK_CTX.write() {
+        *c = None;
+    }
 }
 
 fn get_task_context() -> Result<TaskContext, AdkError> {
-    TASK_CTX.with(|c| {
-        c.borrow()
-            .as_ref()
-            .map(|ctx| TaskContext {
-                // Create a lightweight ProviderManager wrapping the same Arc<dyn Llm>.
-                // Arc::clone is cheap — it shares the same model instance.
-                provider_mgr: ProviderManager::from_current(
-                    ctx.provider_mgr.current(),
-                    ctx.provider_mgr.current_provider().to_string(),
-                    ctx.provider_mgr.current_model_name().to_string(),
-                ),
-                sandbox: ctx.sandbox.clone(),
-                vault: ctx.vault.clone(),
-                system_prompt: ctx.system_prompt.clone(),
-                depth: ctx.depth,
-            })
-            .ok_or_else(|| AdkError::tool("task context not initialized"))
-    })
+    let guard = TASK_CTX
+        .read()
+        .map_err(|_| AdkError::tool("task context lock poisoned"))?;
+    guard
+        .as_ref()
+        .map(|ctx| TaskContext {
+            // A lightweight ProviderManager over the same `Arc<dyn Llm>`.
+            // `Arc::clone` is cheap and shares the one model instance.
+            provider_mgr: ProviderManager::from_current(
+                ctx.provider_mgr.current(),
+                ctx.provider_mgr.current_provider().to_string(),
+                ctx.provider_mgr.current_model_name().to_string(),
+            ),
+            sandbox: ctx.sandbox.clone(),
+            vault: ctx.vault.clone(),
+            system_prompt: ctx.system_prompt.clone(),
+            depth: ctx.depth,
+        })
+        .ok_or_else(|| AdkError::tool("task context not initialized"))
 }
 
 // ─── Argument types ───────────────────────────────────────────────
@@ -172,8 +206,30 @@ pub async fn task(args: TaskArgs) -> Result<Value, AdkError> {
         ),
     };
 
-    // Execute with timeout using an in-memory session (sub-agents don't need persistence)
+    // Execute with timeout using an in-memory session (sub-agents don't need
+    // persistence).
+    //
+    // **The session has to be created before the runner is asked to use it.**
+    // `Runner::run` only *gets* the session — the comment above that call in
+    // adk-runner says "get or create", but there is no create, and a missing
+    // session comes straight back as `session not found`. Every `task(...)`
+    // call failed on this: the tool built a fresh in-memory service and then
+    // ran against a session id nothing had ever put in it.
     let session_service = Arc::new(adk_session::InMemorySessionService::new());
+
+    // A fresh id per invocation so two concurrent sub-agents can never land in
+    // one transcript. The service is per-call today, which already isolates
+    // them; this stops that from being load-bearing.
+    let sub_session_id = format!("task-{}", uuid::Uuid::new_v4());
+    session_service
+        .create(adk_session::CreateRequest {
+            app_name: "momo-fetch-task".to_string(),
+            user_id: SUB_AGENT_USER.to_string(),
+            session_id: Some(sub_session_id.clone()),
+            state: Default::default(),
+        })
+        .await
+        .map_err(|e| AdkError::tool(format!("failed to create sub-agent session: {e}")))?;
 
     let runner = Runner::builder()
         .app_name("momo-fetch-task")
@@ -204,7 +260,7 @@ pub async fn task(args: TaskArgs) -> Result<Value, AdkError> {
         set_task_context(child_ctx);
 
         let stream = runner
-            .run_str("task-user", "task-session", content)
+            .run_str(SUB_AGENT_USER, &sub_session_id, content)
             .await
             .map_err(|e| AdkError::tool(format!("sub-agent execution failed: {e}")))?;
 
@@ -276,11 +332,7 @@ async fn collect_final_response(
     let mut text_parts: Vec<String> = Vec::new();
 
     // Emit status events for sub-agent progress
-    STATUS_TX.with(|tx| {
-        if let Some(sender) = tx.borrow().as_ref() {
-            sender.started("task", &format!("running: {task_description}"));
-        }
-    });
+    with_status(|s| s.started("task", &format!("running: {task_description}")));
 
     while let Some(event_result) = stream.next().await {
         match event_result {
@@ -291,10 +343,11 @@ async fn collect_final_response(
                             Part::FunctionCall { name, .. } => {
                                 tool_call_count += 1;
                                 tracing::debug!("sub-agent tool call: {name}");
-                                STATUS_TX.with(|tx| {
-                                    if let Some(sender) = tx.borrow().as_ref() {
-                                        sender.progress("task", &format!("tool call {}: {name}", tool_call_count));
-                                    }
+                                with_status(|s| {
+                                    s.progress(
+                                        "task",
+                                        &format!("tool call {}: {name}", tool_call_count),
+                                    );
                                 });
                             }
                             Part::Text { text } => {
@@ -310,11 +363,7 @@ async fn collect_final_response(
                 }
             }
             Err(e) => {
-                STATUS_TX.with(|tx| {
-                    if let Some(sender) = tx.borrow().as_ref() {
-                        sender.failed("task", &format!("stream error: {e}"));
-                    }
-                });
+                with_status(|s| s.failed("task", &format!("stream error: {e}")));
                 return Err(AdkError::tool(format!(
                     "sub-agent stream error: {e}"
                 )));
@@ -323,11 +372,7 @@ async fn collect_final_response(
     }
 
     // Emit completed status
-    STATUS_TX.with(|tx| {
-        if let Some(sender) = tx.borrow().as_ref() {
-            sender.completed("task", &format!("done ({tool_call_count} tool calls)"));
-        }
-    });
+    with_status(|s| s.completed("task", &format!("done ({tool_call_count} tool calls)")));
 
     let combined_text = text_parts.join("");
 

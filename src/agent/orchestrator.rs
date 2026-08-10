@@ -6,7 +6,7 @@
 //! - `receive_messages`: Receive messages from spawned agents via mailbox
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use adk_rust::agent::LlmAgentBuilder;
@@ -23,12 +23,25 @@ use crate::memory::vault::ObsidianVault;
 use crate::providers::ProviderManager;
 use crate::sandbox::FilesystemSandbox;
 use crate::team::Mailbox;
+// `create` lives on the trait, not the concrete service.
+use adk_session::SessionService as _;
 
-// ─── Thread-local context for orchestrator dependencies ────────────
+/// User id every sub-agent runs under.
+///
+/// Sub-agent sessions are throwaway and in-memory; the id only has to be
+/// stable between the `create` and the `run` that follows it.
+const SUB_AGENT_USER: &str = "sub-agent";
 
-thread_local! {
-    static ORCH_CTX: std::cell::RefCell<Option<OrchestratorContext>> = std::cell::RefCell::new(None);
-}
+// ─── Process-global context for orchestrator dependencies ─────────
+//
+// Not `thread_local!`, for the reason recorded in `tools/file.rs`: the context
+// is installed on whichever thread builds the registry, but a tool runs later
+// on an arbitrary tokio worker, so a thread-local made the lookup depend on
+// which worker picked up the task. A process-global is correct because the
+// harness has exactly one of each of these by construction, and `get_*` clones
+// out of the lock so no guard is held across an `await`.
+
+static ORCH_CTX: RwLock<Option<OrchestratorContext>> = RwLock::new(None);
 
 /// Dependencies needed by the orchestrator tools.
 pub struct OrchestratorContext {
@@ -42,21 +55,27 @@ pub struct OrchestratorContext {
     pub identity: String,
 }
 
-/// Set the orchestrator context for the current thread.
+/// Set the orchestrator context for the process.
 pub fn set_orchestrator_context(ctx: OrchestratorContext) {
-    ORCH_CTX.with(|c| *c.borrow_mut() = Some(ctx));
+    if let Ok(mut c) = ORCH_CTX.write() {
+        *c = Some(ctx);
+    }
 }
 
-/// Clear the orchestrator context for the current thread.
+/// Clear the orchestrator context.
 pub fn clear_orchestrator_context() {
-    ORCH_CTX.with(|c| *c.borrow_mut() = None);
+    if let Ok(mut c) = ORCH_CTX.write() {
+        *c = None;
+    }
 }
 
 fn get_orch_context() -> Result<OrchestratorContext, AdkError> {
-    ORCH_CTX.with(|c| {
-        c.borrow()
-            .as_ref()
-            .map(|ctx| OrchestratorContext {
+    let guard = ORCH_CTX
+        .read()
+        .map_err(|_| AdkError::tool("orchestrator context lock poisoned"))?;
+    guard
+        .as_ref()
+        .map(|ctx| OrchestratorContext {
                 provider_mgr: ProviderManager::from_current(
                     ctx.provider_mgr.current(),
                     ctx.provider_mgr.current_provider().to_string(),
@@ -67,10 +86,9 @@ fn get_orch_context() -> Result<OrchestratorContext, AdkError> {
                 agent_registry: ctx.agent_registry.clone(),
                 project_path: ctx.project_path.clone(),
                 mailbox_path: ctx.mailbox_path.clone(),
-                identity: ctx.identity.clone(),
-            })
-            .ok_or_else(|| AdkError::tool("orchestrator context not initialized"))
-    })
+            identity: ctx.identity.clone(),
+        })
+        .ok_or_else(|| AdkError::tool("orchestrator context not initialized"))
 }
 
 // ─── spawn_agent tool ──────────────────────────────────────────────
@@ -165,7 +183,21 @@ async fn spawn_inline(
         .build()
         .map_err(|e| AdkError::tool(format!("failed to build agent: {e}")))?;
 
+    // The session must exist before the runner is asked to use it — `Runner::run`
+    // only gets it, and a missing one surfaces as `session not found`. Same bug
+    // as the `task` tool had; fixed in both places at once.
     let session_service = Arc::new(adk_session::InMemorySessionService::new());
+    let spawn_session_id = format!("spawn-{}", uuid::Uuid::new_v4());
+    session_service
+        .create(adk_session::CreateRequest {
+            app_name: "momo-fetch-spawn".to_string(),
+            user_id: SUB_AGENT_USER.to_string(),
+            session_id: Some(spawn_session_id.clone()),
+            state: Default::default(),
+        })
+        .await
+        .map_err(|e| AdkError::tool(format!("failed to create spawn session: {e}")))?;
+
     let runner = Runner::builder()
         .app_name("momo-fetch-spawn")
         .agent(Arc::new(agent))
@@ -176,7 +208,7 @@ async fn spawn_inline(
     // Execute the task
     let content = Content::new("user").with_text(task);
     let stream = runner
-        .run_str("default-user", "spawn-session", content)
+        .run_str(SUB_AGENT_USER, &spawn_session_id, content)
         .await
         .map_err(|e| AdkError::tool(format!("failed to run agent: {e}")))?;
 
