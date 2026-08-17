@@ -8,6 +8,7 @@ mod deeplink;
 mod gateway;
 mod menu;
 mod secrets;
+mod shell_path;
 
 use std::path::PathBuf;
 use std::sync::Mutex;

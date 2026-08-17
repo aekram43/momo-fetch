@@ -96,6 +96,15 @@ impl Supervisor {
         // touches the keychain itself (see secrets.rs for why that matters).
         cmd.envs(env);
 
+        // A GUI launch gives us the launchd default PATH, and the gateway hands
+        // its own PATH to every stdio MCP server it spawns — so without this,
+        // `npx`-based servers fail to start in the app and only in the app.
+        // Applied after `envs` so the recovered value cannot be shadowed.
+        // See shell_path.rs.
+        if let Some(path) = crate::shell_path::for_gateway() {
+            cmd.env("PATH", path);
+        }
+
         // On Unix, put the child in its own process group. Without this a
         // Ctrl-C in a terminal-launched app is delivered to the child too, and
         // it dies before our shutdown path runs.
