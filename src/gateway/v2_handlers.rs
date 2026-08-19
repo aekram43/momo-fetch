@@ -192,6 +192,15 @@ async fn run_v2_turn(
         emit!(tx, state, lease, event);
     }
 
+    // Stamp the tree before anything runs. Whatever the turn writes — through
+    // the file tools, through the shell, through a subprocess it started — is
+    // the difference between this and the stamp taken after the last leg.
+    let root = {
+        let harness = state.harness.read().await;
+        harness.sandbox().root().to_path_buf()
+    };
+    let before = stamp(&root).await;
+
     let mut stop_reason = "complete";
     let mut next_leg = Some(LegStart::Initial(prompt));
 
@@ -323,6 +332,26 @@ async fn run_v2_turn(
         emit!(tx, state, lease, event);
     }
 
+    // Files, after cost: an interrupted or failed turn still wrote whatever it
+    // wrote, and that is exactly when someone needs to see it.
+    if let Some(before) = before {
+        let after = stamp(&root).await;
+        let files: Vec<ArtifactChange> = after
+            .map(|after| crate::artifacts::changes(&before, &after, &root))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| ArtifactChange {
+                path: c.path,
+                change: c.kind.as_str().to_string(),
+            })
+            .collect();
+
+        if !files.is_empty() {
+            let event = V2StreamEvent::Artifacts(ArtifactsPayload { files });
+            emit!(tx, state, lease, event);
+        }
+    }
+
     if lease.is_interrupted() {
         stop_reason = "interrupted";
     }
@@ -332,6 +361,23 @@ async fn run_v2_turn(
         stop_reason: stop_reason.to_string(),
     });
     emit!(tx, state, lease, event);
+}
+
+/// Stamp the tree off the async runtime.
+///
+/// A walk of a large project is milliseconds of *blocking* work; on a runtime
+/// thread it stalls every other request the gateway is serving. `None` means
+/// the stamp could not be taken, and the turn simply reports no files rather
+/// than guessing at them.
+async fn stamp(root: &std::path::Path) -> Option<crate::artifacts::Snapshot> {
+    let root = root.to_path_buf();
+    match tokio::task::spawn_blocking(move || crate::artifacts::Snapshot::take(&root)).await {
+        Ok(snapshot) => Some(snapshot),
+        Err(e) => {
+            tracing::warn!("could not stamp the project tree for artifacts: {e}");
+            None
+        }
+    }
 }
 
 /// How the next leg of a turn is started.

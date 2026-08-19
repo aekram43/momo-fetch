@@ -1,4 +1,5 @@
 mod agent;
+mod artifacts;
 mod cli;
 mod config;
 mod context;

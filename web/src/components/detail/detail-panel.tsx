@@ -21,9 +21,23 @@ export function DetailPanel() {
   const last = [...messages].reverse().find((m) => m.role === "assistant");
   const calls = last?.toolCalls ?? [];
 
-  // Artifacts are derived client-side from write-shaped tool calls; there is no
-  // artifact API (spec §6). Turn-scoped, and the copy says so.
-  const artifacts = calls.filter((c) => /write|edit|create/i.test(c.name));
+  // Two sources, deliberately. The gateway compares the project tree before and
+  // after the turn, which catches every file however it was written — a shell
+  // heredoc, `sed -i`, a formatter — but only inside the sandbox root, and only
+  // once the turn ends. Write-shaped tool calls fill both gaps: they appear as
+  // the agent makes them, and they cover writes that land outside the project,
+  // like `mem_write` into the vault.
+  const written = useChatStore((s) => s.turnArtifacts);
+  const fromCalls = calls
+    .filter((c) => /write|edit|create/i.test(c.name))
+    .map((c) => ({ key: c.id, path: pathOf(c.args) ?? c.name, change: null as string | null }));
+
+  const seen = new Set(written.map((f) => f.path));
+  const artifacts = [
+    ...written.map((f) => ({ key: f.path, path: f.path, change: f.change })),
+    // A path the diff already reported is the same file, better described.
+    ...fromCalls.filter((c) => !seen.has(c.path)),
+  ];
 
   return (
     <aside
@@ -53,19 +67,21 @@ export function DetailPanel() {
 
       <PanelSection title="Artifacts">
         {artifacts.length === 0 ? (
-          <Hint>Files written this turn show up here.</Hint>
+          <Hint>Files this turn changed show up here.</Hint>
         ) : (
           <>
             <ul className="space-y-0.5">
               {artifacts.map((a) => (
-                <li key={a.id} className="truncate font-mono text-[11px] text-dim">
-                  {pathOf(a.args) ?? a.name}
+                <li key={a.key} className="flex items-baseline gap-1.5">
+                  <span className="truncate font-mono text-[11px] text-dim">{a.path}</span>
+                  {a.change && (
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-faint">
+                      {a.change === "created" ? "new" : a.change === "deleted" ? "del" : "mod"}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
-            <p className="mt-1 text-[10px] leading-relaxed text-faint">
-              Derived from this turn&apos;s tool calls, not a filesystem diff.
-            </p>
           </>
         )}
       </PanelSection>

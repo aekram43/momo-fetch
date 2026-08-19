@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import type {
   ApprovalRequiredEvent,
+  ArtifactChange,
   ContextUsageEvent,
   RoleEvent,
   SessionMessage,
@@ -38,6 +39,11 @@ interface ChatState {
   pendingApproval: ApprovalRequiredEvent | null;
   /** Sum of the per-leg `usage` events for the current turn. */
   turnTokens: { prompt: number; completion: number };
+  /**
+   * Files the current turn changed on disk, from the gateway's before/after
+   * comparison. Arrives once, at the end of the turn.
+   */
+  turnArtifacts: ArtifactChange[];
   sessionCost: number;
   context: ContextUsageEvent | null;
   /** Set when a turn is refused with 409, cleared on the next successful send. */
@@ -53,6 +59,7 @@ interface ChatState {
   onApprovalResolved: (approved: boolean) => void;
   onUsage: (e: UsageEvent) => void;
   onContext: (e: ContextUsageEvent) => void;
+  onArtifacts: (files: ArtifactChange[]) => void;
   onDone: () => void;
   onError: (message: string) => void;
   setConflict: (message: string | null) => void;
@@ -88,6 +95,7 @@ export const useChatStore = create<ChatState>((set) => ({
   model: null,
   pendingApproval: null,
   turnTokens: { prompt: 0, completion: 0 },
+  turnArtifacts: [],
   sessionCost: 0,
   context: null,
   conflict: null,
@@ -101,6 +109,7 @@ export const useChatStore = create<ChatState>((set) => ({
       ],
       // Per-turn counters reset; session cost is cumulative and must not.
       turnTokens: { prompt: 0, completion: 0 },
+      turnArtifacts: [],
       conflict: null,
       error: null,
     })),
@@ -210,6 +219,8 @@ export const useChatStore = create<ChatState>((set) => ({
 
   onContext: (e) => set({ context: e }),
 
+  onArtifacts: (files) => set({ turnArtifacts: files }),
+
   onDone: () => set({ turnId: null, pendingApproval: null }),
 
   onError: (message) => set({ error: message, turnId: null }),
@@ -224,6 +235,9 @@ export const useChatStore = create<ChatState>((set) => ({
       pendingApproval: null,
       error: null,
       conflict: null,
+      // Changed files are observed live, never stored — a session loaded from
+      // history has none, and showing the previous session's would be a lie.
+      turnArtifacts: [],
       messages: messages
         // The harness injects retrieved memories as a synthetic user turn;
         // showing it would be confusing — it is not something the user typed.
@@ -252,6 +266,7 @@ export const useChatStore = create<ChatState>((set) => ({
       turnId: null,
       pendingApproval: null,
       turnTokens: { prompt: 0, completion: 0 },
+      turnArtifacts: [],
       context: null,
       conflict: null,
       error: null,

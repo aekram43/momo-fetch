@@ -70,6 +70,7 @@ pub enum V2StreamEvent {
     ApprovalResolved(ApprovalResolvedPayload),
     Usage(UsagePayload),
     ContextUsage(ContextUsagePayload),
+    Artifacts(ArtifactsPayload),
     Error(ErrorPayload),
     Done(DonePayload),
 }
@@ -86,6 +87,7 @@ impl V2StreamEvent {
             Self::ApprovalResolved(_) => "approval_resolved",
             Self::Usage(_) => "usage",
             Self::ContextUsage(_) => "context_usage",
+            Self::Artifacts(_) => "artifacts",
             Self::Error(_) => "error",
             Self::Done(_) => "done",
         }
@@ -178,6 +180,24 @@ pub struct ContextUsagePayload {
 pub struct ErrorPayload {
     pub code: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArtifactsPayload {
+    pub files: Vec<ArtifactChange>,
+}
+
+/// One path the turn created, modified or deleted.
+///
+/// Found by comparing the sandbox tree before and after the turn, so it covers
+/// writes the agent made through the shell as well as through the file tools —
+/// see `crate::artifacts`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ArtifactChange {
+    /// Relative to the project root.
+    pub path: String,
+    /// `"created"`, `"modified"` or `"deleted"`.
+    pub change: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

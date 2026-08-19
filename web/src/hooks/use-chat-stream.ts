@@ -68,6 +68,9 @@ export function useChatStream() {
             case "context_usage":
               s.onContext(ev.data);
               break;
+            case "artifacts":
+              s.onArtifacts(ev.data.files);
+              break;
             case "error":
               s.onError(ev.data.message);
               break;

@@ -105,6 +105,24 @@ export interface ContextUsageEvent {
   percent: number;
 }
 
+/** One path a turn created, modified or deleted. */
+export interface ArtifactChange {
+  /** Relative to the project root. */
+  path: string;
+  change: "created" | "modified" | "deleted";
+}
+
+/**
+ * Files the turn changed on disk.
+ *
+ * Emitted once, after the last leg — the gateway compares the project tree
+ * before and after the turn, so this covers writes made through the shell as
+ * well as through the file tools. Absent when nothing changed.
+ */
+export interface ArtifactsEvent {
+  files: ArtifactChange[];
+}
+
 export interface DoneEvent {
   turn_id: string;
   stop_reason: "complete" | "error" | "interrupted";
@@ -120,6 +138,7 @@ export type StreamEvent =
   | { type: "approval_resolved"; data: ApprovalResolvedEvent }
   | { type: "usage"; data: UsageEvent }
   | { type: "context_usage"; data: ContextUsageEvent }
+  | { type: "artifacts"; data: ArtifactsEvent }
   | { type: "error"; data: GatewayError }
   | { type: "done"; data: DoneEvent }
   /** Forward compatibility: surfaced, never silently dropped (spec §5). */
@@ -134,6 +153,7 @@ export const sseEventNames = [
   "approval_resolved",
   "usage",
   "context_usage",
+  "artifacts",
   "error",
   "done",
 ] as const;
