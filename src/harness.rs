@@ -381,7 +381,7 @@ impl Harness {
             .runner
             .run_str("default-user", &self.current_session_id, content)
             .await?;
-        Ok(stream)
+        Ok(self.recording_replies(stream))
     }
 
     /// Run a single conversational turn with memory enrichment.
@@ -395,7 +395,7 @@ impl Harness {
             .runner
             .run_str("default-user", &self.current_session_id, content)
             .await?;
-        Ok((enriched, stream))
+        Ok((enriched, self.recording_replies(stream)))
     }
 
 
@@ -420,7 +420,22 @@ impl Harness {
             .runner
             .run_str("default-user", &self.current_session_id, content)
             .await?;
-        Ok(stream)
+        Ok(self.recording_replies(stream))
+    }
+
+    /// Wrap a turn's events so the agent's replies are persisted.
+    ///
+    /// adk streams a reply as partial events and persists only the non-partial
+    /// one, which for text is metadata with no content — so without this the
+    /// session store keeps the tool calls and loses every word. Applied to all
+    /// three entry points, since the REPL and the gateway both read the turn
+    /// back from the store on the next one. See `transcript`.
+    fn recording_replies(&self, stream: EventStream) -> EventStream {
+        crate::transcript::recording_replies(
+            stream,
+            self.session_mgr.service(),
+            self.current_session_id.clone(),
+        )
     }
 
     /// Interrupt current generation.

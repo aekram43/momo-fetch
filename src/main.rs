@@ -14,6 +14,7 @@ mod session;
 mod skill;
 mod team;
 mod tools;
+mod transcript;
 
 use clap::Parser;
 use cli::CliArgs;
