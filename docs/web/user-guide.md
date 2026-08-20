@@ -103,11 +103,14 @@ Header optionally shows token count in monospace: `{prompt}↑ {completion}↓` 
 
 ### Artifacts
 
-**Files written this turn**, derived client-side from tool calls whose names match `write`, `edit`, or `create` (case-insensitive). Shows:
-- List of file paths (monospace)
-- Disclaimer: "Derived from this turn's tool calls, not a filesystem diff."
+**Every file the turn changed.** Two sources, shown as one list of paths in monospace, deduplicated:
 
-If empty, a hint says "Files written this turn show up here."
+- **The filesystem diff.** The gateway compares the project tree before the turn and after it, so this covers files written any way at all — the file tools, a shell heredoc, `sed -i`, `>`, a formatter, a codegen step. Each row carries a tag: `new`, `mod` or `del`. It arrives once, when the turn ends. Build output and `.git` are excluded (as is anything `.gitignore` or `.agentignore` covers); dotfiles like `.env` are not.
+- **Write-shaped tool calls**, as the agent makes them — `file_write`, `file_edit`, and also `mem_write`, which writes into the memory vault rather than the project. These appear immediately, without waiting for the turn to end, and cover writes that land outside the project folder. They have no tag.
+
+Turn-scoped and not stored: reopening a past session shows none.
+
+If empty, a hint says "Files this turn changed show up here."
 
 ## Status Bar (bottom)
 

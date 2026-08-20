@@ -97,6 +97,9 @@ data: Hello
 event: text
 data:  there
 
+event: artifacts
+data: {"files":[{"path":"hello.txt","change":"created"}]}
+
 event: done
 data: {"turn_id":"...","stop_reason":"complete"}
 ```
@@ -115,6 +118,7 @@ The parser joins multi-line data with newlines (per the SSE spec) and yields typ
 | **approval_resolved** | call_id, approved, reason ("user", "timeout", "disconnect") | After approval decision |
 | **usage** | prompt_tokens, completion_tokens, total_tokens?, cost_usd | Once per leg, cumulative cost |
 | **context_usage** | used, total, percent | During long turns, as context fills |
+| **artifacts** | files: [{ path, change: "created"/"modified"/"deleted" }] | At most once, after the last leg, before `done`. Omitted when nothing changed |
 | **error** | code, message, details? | On error, may end turn |
 | **done** | turn_id, stop_reason ("complete", "error", "interrupted") | At turn end, always last |
 | **unknown** | name (event type), raw (data string) | Forward compat: unknown types are surfaced |
@@ -342,6 +346,7 @@ controller.abort();
 - **Token polling** — A `usage` event arrives once per leg (a leg is an approval round-trip). Multiple `usage` events can arrive in one turn; token counts are additive, cost is a replacement
 - **Context pressure** — `context_usage` tells you how much of the model's context window is used; this is not a hard limit, but approaching 95% may cause the agent to summarize or truncate
 - **Large tool outputs** — Truncated at the gateway; `truncated: true` signals that the output was cut off and the detail panel shows the full log
+- **Artifacts cost a tree walk** — the gateway stamps the sandbox tree before the turn and after the last leg (`src/artifacts.rs`), skipping `.git`, `node_modules`, `target`, `.next` and anything `.gitignore`/`.agentignore` excludes. ~17 ms per stamp on a 378-file repo, off the async runtime; a tree over 50k files is not diffed at all and the event is simply omitted
 
 ## Testing
 

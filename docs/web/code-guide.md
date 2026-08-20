@@ -14,7 +14,7 @@ web/src/
 │   ├── chat/               # Composer, messages, tool cards, approval dialog
 │   ├── layout/             # App shell, header, sidebar, status bar
 │   ├── settings/           # Settings dialog and four panels
-│   ├── detail/             # Right panel: turn info, files, memory
+│   ├── detail/             # Right panel: this turn's tool calls + changed files
 │   ├── sidebar/            # Session list, agent picker, tool status
 │   └── shared/             # Reusable: toaster, buttons, etc.
 ├── hooks/
@@ -80,6 +80,7 @@ web/src/
 - Not persisted; clears on refresh
 - **Turn lifecycle:** `turnId` is set by the `role` event, cleared by `done` or `error`
 - **Approval:** `pendingApproval` is set when `approval_required` arrives, cleared when `approval_resolved` arrives. The call id changes after approval (the harness spawns a new turn), so call ids are *not* stable across an approval.
+- **Artifacts:** `turnArtifacts` holds the files the turn changed, from the gateway's `artifacts` event — a comparison of the project tree before and after the turn, so it arrives once at the end and covers writes made through the shell. Cleared when a turn starts and when history loads: changed files are observed live and never stored, so a session loaded from history has none. The detail panel renders these alongside the rows it still derives from write-shaped tool calls (deduplicated by path), because those appear *as* the agent works and cover writes outside the sandbox root, such as `mem_write` into the vault.
 
 **Fetching gateway resources** (`useGatewayResource`)
 

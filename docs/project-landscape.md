@@ -7,7 +7,7 @@ where that dependency graph will bite you.
 > come from every `crate::<module>` reference in `src/`, so they include
 > fully-qualified uses that a `use` statement alone would miss.
 >
-> **Last verified:** 2026-08-07 · `dev` · rust 24,267 lines · web 5,829 · desktop 1,376
+> **Last verified:** 2026-08-19 · `dev` · rust 25,429 lines · web 6,017 · desktop 1,660
 
 ---
 
@@ -16,14 +16,14 @@ where that dependency graph will bite you.
 ```
                      ┌───────────────────────────────────┐
                      │  desktop/   Tauri shell           │
-                     │  Rust · 1.4k lines · 6 files      │
+                     │  Rust · 1.7k lines · 7 files      │
                      │  keychain · menus · supervision   │
                      └───────┬───────────────────┬───────┘
                     spawns   │                   │  embeds the build
                              ▼                   ▼
       ┌──────────────────────────────┐   ┌──────────────────────────┐
       │  src/    momo-fetch          │   │  web/   Next.js          │
-      │  Rust · 24k lines · 16 mods  │   │  TS · 5.8k · 50 files    │
+      │  Rust · 25k lines · 18 mods  │   │  TS · 6.0k · 50 files    │
       │                              │   │  static export           │
       │  REPL · -p oneshot           │   │  no JS server anywhere   │
       │  --gateway  (v1 + v2 HTTP)   │   └──────────────────────────┘
@@ -50,7 +50,7 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 
 ## 2. `src/` — the harness
 
-16 modules. Four of them are 80% of the code.
+18 modules. Four of them are 80% of the code.
 
 ### The big four
 
@@ -70,7 +70,9 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 | `providers.rs` | 544 | Provider registry, availability, liveness probe |
 | `context_window.rs` | 492 | Model context sizes |
 | `session.rs` | 255 | SQLite session store |
-| `main.rs` | 37 | Declares the modules and calls `cli` |
+| `artifacts.rs` | 323 | Stamps the sandbox tree before/after a turn; the `artifacts` event is the difference |
+| `transcript.rs` | 335 | Reassembles a streamed reply into one stored event — adk persists none of it |
+| `main.rs` | 39 | Declares the modules and calls `cli` |
 
 ### Supporting
 
@@ -107,6 +109,8 @@ graph TD
     mcp[mcp]
     sandbox[sandbox]
     session[session]
+    transcript[transcript]
+    artifacts[artifacts]
     skill[skill]
     cost[cost]
     cw[context_window]
@@ -121,6 +125,7 @@ graph TD
     cli --> cw
 
     gateway --> harness
+    gateway --> artifacts
     gateway --> config
     gateway --> memory
     gateway --> sandbox
@@ -130,6 +135,7 @@ graph TD
     harness --> context
     harness --> mcp
     harness --> session
+    harness --> transcript
     harness --> skill
     harness --> cost
     harness --> providers
@@ -164,20 +170,21 @@ graph TD
     config -. CliArgs .-> cli
 
     classDef leaf fill:#0b2b3f,stroke:#f76915,color:#fff
-    class sandbox,session,skill,cost,mcp,team,cw leaf
+    class sandbox,session,skill,cost,mcp,team,cw,artifacts leaf
 ```
 
 Every edge in this graph is in the source; nothing is elided for tidiness. The
 dotted ones point *back up* into `cli` and are the cycles — see [§4](#4-cycles).
 
 **Leaves** (depend on nothing in the crate): `sandbox` · `session` · `skill` ·
-`cost` · `mcp` · `team` · `context_window`. These are the safe modules to change
-in isolation.
+`cost` · `mcp` · `team` · `context_window` · `artifacts`. These are the safe
+modules to change in isolation. `transcript` reaches only `session`, and only
+in its tests.
 
 **Most depended on:** `sandbox` (5) · `memory` (5) · `config` (5) ·
 `providers` (3) · `team` (3).
 
-`harness` reaches 14 of the other 15 modules. It is the assembly point, and it
+`harness` reaches 15 of the other 17 modules. It is the assembly point, and it
 is the reason nothing in this crate is really isolated from anything else.
 
 ---
@@ -202,7 +209,7 @@ move — no logic changes, no behaviour changes.
 
 ## 5. `web/` and `desktop/`
 
-### `web/src` — 50 files, 5.8k lines
+### `web/src` — 50 files, 6.0k lines
 
 Next.js **static export** (`output: 'export'`). No JavaScript server exists at
 any point; the gateway serves the built files.
@@ -223,7 +230,7 @@ any point; the gateway serves the built files.
 the gateway; `npm run build:desktop` sets none, for Tauri at `/`. Use the wrong
 one and every asset 404s.
 
-### `desktop/src-tauri/src` — 6 files, 1.4k lines
+### `desktop/src-tauri/src` — 7 files, 1.6k lines
 
 A thin shell. It contains no agent logic at all.
 
@@ -234,6 +241,7 @@ A thin shell. It contains no agent logic at all.
 | `secrets.rs` | **The OS keychain — the only thing the shell genuinely owns.** macOS attaches an ACL per binary, so a key written here and read by the gateway would prompt the user inside a child process with no UI. The shell reads it and injects it as an env var at spawn |
 | `menu.rs` | Native menu + tray, emitting one `momo:menu` event |
 | `deeplink.rs` | Validates `momo://` links before the UI is allowed to act on one |
+| `shell_path.rs` | Recovers the login shell's `PATH`. A Finder launch has launchd's, so the gateway could not find `npx` and every stdio MCP server failed to start |
 | `main.rs` | 185 bytes |
 
 ---

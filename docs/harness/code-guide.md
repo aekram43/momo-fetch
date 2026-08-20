@@ -23,6 +23,7 @@ cli/mod.rs (clap arg parsing)
           +---> sandbox/        (filesystem isolation)
           +---> context/        (system prompt builder)
           +---> session.rs      (SQLite session persistence)
+          +---> transcript.rs   (reassembles streamed replies into the session)
           +---> memory/         (Obsidian vault engine)
           +---> mcp/            (MCP server management)
           +---> skill/          (skill system)
@@ -115,6 +116,7 @@ This is the central construction sequence. Order matters:
    - Enriches input with relevant memories (if auto_search enabled)
    - Creates `Content::new("user").with_text(enriched_input)`
    - Calls `runner.run_str("default-user", session_id, content)` → returns `EventStream`
+   - Wraps that stream in `transcript::recording_replies` (see below) — without it the agent's own text never reaches the session store
 3. Consumes the `EventStream` via `consume_stream()`:
    - **Thinking spinner** → `ThinkingSpinner` shows braille animation while waiting for LLM
    - **Text parts** → spinner stops, `print!()` (streamed token by token)
@@ -387,6 +389,38 @@ Two system prompt methods:
 - `/sessions` lists past sessions, `/resume <id>` restores one
 - `/clear` deletes current session and creates a fresh one
 - `/compact` summarizes events into a new session (delete old + create new + append summary event)
+
+### Reply persistence (`src/transcript.rs`)
+
+"Events are auto-saved by adk-runner" is true but incomplete, and the gap cost
+a real bug *(fixed 2026-08-19)*. In streaming mode — `RunConfig::default()` is
+`StreamingMode::SSE` — adk emits one event per model chunk, all sharing an
+event id, each carrying only its delta. The assembled text lives in an
+accumulator that `adk-agent` turns into an event **only in the non-streaming
+branch**. The runner persists only non-partial events, and the sole non-partial
+event a text reply produces is the provider's terminal chunk: finish reason,
+usage, `content: null`.
+
+So tool calls were stored (they arrive non-partial) and every word the agent
+said was streamed to the client and dropped. Worse than a blank transcript:
+`Runner::run` reloads the session from the store at the top of **every** turn,
+so the model was handed a history in which it had never spoken.
+
+`transcript::recording_replies` wraps the turn's `EventStream`, reassembles the
+deltas and writes one event per LLM call. Applied in all three entry points
+(`run_turn`, `run_turn_enriched`, `run_confirmation_turn`), so the REPL and the
+gateway both get it. Two things about it are load-bearing:
+
+- **It writes at the terminal event, before yielding it.** Consumers stop
+  polling at `Event::is_final_response()` — the gateway's SSE handler `return`s
+  there — which drops the wrapper where it stands. A write deferred to the end
+  of the loop never runs.
+- **The event is stamped with the first chunk's time, not the flush time.**
+  Events are read back `ORDER BY timestamp`, and a reply that preceded a tool
+  call can only be flushed after it.
+
+Ids are `{streamed_event_id}_text_{n}`; events are inserted, not upserted, and
+one LLM call can speak twice around a tool call.
 
 ---
 

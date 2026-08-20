@@ -626,6 +626,18 @@ Total tools available: 13
 
 MCP tools are automatically available to the agent with the `mcp_` namespace prefix (e.g., `mcp_filesystem__read_file`).
 
+**If a stdio server works here but is red in the desktop app**, it was a `PATH`
+problem, fixed on 2026-08-17. An app launched from Finder or the Dock inherits
+`/usr/bin:/bin:/usr/sbin:/sbin` from launchd and never sees your login shell, so
+`npx` — installed by nvm, Homebrew, Volta or asdf — could not be found. The
+desktop shell now recovers the shell's `PATH` before starting the gateway
+(`desktop/src-tauri/src/shell_path.rs`). On an older build, the workaround is an
+absolute path in `.harness/mcp.json`:
+
+```json
+"command": "/Users/you/.nvm/versions/node/v23.11.0/bin/npx"
+```
+
 ---
 
 ## 9. Skills

@@ -13,6 +13,7 @@ The shell is small and single-purpose: it owns the keychain, supervises the gate
 | `desktop/src-tauri/src/secrets.rs` | ~218 | Keychain read/write; environment variable injection; key precedence |
 | `desktop/src-tauri/src/menu.rs` | ~140 | Native menus and tray icon; emit `momo:menu` events |
 | `desktop/src-tauri/src/deeplink.rs` | ~218 | Parse and validate `momo://` URLs; emit proposal events |
+| `desktop/src-tauri/src/shell_path.rs` | ~180 | Recover the login shell's `PATH` for a GUI launch, so the gateway can spawn stdio MCP servers |
 | `desktop/src-tauri/tauri.conf.json` | ~87 | Bundling, resources, beforeBuildCommand, deep link scheme |
 | `web/src/lib/desktop.ts` | ~170 | IPC contract definition; event listeners; TypeScript types |
 
@@ -127,6 +128,34 @@ This is the opposite of the CLI, where `.env` wins. In the GUI, what you type in
 - Port 0 (kernel-assigned); the child reports its actual port on stdout
 - Both `tauri://localhost` and `http://tauri.localhost` CORS origins (for the webview)
 - Working directory set to the project root (so `.harness/` is writable)
+- A recovered `PATH` — see below
+
+### The PATH a GUI launch does not have
+
+*(fixed 2026-08-17)* macOS hands an app launched from Finder or the Dock the
+launchd default `PATH`: `/usr/bin:/bin:/usr/sbin:/sbin`. The login shell is
+never involved, so nothing installed by nvm, Homebrew, Volta or asdf is on it.
+The gateway inherits that `PATH` and passes it to every stdio MCP server it
+spawns, so an `npx`-based server dies with `command 'npx' not found`, the
+Tools panel paints it red, and the *same* `mcp.json` works from a terminal.
+It reads as an MCP bug; it is an environment bug one process earlier.
+
+`shell_path::for_gateway()` fixes it the way editors do — ask the login shell
+once and hand the answer to the child:
+
+- **Skipped unless the current `PATH` looks untouched by any shell**, so a
+  terminal launch and `cargo tauri dev` pay nothing for it.
+- **`$SHELL -ilc`** — interactive *and* login. Version managers live in
+  `.zshrc` at least as often as in `.zprofile`; reading one misses half.
+- **A marker around the printed value**, so rc-file chatter (nvm notices,
+  oh-my-zsh banners) cannot end up inside `PATH`.
+- **3 s timeout, then kill.** An rc file that blocks must not wedge startup; a
+  missed probe costs only the recovery.
+- **Shell entries first**, so the user's node wins over `/usr/bin/node`; ours
+  are appended, never dropped.
+
+Windows is a no-op: a GUI process there inherits the same `PATH` a console one
+does.
 
 The supervisor drains both stdout and stderr on separate threads. It watches for the `MOMO_GATEWAY_LISTENING <url>` line and times out after 30 seconds.
 

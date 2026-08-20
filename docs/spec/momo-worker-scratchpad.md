@@ -14,7 +14,7 @@
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
 
-**UX pass (settings dialog · customization · permissions badge) · dev · 2026-08-06 · rust 308 · desktop 8 · web 31 · all clean · 🎉 ครบทุกอย่าง**
+**Truth pass (MCP `PATH` · reply persistence · artifacts diff) · dev · 2026-08-19 · rust 335 · desktop 23 · web 31 · all clean · 🎉 ครบทุกอย่าง**
 
 | ส่วน | เสร็จ | เหลือ | |
 |---|---:|---:|---|
@@ -56,6 +56,41 @@ Auto-update ก็ไม่เกี่ยว — source install อัปเด
 ## 0. Wave progress log
 
 Newest first. One entry per work package, added on completion.
+
+### ✅ Three things the panels were quietly lying about · 2026-08-19
+
+Reported as three separate "the UI is broken" complaints. None of them was a UI
+bug; each was a layer below telling the UI something false.
+
+**Red stdio MCP servers, in the app only.** The Tools panel was right — the
+servers really had failed to start. A GUI-launched macOS app inherits launchd's
+`PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), never the login shell's, so the
+gateway it spawns cannot find `npx` and every nvm/Homebrew/Volta-installed
+server dies at spawn. The same `mcp.json` works from a terminal, which is what
+made it read as an MCP problem. Fixed in `desktop/src-tauri/src/shell_path.rs`
+— see [§4.10](#410-a-gui-launched-app-has-no-shell-path).
+
+**Sessions "not saving messages".** Also true, and much worse than cosmetic:
+adk never persisted a single word the agent said, in any client, and
+`Runner::run` reloads the session from the store every turn — so the model was
+being handed a history in which it had never spoken. Fixed in
+`src/transcript.rs` — see
+[§4.9](#49-streaming-drops-the-assistants-text-and-the-model-never-sees-it).
+
+**An Artifacts panel that stayed empty.** It inferred writes from tool *names*,
+so it only ever saw `file_write`/`file_edit` and missed everything written
+through the shell. Replaced with a real before/after tree diff in
+`src/artifacts.rs`, emitted as a new `artifacts` SSE event — see
+[§4.11](#411-artifacts-are-a-filesystem-diff-not-a-tool-name-guess).
+
+Common thread worth keeping: **all three were verified against the wire, not
+against the code.** The MCP one came out of the desktop log, the transcript one
+out of `sqlite3` on `sessions.db` (13 `role: model` events of which 11 were
+function calls, plus 8 assistant events carrying `content: null` next to a
+`candidates_token_count` of 284, 783, 434 — text that was generated and
+discarded), the artifacts one out
+of a live turn told to use `shell_exec` and nothing else. Reading the code
+would have found the first and missed the shape of the other two.
 
 ### ✅ Standing-permissions badge in the status bar · 2026-08-06
 
@@ -649,6 +684,85 @@ Either way the **response shape does not change** and neither does the UI contra
 
 ### 4.8 Memory search: use the right function
 `MemorySidecar::search_for_context` is enrichment-shaped (input → prompt injection, with its own relevance gate). General search for **G5** is `ObsidianVault::search(&MemoryQuery)` (`src/memory/vault.rs:321`), plus `stats()` / `counters()`.
+
+### 4.9 Streaming drops the assistant's text, and the model never sees it
+
+*(found and fixed 2026-08-19)* `RunConfig::default()` is `StreamingMode::SSE`.
+In that mode `adk-agent` emits one event per model chunk — all sharing one
+event id, each carrying **only its delta** — and the assembled text lives in an
+accumulator it turns into an event only in the `if !should_stream_to_client`
+branch (`adk-agent-0.7.0/src/llm_agent.rs:1374`). `adk-runner` persists only
+non-partial events (`runner.rs:622`), and the one non-partial event a text
+reply produces is the provider's terminal chunk: finish reason, usage,
+`content: null`.
+
+Net effect: tool calls are stored (they arrive non-partial), **every word the
+agent says is streamed to the client and dropped.** And because `Runner::run`
+re-reads the session from the service at the top of *every* turn
+(`runner.rs:256`), this is not a transcript problem — the model itself never
+sees what it said last turn, only its own tool calls and their results.
+
+`src/transcript.rs` wraps the turn's `EventStream` and writes one reassembled
+event per LLM call. Two non-obvious constraints, both of which bit:
+
+- **Write at the terminal event, before yielding it.** Consumers stop polling
+  at `Event::is_final_response()` — `consume_leg` in `v2_handlers.rs` `return`s
+  there — which drops the wrapper mid-generator. The first cut flushed after
+  the loop and wrote nothing at all; the DB stayed empty and the logs stayed
+  silent. Anything deferred past that yield never runs. **This applies to any
+  future wrapper around an adk stream.**
+- **Stamp the event with the first chunk's time.** Events are read back
+  `ORDER BY timestamp` (`adk-session-0.7.0/src/sqlite.rs:248`), and a reply
+  that preceded a tool call can only be flushed after it — stamping at flush
+  time reorders the conversation around its own tool calls.
+
+Ids are `{streamed_id}_text_{n}`: the events table is INSERTed, not upserted
+(`sqlite.rs:526`), and one LLM call can speak twice around a tool call.
+
+### 4.10 A GUI-launched app has no shell `PATH`
+
+*(fixed 2026-08-17)* macOS gives an app launched from Finder or the Dock
+launchd's `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin` — and nothing from the login
+shell. `launchctl getenv PATH` is empty on a stock machine. The gateway
+inherits it and hands it to every stdio MCP server it spawns, so `npx` (nvm,
+Homebrew, Volta, asdf — all outside those four directories) is not found and
+`McpServerManager` marks the server `FailedToStart`, which F14 paints red.
+
+The tell that this is environmental, not an MCP bug: the identical `mcp.json`
+works when the same binary is started from a terminal.
+
+`desktop/src-tauri/src/shell_path.rs` asks the login shell once (`$SHELL -ilc`,
+marker-delimited, 3 s timeout, shell entries first) and only when the current
+`PATH` still looks like launchd's — so a terminal launch and `cargo tauri dev`
+pay nothing. Note this is *not* the same as setting `PATH` on the MCP child:
+`execvp` resolves the command against the **spawning** process's environment,
+so the fix has to land on the gateway process itself.
+
+### 4.11 Artifacts are a filesystem diff, not a tool-name guess
+
+*(revised 2026-08-19)* The original derivation — filter tool calls whose name
+matches `write|edit|create` — cannot see a file written by `shell_exec`, which
+is most of them in practice. `src/artifacts.rs` stamps the sandbox tree before
+the turn and after the last leg and reports the difference as one `artifacts`
+event.
+
+Things that are load-bearing rather than incidental:
+
+- **size *and* mtime.** A one-character edit keeps the length; a coarse mtime
+  misses two writes in a tick.
+- **`require_git(false)` on the `ignore` walker.** `.gitignore` is honoured
+  only inside a repository otherwise, and a project root is not always one.
+- **`.git`, `node_modules`, `target`, `.next` skipped by name.** Every `git`
+  invocation rewrites `.git`; that alone would bury the real edit.
+- **Hidden files kept.** `.env` and `.harness/settings.json` are the edits that
+  matter most.
+- **An incomplete walk is never diffed** — it would report every unvisited file
+  as deleted. Cap is 50k files; measured 378 files in 16.6 ms, in
+  `spawn_blocking`, twice per turn.
+
+The panel still shows tool-derived rows alongside the diff: they appear *as*
+the agent works, and they cover writes outside the sandbox root such as
+`mem_write` into the vault.
 
 ---
 

@@ -259,6 +259,9 @@ data: {"prompt_tokens":1500,"completion_tokens":300,"cost_usd":0.0045}
 event: context_usage
 data: {"used":42000,"total":200000,"percent":21.0}
 
+event: artifacts
+data: {"files":[{"path":"src/main.rs","change":"modified"},{"path":"hello.txt","change":"created"}]}
+
 event: done
 data: {"turn_id":"t_01","stop_reason":"complete"}
 ```
@@ -301,6 +304,7 @@ V2StreamEvent (enum, serialized as SSE event type):
   ApprovalResolved{ call_id, approved, reason: "user"|"timeout"|"disconnect" }
   Usage           { prompt_tokens, completion_tokens, cost_usd }
   ContextUsage    { used, total, percent }
+  Artifacts       { files: [{ path, change: "created"|"modified"|"deleted" }] }
   Error           { code, message }
   Done            { turn_id, stop_reason: "complete"|"error"|"interrupted" }
 
@@ -436,6 +440,14 @@ GET /v2/sessions/{id}/messages → { "messages":[{"role","content","timestamp","
 **Correction to v1:** `GET /v1/sessions/{id}` already returns a `messages` array; it just drops non-text parts (`src/gateway/handlers.rs:273-290`). This task walks the same `session.events().all()` but also maps `Part::FunctionCall`/`Part::FunctionResponse`, pairing them by call id so the UI can rebuild tool-call cards on reload.
 
 **Acceptance:** reloading a session that used tools renders the same tool-call cards as the live stream did.
+
+⚠️ **This endpoint can only be as complete as the event store, and the store was
+missing every assistant reply** *(found and fixed 2026-08-19)*. In streaming
+mode adk persists only the terminal, contentless chunk of a text reply, so a
+reloaded session showed tool cards and nothing said — and, because the runner
+rebuilds context from the same store each turn, the model saw the same hole.
+The handler was right all along; `src/transcript.rs` now writes the reply. See
+scratchpad §4.9 before concluding this endpoint is dropping something.
 
 ---
 
@@ -754,12 +766,13 @@ Every frame is `event: <type>` + `data: <json>`. Clients **must** ignore unknown
 | `approval_resolved` | `{ call_id, approved, reason: "user"\|"timeout"\|"disconnect" }` |
 | `usage` | `{ prompt_tokens, completion_tokens, cost_usd }` |
 | `context_usage` | `{ used, total, percent }` |
+| `artifacts` | `{ files: [{ path, change: "created"\|"modified"\|"deleted" }] }` |
 | `error` | `{ code, message }` |
 | `done` | `{ turn_id, stop_reason: "complete"\|"error"\|"interrupted" }` |
 
 **On `destructive`/`category` (replaces v1's `risk`):** v1 specified `risk: "low"|"medium"|"high"` in one place and `"destructive"` in another. Neither exists in code. `FilesystemSandbox::check_destructive` (`src/sandbox/mod.rs:225`) returns `{ is_destructive, pattern, category }` where `category` is one of *Destructive deletion / Destructive git / Destructive SQL / Destructive system*. The event carries those directly. Confirmation itself is binary — `requires_confirmation` (`:264`) returns `bool` gated on `PermissionMode` and the `MUTATING_TOOLS` list. A synthetic risk scale would be a lie the UI can't back up.
 
-**Ordering guarantees:** `role` is always first and `done` always last. `tool_call_result` always follows its `tool_call_start`. `approval_required` for a call always precedes that call's `tool_call_result`. `usage`/`context_usage` arrive before `done`. Nothing else is ordered.
+**Ordering guarantees:** `role` is always first and `done` always last. `tool_call_result` always follows its `tool_call_start`. `approval_required` for a call always precedes that call's `tool_call_result`. `usage`/`context_usage` arrive before `done`. `artifacts` arrives at most once, after the last leg and before `done` — it is a comparison of the tree before and after the *whole* turn, so it cannot be emitted per leg. Nothing else is ordered.
 
 **⚠️ `call_id` does not survive an approval** *(observed 2026-08-05, not a bug — a consequence of C1)*. The pre-approval `tool_call_start` and the post-approval one carry **different `id`s**, because the follow-up is genuinely a new turn with a new function call, not a resumption:
 
@@ -791,6 +804,7 @@ Client                          Gateway                         Harness
   │<── event: text ────────────────│    (more text)                 │
   │<── event: usage ───────────────│  (from record_event, G10)      │
   │<── event: context_usage ───────│                                │
+  │<── event: artifacts ───────────│  (tree diff, before vs after)  │
   │<── event: done ────────────────│── finalize_turn(), release     │
 ```
 
@@ -882,7 +896,15 @@ thing this product exists to show — into a column shared with a theme switch.
 desktop app.** Escape closes it and must *not* also interrupt the turn; the
 approval dialog still outranks both and owns Escape as "deny".
 
-**Artifacts tab derivation:** there is no artifact-tracking API. The tab is derived client-side from `tool_call_start` events for write-shaped tools (`file_write`, `file_edit`, …) observed during the turn. It is therefore turn-scoped and lost on reload unless reconstructed from G8's tool-call history. Say so in the UI rather than implying a filesystem diff.
+**Artifacts panel derivation** *(revised 2026-08-19 — it is now a filesystem diff)*. Deriving the list from `tool_call_start` alone only ever saw writes that went through `file_write`/`file_edit`; a turn that wrote through the shell — a heredoc, `sed -i`, `>`, a formatter, a codegen step — showed an empty panel, which is exactly the turn where someone needs the list. The gateway now stamps the sandbox tree before the turn and again after the last leg and emits the difference as one `artifacts` event (`src/artifacts.rs`).
+
+- **Stamp = size *and* mtime.** A one-character edit keeps the length; a coarse mtime misses two writes in the same tick. Each alone has a blind spot.
+- **Skips `.git`, `node_modules`, `target`, `.next`, and anything `.gitignore`/`.agentignore` excludes** (`require_git(false)`, since a project root is not always a repository). Every `git` invocation rewrites `.git`; reporting that buries the one file the user edited.
+- **Does not skip dotfiles** — `.env` and `.harness/settings.json` are the edits that matter most.
+- **Caps the walk at 50k files and refuses to diff an incomplete stamp.** A partial walk would report every unvisited file as deleted. Measured cost on the harness repo: 378 files, 16.6 ms, run in `spawn_blocking`, twice per turn.
+- **Emitted even when the turn is interrupted or errors** — whatever it wrote is still on disk.
+
+The panel keeps the tool-derived rows *alongside* the diff, deduplicated by path: they appear as the agent works rather than only at the end, and they cover writes that land outside the sandbox root, such as `mem_write` into the vault. Both are turn-scoped and neither is persisted, so a session loaded from history shows none.
 
 **Progress tab:** same source — the ordered `tool_call_start`/`tool_call_result` pairs for the current turn.
 
