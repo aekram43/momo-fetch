@@ -832,9 +832,15 @@ Workers:
 ```
 gpt-4o> /team merge
 Merge results:
-  ✓ frontend (fix-ts): Merged successfully
-  ✗ tests (auth-tests): Still running
+  ✓ frontend (fix-ts): Updating a1b2c3d..e4f5a6b
+  ✗ tests (auth-tests): Failed to merge branch 'auth-tests': CONFLICT ...
 ```
+
+Only workers that both completed *and* ran in a worktree are attempted; anything
+else is skipped silently, and a team with none prints
+`No completed workers with worktrees to merge.` A merge that conflicts is rolled
+back with `git merge --abort` before the failure is reported, so the repo is
+never left mid-merge.
 
 ### Stopping a Team
 
@@ -843,10 +849,89 @@ gpt-4o> /team stop
 ✓ Team stopped. Workers terminated, worktrees cleaned up.
 ```
 
+> ⚠️ **`/team stop` throws the work away.** "Cleaned up" means
+> `git worktree remove --force` — which discards uncommitted changes in the
+> worker's directory — followed by `git branch -d` and, if that fails because
+> the branch is unmerged, `git branch -D` (`src/team/mod.rs:944`). A worker that
+> committed to `team/coder` but was never merged loses that branch too.
+>
+> Merge first, or save what you want before stopping:
+>
+> ```bash
+> git merge --no-edit team/<worker-name>       # or
+> git branch keep/<worker-name> team/<worker-name>
+> ```
+
 ### Requirements
 
-- **tmux** for pane isolation (workers still run without it, just in background)
-- **git** for worktree isolation (optional — workers share the working directory without it)
+| | Needed for | Without it |
+|---|---|---|
+| **tmux** | running the workers at all | **Nothing starts.** See below |
+| **git** | worktree isolation | `/team start` warns and turns worktrees off for *every* worker; they all share the project directory |
+
+**tmux is not optional, whatever the warning says.** If tmux is missing,
+`/team start` prints *"Workers will run in background without pane isolation"*
+and then starts nothing: a worker is launched by sending its command to a tmux
+window, so with no window there is no process (`src/team/mod.rs:748`). The team is
+recorded, `/team status` shows every worker as `starting`, and it stays that way
+forever. Install tmux before using teams.
+
+**Not a git repo:** the check is all-or-nothing. One worker asking for a
+worktree in a non-repo disables worktrees for the whole team, and `/team merge`
+then skips those workers entirely — it only merges workers whose `use_worktree`
+is set.
+
+### What a worker actually is
+
+A separate `momo-fetch` process, one per worker, each in its own tmux **window**
+named after the worker:
+
+```
+cd <work_dir> && momo-fetch [-a <agent>] -p '<task>' 2>&1 | tee .harness/worker-<name>.log
+```
+
+- `<work_dir>` is the worktree when `worktree: true` in a git repo, otherwise the
+  project root — so **without worktrees every worker edits the same files at the
+  same time.**
+- The log is inside the worker's own directory, so with worktrees it lands in
+  `.harness/worktrees/<name>/.harness/worker-<name>.log`.
+- Watch them live with `tmux ls` then `tmux attach -t <session>`. The session is
+  named `team-<team-id>`, and since the id itself starts with `team-` it reads
+  `team-team-20260820-…` — `tmux ls` is easier than typing it.
+- Each worker is a **one-shot run**, not a REPL. It gets the task, works, exits.
+
+### Why `/team merge` says the team is not completed
+
+`/team merge` refuses unless the team status is `Completed`, and a team only
+becomes `Completed` when **every** worker's status is `Completed` or `Failed`.
+Worker status changes in exactly one way: a message addressed to `lead` arriving
+in `<project>/.harness/mailbox` with `msg_type` `ready` / `progress` /
+`completed` / `failed` (`src/team/mod.rs:826`). There is no fallback that
+notices a worker's process exited.
+
+Two consequences worth knowing before you wait on it:
+
+- **Nothing posts that message automatically.** The worker is a plain
+  `momo-fetch -p` run. The only way one is sent is if the worker's agent
+  personality has the orchestrator tools and the model chooses to call
+  `send_message(to: "lead", msg_type: "completed", …)`.
+- **A worker in a worktree writes to the wrong mailbox anyway.** It resolves
+  `.harness/mailbox` relative to *its* directory — the worktree — while the lead
+  reads the one in the main checkout.
+
+So treat `/team status` as "what the mailbox has heard", not as ground truth:
+it only refreshes when you run it, and silence means nothing was reported, not
+that nothing happened. To see real progress, read the tmux windows or the
+`worker-<name>.log` files. When the branches are ready, merge them yourself:
+
+```bash
+git merge --no-edit team/<worker-name>
+git worktree remove .harness/worktrees/<worker-name>
+```
+
+`/team stop` is still the right way to end a team — but only **after** you have
+merged or copied the branches, since it deletes them (see the warning under
+[Stopping a Team](#stopping-a-team)).
 
 ---
 

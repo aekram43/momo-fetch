@@ -364,11 +364,28 @@ API key: ****
 
 | Command | Description |
 |---------|-------------|
-| `/team start <name>` | Start a team from `.harness/teams/<name>.yml` |
-| `/team start` | Start a team interactively |
-| `/team status` | Show team status and worker progress |
-| `/team merge` | Merge completed workers' branches |
-| `/team stop` | Stop team and clean up worktrees |
+| `/team start <name>` | Start a team from `.harness/teams/<name>.yml` (`.yaml` also accepted) |
+| `/team start` | List the available configs, then define workers interactively |
+| `/team status` | Read the mailbox and print what workers have reported |
+| `/team merge` | Merge completed workers' branches (needs team status `Completed`) |
+| `/team stop` | Kill the tmux session, remove worktrees, end the team — **destructive**, see below |
+
+**Requires tmux.** Workers are launched by sending a command to a tmux window;
+without tmux the team is created and no worker ever starts, despite the warning
+saying otherwise. Requires git only for `worktree: true` — in a non-repo,
+worktrees are disabled for the whole team with a warning.
+
+**`/team stop` discards unmerged work.** It removes each worktree with
+`--force` (uncommitted changes go with it) and deletes the worker's branch,
+falling back to `git branch -D` when the branch is unmerged. Merge, or branch a
+copy, before stopping.
+
+**`/team status` is not a process check.** A worker's state changes only when a
+message arrives in `<project>/.harness/mailbox` addressed to `lead`, and nothing
+in a worker's default run posts one — so workers can sit at `starting` while
+they are in fact working, and `/team merge` will refuse. Read the tmux windows
+or `.harness/worker-<name>.log`, and merge the branches by hand if needed. Full
+explanation in the [user guide §12](user-guide.md#12-agent-teams).
 
 ### Agent Personalities
 
