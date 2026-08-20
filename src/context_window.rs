@@ -113,7 +113,27 @@ fn model_context_window(provider: &str, model: &str) -> Option<u64> {
             }
         }
         "zai" => {
-            if model.contains("4.7") || model.contains("4-plus") {
+            // Verified against the public catalogue on 2026-08-20. This is the
+            // offline answer only — `prefetch_context_windows` supersedes it
+            // whenever the catalogue is reachable, which is why a stale entry
+            // here shows up as a wrong percentage rather than a wrong answer.
+            let model = model.to_ascii_lowercase();
+            if model.contains("5.2") || model.contains("5.3") {
+                Some(1_048_576)
+            } else if model.contains("turbo") || model.contains("flash") {
+                Some(202_752)
+            } else if model.contains("4.5v") {
+                Some(65_536)
+            } else if model.contains("4.5") || model.contains("4.6v") {
+                Some(131_072)
+            } else if model.contains("4.6")
+                || model.contains("4.7")
+                || model.starts_with("glm-5")
+            {
+                Some(204_800)
+            } else if model.contains("4-plus") {
+                // Not in the catalogue any more; left at its previous value
+                // rather than guessed downwards.
                 Some(1_000_000)
             } else {
                 Some(128_000)
@@ -185,6 +205,44 @@ impl ContextWindowCache {
     }
 }
 
+// ── Catalogue indexing ──────────────────────────────────────────────
+
+/// Public catalogue every provider's models can be looked up in.
+///
+/// No key required — this is the same list the model picker shows anonymous
+/// visitors. See [`crate::providers::ProviderManager::prefetch_context_windows`]
+/// for why a zai or Anthropic session asks OpenRouter about its own model.
+pub const CATALOGUE_URL: &str = "https://openrouter.ai/api/v1/models";
+
+/// Index a catalogue by both its qualified ids and their bare model names.
+///
+/// Catalogue ids are vendor-qualified (`z-ai/glm-5.3`) while a provider's own
+/// name for the same model is not (`glm-5.3`), so an entry has to answer to
+/// both or the lookup misses for every provider except OpenRouter itself.
+///
+/// **On collisions, the smaller window wins.** The 414-model catalogue has none
+/// today, but a gauge that over-states the window tells someone they have room
+/// they do not have; under-stating it only makes them compact early.
+pub fn index_catalogue(models: impl IntoIterator<Item = (String, u64)>) -> Vec<(String, u64)> {
+    let mut indexed: HashMap<String, u64> = HashMap::new();
+
+    let mut record = |key: String, size: u64| {
+        indexed
+            .entry(key)
+            .and_modify(|existing| *existing = (*existing).min(size))
+            .or_insert(size);
+    };
+
+    for (id, size) in models {
+        if let Some((_vendor, bare)) = id.split_once('/') {
+            record(bare.to_string(), size);
+        }
+        record(id, size);
+    }
+
+    indexed.into_iter().collect()
+}
+
 // ── 3-layer resolution ──────────────────────────────────────────────
 
 /// Resolve context window size with 3-layer priority:
@@ -198,14 +256,8 @@ pub fn resolve_context_window_size(
     cache: Option<&ContextWindowCache>,
 ) -> Option<u64> {
     // Layer 1: Settings override
-    if let Some(ov) = overrides {
-        let qualified = format!("{}:{}", provider, model);
-        if let Some(&size) = ov.get(&qualified) {
-            return Some(size);
-        }
-        if let Some(&size) = ov.get(model) {
-            return Some(size);
-        }
+    if let Some(size) = overrides.and_then(|ov| override_for(ov, provider, model)) {
+        return Some(size);
     }
 
     // Layer 2: Dynamic cache
@@ -217,6 +269,26 @@ pub fn resolve_context_window_size(
 
     // Layer 3: Model-level static mapping (with provider fallback)
     model_context_window(provider, model)
+}
+
+/// Layer 1 on its own: the size someone pinned for this model, if they did.
+///
+/// `provider:model` beats a bare `model`, so pinning `zai:glm-5.3` does not
+/// also pin someone else's `glm-5.3`.
+///
+/// Split out of [`resolve_context_window_size`] because the prefetch needs to
+/// ask the same question — "is this model already pinned?" — and two copies of
+/// the key rules would drift into a fetch that skips on a key the lookup then
+/// ignores.
+pub fn override_for(
+    overrides: &HashMap<String, u64>,
+    provider: &str,
+    model: &str,
+) -> Option<u64> {
+    overrides
+        .get(&format!("{provider}:{model}"))
+        .or_else(|| overrides.get(model))
+        .copied()
 }
 
 /// Current context window usage snapshot.
@@ -355,10 +427,123 @@ mod tests {
     }
 
     #[test]
+    fn catalogue_answers_to_the_bare_model_name() {
+        // The whole point: a zai session calls its model `glm-5.3`, the
+        // catalogue calls it `z-ai/glm-5.3`, and the lookup has to bridge that.
+        let indexed: HashMap<String, u64> =
+            index_catalogue([("z-ai/glm-5.3".to_string(), 1_048_576)])
+                .into_iter()
+                .collect();
+
+        assert_eq!(indexed.get("glm-5.3"), Some(&1_048_576));
+        assert_eq!(indexed.get("z-ai/glm-5.3"), Some(&1_048_576));
+    }
+
+    #[test]
+    fn catalogue_keeps_variant_suffixes_apart() {
+        // `:free` and `:batch` are cheaper *and* smaller. Collapsing them into
+        // the base model would overstate the window on exactly the tiers where
+        // running out hurts.
+        let indexed: HashMap<String, u64> = index_catalogue([
+            ("z-ai/glm-5.2".to_string(), 1_048_576),
+            ("z-ai/glm-5.2:free".to_string(), 256_000),
+        ])
+        .into_iter()
+        .collect();
+
+        assert_eq!(indexed.get("glm-5.2"), Some(&1_048_576));
+        assert_eq!(indexed.get("glm-5.2:free"), Some(&256_000));
+    }
+
+    #[test]
+    fn a_contested_bare_name_takes_the_smaller_window() {
+        // No collisions in the catalogue today; if two vendors ever ship the
+        // same bare name, promising the larger window is the dangerous half.
+        let indexed: HashMap<String, u64> = index_catalogue([
+            ("vendor-a/some-model".to_string(), 200_000),
+            ("vendor-b/some-model".to_string(), 32_000),
+        ])
+        .into_iter()
+        .collect();
+
+        assert_eq!(indexed.get("some-model"), Some(&32_000));
+        assert_eq!(indexed.get("vendor-a/some-model"), Some(&200_000));
+        assert_eq!(indexed.get("vendor-b/some-model"), Some(&32_000));
+    }
+
+    #[test]
+    fn an_unqualified_catalogue_id_still_indexes() {
+        let listed = [("auto".to_string(), 128_000)];
+        let indexed: HashMap<String, u64> = index_catalogue(listed).into_iter().collect();
+
+        assert_eq!(indexed.get("auto"), Some(&128_000));
+        // Nothing invented for a name with no vendor prefix.
+        assert_eq!(indexed.len(), 1);
+    }
+
+    #[test]
+    fn the_catalogue_outranks_the_static_table() {
+        // Layer 2 over layer 3: this is what stops a model the table has never
+        // heard of from reading as the 128k default.
+        let cache = ContextWindowCache::new();
+        cache.populate(index_catalogue([("z-ai/glm-5.3".to_string(), 1_048_576)]));
+
+        assert_eq!(
+            resolve_context_window_size("zai", "glm-5.3", None, Some(&cache)),
+            Some(1_048_576)
+        );
+    }
+
+    #[test]
+    fn a_qualified_pin_beats_a_bare_one() {
+        let overrides = HashMap::from([
+            ("glm-5.3".to_string(), 128_000),
+            ("zai:glm-5.3".to_string(), 1_048_576),
+        ]);
+
+        assert_eq!(override_for(&overrides, "zai", "glm-5.3"), Some(1_048_576));
+        // Someone else's glm-5.3 is not pinned by the qualified entry.
+        assert_eq!(override_for(&overrides, "custom", "glm-5.3"), Some(128_000));
+    }
+
+    #[test]
+    fn an_unpinned_model_has_no_override() {
+        // What the prefetch checks before deciding to skip the network.
+        let overrides = HashMap::from([("zai:glm-5.3".to_string(), 1_048_576)]);
+
+        assert_eq!(override_for(&overrides, "zai", "glm-5.2"), None);
+        assert_eq!(override_for(&HashMap::new(), "zai", "glm-5.3"), None);
+    }
+
+    #[test]
+    fn a_settings_override_outranks_the_catalogue() {
+        let cache = ContextWindowCache::new();
+        cache.populate(index_catalogue([("z-ai/glm-5.3".to_string(), 1_048_576)]));
+        let overrides = HashMap::from([("zai:glm-5.3".to_string(), 65_536)]);
+
+        assert_eq!(
+            resolve_context_window_size("zai", "glm-5.3", Some(&overrides), Some(&cache)),
+            Some(65_536)
+        );
+    }
+
+    #[test]
     fn test_zai_context_window() {
-        assert_eq!(context_window_size("zai", "GLM-5"), Some(128_000));
-        assert_eq!(context_window_size("zai", "GLM-5.1"), Some(128_000));
-        assert_eq!(context_window_size("zai", "GLM-4.7"), Some(1_000_000));
+        // Numbers from the public catalogue, 2026-08-20. The old table said
+        // 128k for everything but 4.7/4-plus, which is what made a 100k prompt
+        // on glm-5.3 read as 78% of a window eight times that size.
+        assert_eq!(context_window_size("zai", "glm-5.3"), Some(1_048_576));
+        assert_eq!(context_window_size("zai", "glm-5.2"), Some(1_048_576));
+        assert_eq!(context_window_size("zai", "glm-5.1"), Some(204_800));
+        assert_eq!(context_window_size("zai", "glm-5"), Some(204_800));
+        assert_eq!(context_window_size("zai", "glm-5-turbo"), Some(202_752));
+        assert_eq!(context_window_size("zai", "glm-4.7"), Some(204_800));
+        assert_eq!(context_window_size("zai", "glm-4.7-flash"), Some(202_752));
+        assert_eq!(context_window_size("zai", "glm-4.6"), Some(204_800));
+        assert_eq!(context_window_size("zai", "glm-4.5"), Some(131_072));
+        assert_eq!(context_window_size("zai", "glm-4.5-air"), Some(131_072));
+        // Case is not the model name's business.
+        assert_eq!(context_window_size("zai", "GLM-5.3"), Some(1_048_576));
         assert_eq!(context_window_size("zai", "GLM-4-plus"), Some(1_000_000));
     }
 

@@ -31,10 +31,21 @@
 ```json
 {
   "context_window": {
-    "model_name": 200000              // Override auto-detected context size
+    "model_name": 200000,             // Override auto-detected context size
+    "zai:glm-5.3": 1048576            // "provider:model" wins over "model"
   }
 }
 ```
+
+ปกติไม่ต้องตั้ง — ขนาด context หาเองจาก 3 ชั้น ตามลำดับ:
+
+1. **override ในไฟล์นี้**
+2. **model catalogue ของ OpenRouter** (`https://openrouter.ai/api/v1/models`) ดึงตอนเริ่มและตอนสลับ model/provider แล้ว cache ไว้ 1 ชั่วโมง ใช้กับ**ทุก provider** ไม่ใช่เฉพาะ OpenRouter เพราะ index ด้วยชื่อรุ่นล้วนด้วย (`z-ai/glm-5.3` → หา `glm-5.3` เจอ) ไม่ต้องใช้ API key เป็นการ GET รายการสาธารณะ ไม่มี prompt หรือ key ส่งออกไป
+
+   **ถ้ารุ่นที่ใช้อยู่ถูก pin ไว้ในข้อ 1 แล้ว จะไม่ยิงเลย** — ค่าใน settings ชนะอยู่แล้ว การดึงมาก็ได้ค่าที่ไม่มีใครอ่าน ใครที่ไม่อยากให้ต่อออกเน็ตไปหา openrouter.ai ระหว่างใช้ provider อื่น ตั้ง override ให้รุ่นที่ใช้ก็ปิดได้ในตัว
+3. **ตารางในโค้ด** (`src/context_window.rs`) — ใช้ตอนออฟไลน์หรือ catalogue ล่ม
+
+ตั้ง override เมื่อรุ่นที่ใช้ไม่มีใน catalogue (เช่น endpoint ภายในองค์กร) หรือเมื่ออยากบีบให้เตือนเต็มเร็วกว่าความจริง
 
 ## 🚨 แก้ปัญหา ZAI 401 Unauthorized
 

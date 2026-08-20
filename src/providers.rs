@@ -213,12 +213,39 @@ impl ProviderManager {
         &self.context_window_cache
     }
 
-    /// Fetch context window sizes from provider model info APIs (fire-and-forget).
+    /// Fill the context-window cache from the public model catalogue
+    /// (fire-and-forget).
     ///
-    /// Currently only OpenRouter's `list_models()` exposes `context_length`.
-    /// Runs as a background task; never blocks the REPL.
-    pub fn prefetch_context_windows(&self) {
-        if self.current_provider != "openrouter" {
+    /// **Asked for every provider, not just OpenRouter.** The static table
+    /// cannot keep up with model releases — `glm-5.3` fell through it to the
+    /// 128k default while the model actually takes 1,048,576, so the status bar
+    /// read 78% full at 100k. The catalogue knows all 414 of them, needs no API
+    /// key, and is indexed by bare model name too, so a zai session can look up
+    /// its own `glm-5.3` in it. z.ai's own `/models` endpoint returns id,
+    /// object, created and owned_by — no context length at all — so this is not
+    /// a matter of asking the right provider.
+    ///
+    /// Worth knowing: this reaches openrouter.ai even when OpenRouter is not
+    /// the provider in use. It sends no key and no prompt — it is a GET of a
+    /// public price list — and a `context_window` entry in settings still
+    /// outranks whatever comes back.
+    pub fn prefetch_context_windows(&self, overrides: &HashMap<String, u64>) {
+        // A pinned model has nothing to learn from the catalogue: settings are
+        // layer 1 and win over it anyway, so fetching would spend a request to
+        // populate an entry the lookup will never reach. Asked with the same
+        // key rules the lookup uses, so the two cannot disagree.
+        if crate::context_window::override_for(
+            overrides,
+            &self.current_provider,
+            self.current_model_name(),
+        )
+        .is_some()
+        {
+            tracing::debug!(
+                provider = %self.current_provider,
+                model = %self.current_model_name(),
+                "Context window: pinned in settings, skipping the catalogue"
+            );
             return;
         }
 
@@ -227,37 +254,64 @@ impl ProviderManager {
         }
 
         let cache = self.context_window_cache.clone();
-        let api_key = crate::config::secrets::SecretStore::get("openrouter").ok();
 
-        if let Some(key) = api_key {
-            tokio::spawn(async move {
-                let config = OpenRouterConfig::new(&key, "unused");
-                let client = match OpenRouterClient::new(config) {
-                    Ok(c) => c,
-                    Err(_) => return,
-                };
-                match client.list_models().await {
-                    Ok(models) => {
-                        let entries: Vec<(String, u64)> = models
-                            .into_iter()
-                            .filter_map(|m| {
-                                m.context_length.map(|cl| (m.id, cl as u64))
-                            })
-                            .collect();
-                        if !entries.is_empty() {
-                            tracing::info!(
-                                "Context window cache: populated {} models from OpenRouter",
-                                entries.len()
-                            );
-                            cache.populate(entries);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::debug!("Context window cache: OpenRouter fetch failed: {}", e);
-                    }
+        tokio::spawn(async move {
+            let client = match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::debug!("Context window cache: client build failed: {e}");
+                    return;
                 }
-            });
-        }
+            };
+
+            let catalogue: serde_json::Value = match client
+                .get(crate::context_window::CATALOGUE_URL)
+                .send()
+                .await
+            {
+                Ok(resp) => match resp.json().await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::debug!("Context window cache: catalogue parse failed: {e}");
+                        return;
+                    }
+                },
+                Err(e) => {
+                    tracing::debug!("Context window cache: catalogue fetch failed: {e}");
+                    return;
+                }
+            };
+
+            let listed = catalogue
+                .get("data")
+                .and_then(|d| d.as_array())
+                .map(|models| {
+                    models
+                        .iter()
+                        .filter_map(|m| {
+                            let id = m.get("id")?.as_str()?.to_string();
+                            let size = m.get("context_length")?.as_u64()?;
+                            Some((id, size))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            let entries = crate::context_window::index_catalogue(listed);
+            if entries.is_empty() {
+                tracing::debug!("Context window cache: catalogue had no usable entries");
+                return;
+            }
+
+            tracing::info!(
+                "Context window cache: indexed {} names from the model catalogue",
+                entries.len()
+            );
+            cache.populate(entries);
+        });
     }
 
     /// List available providers based on configured API keys (env or keychain).

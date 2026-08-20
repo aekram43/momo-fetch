@@ -59,7 +59,7 @@ impl Harness {
             Some(&config.provider.default_provider),
             Some(&config.provider.default_model)
         )?;
-        provider_mgr.prefetch_context_windows();
+        provider_mgr.prefetch_context_windows(&config.context_window_overrides);
 
         // Initialize sandbox
         let sandbox = Arc::new(FilesystemSandbox::new(
@@ -514,7 +514,8 @@ impl Harness {
                 &self.provider_mgr.current_provider().to_string(),
                 self.provider_mgr.current_model_name(),
             );
-        self.provider_mgr.prefetch_context_windows();
+        self.provider_mgr
+            .prefetch_context_windows(&self.config.context_window_overrides);
         Ok(())
     }
 
@@ -528,7 +529,8 @@ impl Harness {
                 &self.provider_mgr.current_provider().to_string(),
                 self.provider_mgr.current_model_name(),
             );
-        self.provider_mgr.prefetch_context_windows();
+        self.provider_mgr
+            .prefetch_context_windows(&self.config.context_window_overrides);
         Ok(())
     }
 
@@ -542,7 +544,8 @@ impl Harness {
                 &self.provider_mgr.current_provider().to_string(),
                 self.provider_mgr.current_model_name(),
             );
-        self.provider_mgr.prefetch_context_windows();
+        self.provider_mgr
+            .prefetch_context_windows(&self.config.context_window_overrides);
         Ok(())
     }
 
