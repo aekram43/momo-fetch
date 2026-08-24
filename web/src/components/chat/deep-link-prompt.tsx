@@ -36,8 +36,10 @@ export function DeepLinkPrompt() {
   async function accept() {
     if (!path || busy) return;
     setBusy(true);
-    const url = await openProject(path);
-    if (!url) push({ tone: "error", message: "Could not open that directory." });
+    const opened = await openProject(path);
+    // The shell says why — a link can point at a directory that is not a
+    // workspace, and "could not open" would hide the one useful sentence.
+    if (!opened.ok) push({ tone: "error", message: opened.error });
     setBusy(false);
     setPath(null);
   }

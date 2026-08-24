@@ -3,9 +3,16 @@
 import { useState } from "react";
 
 import { Hint, PanelSection } from "@/components/shared/panel-section";
-import { isDesktop, openProject, pickDirectory } from "@/lib/desktop";
+import {
+  createWorkspace,
+  isDesktop,
+  openProject,
+  pickDirectory,
+  recentWorkspaces,
+} from "@/lib/desktop";
 import { SkeletonRows } from "@/components/shared/skeleton";
-import { ApiError, readFile, readTree } from "@/lib/api-client";
+import { ApiError, getSettings, readFile, readTree } from "@/lib/api-client";
+import { projectName } from "@/lib/project-name";
 import { useGatewayResource } from "@/hooks/use-gateway-resource";
 import { useToastStore } from "@/stores/toast-store";
 import type { FileContent } from "@/lib/types";
@@ -23,20 +30,56 @@ import type { FileContent } from "@/lib/types";
  */
 export function FilesTab() {
   const [dir, setDir] = useState(".");
-  const { data: tree, error } = useGatewayResource(() => readTree(dir, 1), [dir]);
+  const { data: tree, error } = useGatewayResource(
+    () => readTree(dir, 1),
+    [dir],
+  );
+  // Only for the label. The tree API addresses the root as ".", which is the
+  // right key and a useless name — settings is what knows where the project is.
+  const { data: settings } = useGatewayResource(getSettings);
   const [preview, setPreview] = useState<FileContent | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [confirmRoot, setConfirmRoot] = useState(false);
+  // null = neither action started. Opening warns first; creating needs a
+  // parent directory and a name before it can do anything.
+  const [rootAction, setRootAction] = useState<"open" | "create" | null>(null);
+  const [newParent, setNewParent] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [recent, setRecent] = useState<string[]>([]);
   const push = useToastStore((s) => s.push);
 
+  /** Loaded when the switch panel opens, not on mount: it costs an IPC call
+   *  and nobody needs the list until they are looking at it. */
+  function beginOpen() {
+    setRootAction("open");
+    if (isDesktop()) void recentWorkspaces().then(setRecent);
+  }
+
+  /** Re-root at a path the user already trusts — a recent one, or a picked one. */
+  async function openAt(path: string) {
+    setBusy(true);
+    const opened = await openProject(path);
+    setBusy(false);
+    if (opened.ok) {
+      push({ tone: "info", message: "Reopening at the new workspace…" });
+    } else {
+      push({ tone: "error", message: opened.error });
+    }
+    setRootAction(null);
+  }
+
   /**
-   * T4 — re-root the whole harness at another directory.
+   * T4 — re-root the whole harness at another workspace.
    *
    * Behind a confirm because it moves the sandbox, the memory vault and the
    * session DB at once, and the gateway restarts under it. Desktop only: there
    * is no browser equivalent of choosing a folder on the host.
+   *
+   * The shell refuses a directory that is not already a workspace, and its
+   * refusal is shown verbatim — it names the missing file and points at the
+   * other button, which is more than this component could work out.
    */
-  async function reroot() {
+  async function chooseWorkspace() {
     // The button says "choose folder", so it has to open one.
     //
     // It used to call `window.prompt` — which asks you to *type* an absolute
@@ -46,28 +89,39 @@ export function FilesTab() {
     // `runJavaScriptTextInputPanelWithPrompt`, and WebKit silently returns null
     // for a prompt the delegate does not handle. So on macOS the button was
     // dead: click it, nothing appears, nothing happens, no error.
-    let path: string | null = null;
-    try {
-      path = await pickDirectory("Choose a project directory");
-    } catch {
-      push({
-        tone: "error",
-        message: "Could not open the folder picker.",
-      });
-      setConfirmRoot(false);
-      return;
-    }
-    if (!path) {
-      setConfirmRoot(false);
-      return;
-    }
-    const url = await openProject(path);
-    if (url) {
-      push({ tone: "info", message: "Reopening at the new project…" });
+    const path = await pick();
+    if (!path) return;
+    await openAt(path);
+  }
+
+  /** Create a workspace under the chosen directory, then open it. */
+  async function create() {
+    if (!newParent) return;
+
+    setBusy(true);
+    const created = await createWorkspace(newParent, newName);
+    setBusy(false);
+    if (created.ok) {
+      push({ tone: "info", message: `Created ${newName}. Opening…` });
+      setRootAction(null);
+      setNewParent(null);
+      setNewName("");
     } else {
-      push({ tone: "error", message: "Could not open that directory." });
+      // Kept open with the name still typed: every failure here — a name with
+      // a slash, a folder that is already a workspace — is one edit away from
+      // working.
+      push({ tone: "error", message: created.error });
     }
-    setConfirmRoot(false);
+  }
+
+  /** The native folder picker, with its own failure reported. */
+  async function pick(): Promise<string | null> {
+    try {
+      return await pickDirectory("Choose a project directory");
+    } catch {
+      push({ tone: "error", message: "Could not open the folder picker." });
+      return null;
+    }
   }
 
   async function open(path: string) {
@@ -84,7 +138,9 @@ export function FilesTab() {
     }
   }
 
-  const parent = dir === "." ? null : dir.split("/").slice(0, -1).join("/") || ".";
+  const parent =
+    dir === "." ? null : dir.split("/").slice(0, -1).join("/") || ".";
+  const location = dir === "." ? projectName(settings?.project_path) : dir;
 
   return (
     <PanelSection
@@ -101,41 +157,142 @@ export function FilesTab() {
         )
       }
     >
-      <p className="mb-1.5 truncate font-mono text-[10px] text-faint">{dir}</p>
+      {/* The root shows the project's folder name; anywhere else, the path you
+          navigated to. Rendered only once there is something real to print —
+          a bare "." was the line this replaced. */}
+      {location && (
+        <p className="mb-1.5 truncate font-mono text-[10px] text-faint">
+          {location}
+        </p>
+      )}
 
       {isDesktop() && (
         <div className="mb-2">
-          {confirmRoot ? (
+          {rootAction === null && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={beginOpen}
+                className="font-mono text-[10px] text-dim transition-colors hover:text-ink"
+              >
+                choose workspace…
+              </button>
+              <button
+                type="button"
+                onClick={() => setRootAction("create")}
+                className="font-mono text-[10px] text-dim transition-colors hover:text-ink"
+              >
+                create workspace…
+              </button>
+            </div>
+          )}
+
+          {rootAction === "open" && (
             <div className="rounded border border-signal/40 bg-signal/10 px-2 py-1.5">
               <p className="text-[11px] leading-relaxed text-ink">
-                Opening another project moves the sandbox, memory vault and
+                Opening another workspace moves the sandbox, memory vault and
                 sessions, and restarts the agent. Continue?
               </p>
+              {recent.length > 0 && (
+                <>
+                  <p className="mt-1.5 font-mono text-[10px] text-faint">
+                    recent
+                  </p>
+                  <ul className="space-y-px">
+                    {/* Three: enough to get back to what you were doing, short
+                      enough not to push the folder picker out of sight. */}
+                    {recent.slice(0, 3).map((path) => (
+                      <li key={path}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void openAt(path)}
+                          title={path}
+                          className="w-full truncate rounded px-1 py-0.5 text-left font-mono text-[10px] text-dim transition-colors hover:bg-raised hover:text-ink disabled:opacity-60"
+                        >
+                          {basename(path)}
+                          <span className="ml-1.5 text-faint">
+                            {parentOf(path)}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
               <div className="mt-1.5 flex gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setConfirmRoot(false)}
+                  onClick={() => setRootAction(null)}
                   className="rounded border border-rule px-2 py-0.5 font-mono text-[10px] text-ink"
                 >
                   cancel
                 </button>
                 <button
                   type="button"
-                  onClick={() => void reroot()}
-                  className="rounded bg-signal px-2 py-0.5 font-mono text-[10px] font-semibold text-void"
+                  disabled={busy}
+                  onClick={() => void chooseWorkspace()}
+                  className="rounded bg-signal px-2 py-0.5 font-mono text-[10px] font-semibold text-void disabled:opacity-60"
                 >
                   choose folder
                 </button>
               </div>
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirmRoot(true)}
-              className="font-mono text-[10px] text-dim transition-colors hover:text-ink"
-            >
-              open another project…
-            </button>
+          )}
+
+          {rootAction === "create" && (
+            <div className="rounded border border-signal/40 bg-signal/10 px-2 py-1.5">
+              <p className="text-[11px] leading-relaxed text-ink">
+                Creates a folder with a fresh settings file and memory vault,
+                then opens it. The current model carries over; API keys are not
+                copied.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => void pick().then((p) => p && setNewParent(p))}
+                className="mt-1.5 block w-full truncate rounded border border-rule px-2 py-0.5 text-left font-mono text-[10px] text-ink"
+              >
+                {newParent ?? "choose where…"}
+              </button>
+
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newParent && newName.trim())
+                    void create();
+                }}
+                placeholder="workspace name"
+                aria-label="Workspace name"
+                className="mt-1 w-full rounded border border-rule bg-panel px-2 py-0.5 font-mono text-[10px] text-ink placeholder:text-faint"
+              />
+
+              <div className="mt-1.5 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRootAction(null);
+                    setNewParent(null);
+                    setNewName("");
+                  }}
+                  className="rounded border border-rule px-2 py-0.5 font-mono text-[10px] text-ink"
+                >
+                  cancel
+                </button>
+                <button
+                  type="button"
+                  // Both halves are needed, and the button says which is missing
+                  // by staying out of reach until they are there.
+                  disabled={busy || !newParent || !newName.trim()}
+                  onClick={() => void create()}
+                  className="rounded bg-signal px-2 py-0.5 font-mono text-[10px] font-semibold text-void disabled:opacity-60"
+                >
+                  create
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -174,7 +331,9 @@ export function FilesTab() {
         </p>
       )}
 
-      {previewError && <p className="mt-2 text-[11px] text-halt">{previewError}</p>}
+      {previewError && (
+        <p className="mt-2 text-[11px] text-halt">{previewError}</p>
+      )}
 
       {preview && (
         <div className="mt-2 rounded border border-rule">
@@ -206,6 +365,18 @@ export function FilesTab() {
       )}
     </PanelSection>
   );
+}
+
+/** The workspace's own name — what the user calls it. */
+function basename(path: string): string {
+  return projectName(path) ?? path;
+}
+
+/** Where it lives, dimmed beside the name: two workspaces can share a name. */
+function parentOf(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return cut > 0 ? trimmed.slice(0, cut) : "";
 }
 
 function formatSize(bytes: number): string {

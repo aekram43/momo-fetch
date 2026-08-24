@@ -34,6 +34,28 @@ async function invoke<T>(cmd: string, args?: unknown): Promise<T | null> {
   }
 }
 
+/** What a command failed with, for the commands whose reason the user needs. */
+export type Attempt<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/**
+ * `invoke`, keeping the failure.
+ *
+ * The plain helper collapses every error to `null`, which is right for a
+ * status probe and wrong for an action the user just took: "Could not open
+ * that directory" replaced a message that said precisely which file was
+ * missing and what to do about it.
+ */
+async function attempt<T>(cmd: string, args?: unknown): Promise<Attempt<T>> {
+  const fn = window.__TAURI__?.core?.invoke;
+  if (!fn) return { ok: false, error: "Only available in the desktop app." };
+  try {
+    return { ok: true, value: (await fn(cmd, args)) as T };
+  } catch (err) {
+    // Tauri rejects with whatever the command's `Err` held — a string here.
+    return { ok: false, error: typeof err === "string" ? err : String(err) };
+  }
+}
+
 /**
  * Ask the shell for the gateway URL and cache it on `window`.
  *
@@ -108,7 +130,29 @@ export const getGatewayStderr = () => invoke<string>("gateway_stderr");
  * confirmation is a security boundary rather than politeness.
  */
 export const openProject = (path: string) =>
-  invoke<string>("open_project", { path });
+  attempt<string>("open_project", { path });
+
+/**
+ * **T4b** — create a workspace named `name` under `parent`, then open it.
+ *
+ * Separate from {@link openProject} because opening and creating are different
+ * intentions: one refuses a directory that is not a workspace, the other is the
+ * only thing allowed to write `.harness/settings.json` into a directory the
+ * user picked.
+ */
+export const createWorkspace = (parent: string, name: string) =>
+  attempt<string>("create_workspace", { parent, name });
+
+/**
+ * **T4c** — workspaces this machine has opened, most recent first.
+ *
+ * Kept by the shell rather than in `localStorage`: opening one ends in a page
+ * reload, so a page recording its own visit would race a navigation it cannot
+ * win. Already filtered to directories that are still workspaces, and never
+ * includes the one currently open.
+ */
+export const recentWorkspaces = () =>
+  invoke<string[]>("recent_workspaces").then((paths) => paths ?? []);
 
 /**
  * Native folder picker. Returns the chosen absolute path, or `null` if the user
