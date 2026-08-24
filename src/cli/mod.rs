@@ -3,14 +3,27 @@ mod commands;
 mod oneshot;
 mod repl;
 pub mod status;
+pub mod team_cmd;
 
 use std::sync::Arc;
 
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "momo-fetch", version, about = "MOMO Fetch — AI coding companion")]
+#[command(
+    name = "momo-fetch",
+    version,
+    about = "MOMO Fetch — AI coding companion",
+    long_about = "MOMO Fetch — AI coding companion.\n\n\
+        With no subcommand it starts the REPL (or runs one prompt with -p). \
+        The `team` subcommand controls agent teams headlessly, printing JSON \
+        on stdout so an agent can drive them through shell_exec."
+)]
 pub struct CliArgs {
+    /// Headless subcommand. Omit it for the REPL / one-shot behaviour.
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
     /// Run a single prompt and exit
     #[arg(short = 'p', long = "prompt")]
     pub prompt: Option<String>,
@@ -70,10 +83,33 @@ pub struct CliArgs {
     pub gateway_allow_origin: Vec<String>,
 }
 
+/// Subcommands. Every flat flag above keeps working with no subcommand given,
+/// so `momo-fetch`, `momo-fetch -p …`, `--gateway` and friends are untouched.
+#[derive(clap::Subcommand, Debug)]
+pub enum Command {
+    /// Control an agent team without entering the REPL (JSON on stdout)
+    ///
+    /// Exit codes: 0 success, 1 error, 2 state conflict.
+    Team {
+        #[command(subcommand)]
+        action: team_cmd::TeamAction,
+    },
+}
+
 /// Main CLI entry point.
 pub async fn run(args: CliArgs) -> anyhow::Result<()> {
     // Load .env file if present
     let _ = dotenvy::dotenv();
+
+    // Headless subcommands run before the harness is built: they touch only
+    // `.harness/` on disk, and they must not need a provider or an API key.
+    if let Some(Command::Team { action }) = &args.command {
+        let code = team_cmd::run(action, args.project.as_deref());
+        // stdout is the contract here — flush before the exit skips Drop.
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        std::process::exit(code);
+    }
 
     // Check for memory-sidecar mode (Option C)
     if args.mode == "memory-sidecar" {
@@ -342,5 +378,122 @@ async fn run_memory_sidecar(args: &CliArgs) -> anyhow::Result<()> {
 
         // Sleep between polls (100ms)
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    fn parse(args: &[&str]) -> CliArgs {
+        CliArgs::try_parse_from(std::iter::once("momo-fetch").chain(args.iter().copied()))
+            .unwrap_or_else(|e| panic!("failed to parse {args:?}: {e}"))
+    }
+
+    #[test]
+    fn clap_definition_is_valid() {
+        CliArgs::command().debug_assert();
+    }
+
+    /// The `team` subcommand must not cost the flat flags anything — these are
+    /// every invocation shape that worked before it existed.
+    #[test]
+    fn flat_flags_still_parse_without_a_subcommand() {
+        let bare = parse(&[]);
+        assert!(bare.command.is_none());
+        assert!(bare.prompt.is_none());
+        assert_eq!(bare.permission, "strict");
+        assert_eq!(bare.mode, "repl");
+
+        let oneshot = parse(&["-p", "Explain this code"]);
+        assert!(oneshot.command.is_none());
+        assert_eq!(oneshot.prompt.as_deref(), Some("Explain this code"));
+
+        assert!(parse(&["--test-mcp"]).test_mcp);
+        assert!(parse(&["--gateway"]).gateway);
+
+        let gateway = parse(&[
+            "--gateway",
+            "--gateway-port",
+            "0",
+            "--gateway-bind",
+            "127.0.0.1",
+            "--gateway-allow-origin",
+            "tauri://localhost",
+        ]);
+        assert_eq!(gateway.gateway_port, Some(0));
+        assert_eq!(gateway.gateway_allow_origin, vec!["tauri://localhost"]);
+        assert!(gateway.command.is_none());
+
+        let full = parse(&[
+            "--project", "/repo",
+            "--model", "claude-opus-5",
+            "--provider", "anthropic",
+            "--permission", "yolo",
+            "--resume", "sess-1",
+            "--mode", "memory-sidecar",
+            "-a", "reviewer",
+        ]);
+        assert_eq!(full.project.as_deref(), Some("/repo"));
+        assert_eq!(full.model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(full.provider.as_deref(), Some("anthropic"));
+        assert_eq!(full.permission, "yolo");
+        assert_eq!(full.resume.as_deref(), Some("sess-1"));
+        assert_eq!(full.mode, "memory-sidecar");
+        assert_eq!(full.agent.as_deref(), Some("reviewer"));
+        assert!(full.command.is_none());
+
+        // A prompt that happens to read like a subcommand is still a prompt.
+        assert_eq!(parse(&["-p", "team status"]).prompt.as_deref(), Some("team status"));
+    }
+
+    #[test]
+    fn team_subcommand_parses_with_its_own_project_flag() {
+        let args = parse(&["team", "status", "--project", "/repo"]);
+        let Some(Command::Team { action }) = &args.command else {
+            panic!("expected a team command");
+        };
+        match action {
+            team_cmd::TeamAction::Status { scope } => {
+                assert_eq!(scope.project.as_deref(), Some("/repo"));
+            }
+            other => panic!("expected status, got {other:?}"),
+        }
+        // The top-level flag was not used, so it stays empty and the fallback
+        // in `run` has nothing to contribute.
+        assert!(args.project.is_none());
+    }
+
+    #[test]
+    fn team_subcommand_accepts_the_top_level_project_flag_too() {
+        let args = parse(&["--project", "/repo", "team", "status"]);
+        assert_eq!(args.project.as_deref(), Some("/repo"));
+        assert!(matches!(
+            args.command,
+            Some(Command::Team { action: team_cmd::TeamAction::Status { .. } })
+        ));
+    }
+
+    #[test]
+    fn team_start_requires_a_config_name() {
+        assert!(CliArgs::try_parse_from(["momo-fetch", "team", "start"]).is_err());
+        let args = parse(&["team", "start", "squad"]);
+        assert!(matches!(
+            args.command,
+            Some(Command::Team { action: team_cmd::TeamAction::Start { .. } })
+        ));
+    }
+
+    #[test]
+    fn team_stop_takes_force() {
+        let args = parse(&["team", "stop", "--force"]);
+        let Some(Command::Team { action: team_cmd::TeamAction::Stop { force, .. } }) = args.command
+        else {
+            panic!("expected a team stop command");
+        };
+        assert!(force);
     }
 }

@@ -23,6 +23,16 @@ cat file.rs | momo-fetch -p "Review"     # Alternative pipe syntax
 
 One-shot mode prints the agent's response to stdout and tool calls to stderr. Exit code 0 on success, 1 on error.
 
+### Subcommands
+
+```
+momo-fetch [OPTIONS]            # REPL, or one prompt with -p
+momo-fetch team <ACTION>        # Headless team control, JSON on stdout
+```
+
+`team` is the only subcommand; with none given, every flag below behaves exactly
+as it always has. See [Agent Teams](#agent-teams).
+
 ### CLI Flags
 
 ```
@@ -38,6 +48,10 @@ Options:
       --mode <MODE>           Run mode: default (repl) or memory-sidecar
       --resume <SESSION_ID>   Resume a previous session
       --test-mcp              Test MCP server connections and exit
+      --gateway               Start the API gateway server
+      --gateway-port <PORT>   Gateway port (0 = let the OS pick a free one)
+      --gateway-bind <ADDR>   Gateway bind address (default: 127.0.0.1)
+      --gateway-allow-origin <ORIGIN>  Extra allowed CORS origin (repeatable)
   -h, --help                  Show help
   -V, --version               Show version
 ```
@@ -364,7 +378,7 @@ API key: ****
 
 | Command | Description |
 |---------|-------------|
-| `/team start <name>` | Start a team from `.harness/teams/<name>.yml` (`.yaml` also accepted) |
+| `/team start <name>` | Start a team from `.harness/teams/<name>.json` (`.yml`, `.yaml` also accepted) |
 | `/team start` | List the available configs, then define workers interactively |
 | `/team status` | Read the mailbox and print what workers have reported |
 | `/team merge` | Merge completed workers' branches (needs team status `Completed`) |
@@ -386,6 +400,37 @@ in a worker's default run posts one — so workers can sit at `starting` while
 they are in fact working, and `/team merge` will refuse. Read the tmux windows
 or `.harness/worker-<name>.log`, and merge the branches by hand if needed. Full
 explanation in the [user guide §12](user-guide.md#12-agent-teams).
+
+#### Headless: `momo-fetch team`
+
+The same lifecycle without the REPL, for the agent in a session driving it
+through `shell_exec` (or a script, or you in another terminal):
+
+| Command | Description |
+|---------|-------------|
+| `momo-fetch team list` | Every config in `.harness/teams/`, plus which team is active |
+| `momo-fetch team start <name>` | Start from a config — exits **2** if a team is already active |
+| `momo-fetch team status` | Team, workers, pane ids, mailbox backlog |
+| `momo-fetch team stop [--force]` | Stop the team; exits **0** when there is nothing to stop |
+
+Every action takes `--project <dir>` (default: the current directory, resolved
+to an absolute path). There is no `team merge` — merging has conflicts to
+resolve, so it stays in the REPL.
+
+**stdout is one JSON document and nothing else**; narration and errors go to
+stderr. Exit codes: `0` success, `1` error, `2` state conflict
+(`team_already_active`). `team start` returns the same document as
+`team status`, so the pane ids come back with the start.
+
+```bash
+$ momo-fetch team status --project ~/workspace/momo-assistant | jq -r '.workers[].name'
+analyst
+executor
+validator
+```
+
+Same destructive stop as `/team stop` — merge before stopping. Full reference in
+the [user guide §12](user-guide.md#driving-a-team-from-the-shell).
 
 ### Agent Personalities
 

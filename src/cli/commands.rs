@@ -941,7 +941,12 @@ impl Command {
                     }
                 }
 
-                match harness.team_service_mut().start(workers) {
+                // Named through the same path as `momo-fetch team start`, so
+                // a team started here reports its config in `team status`.
+                match harness
+                    .team_service_mut()
+                    .start(config_name.clone(), workers)
+                {
                     Ok(team_id) => {
                         println!(
                             "{} Team '{team_id}' started",

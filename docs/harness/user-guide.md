@@ -759,7 +759,9 @@ Define worker agents (one per line, empty line to finish):
 
 ### Starting a Team from Config File
 
-Create a team config in `.harness/teams/<name>.yml`:
+Create a team config in `.harness/teams/<name>.yml`. `.yaml` and `.json` work
+too — the loader tries `.json`, `.yml`, `.yaml` in that order and parses all
+three, so a JSON squad file is a first-class config, not a second-class one:
 
 ```yaml
 # .harness/teams/auth-squad.yml
@@ -862,6 +864,114 @@ gpt-4o> /team stop
 > git branch keep/<worker-name> team/<worker-name>
 > ```
 
+### Driving a team from the shell
+
+Everything above is the REPL's `/team`. The same lifecycle is available as a
+subcommand, for the agent *inside* a session to run through `shell_exec` — or
+for a script, a cron job, or you in another terminal:
+
+```bash
+momo-fetch team list   [--project <dir>]
+momo-fetch team start <name> [--project <dir>]
+momo-fetch team status [--project <dir>]
+momo-fetch team stop   [--project <dir>] [--force]
+```
+
+`--project` defaults to the current directory and is resolved to an absolute
+path before anything reads `.harness/`. There is no `team merge`: merging is a
+git operation with conflicts to resolve, so it stays in the REPL and in your
+hands.
+
+**stdout is one JSON document, always.** Narration, warnings and errors go to
+stderr, so `momo-fetch team status | jq` never has to step around prose. The
+exit code carries the outcome:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success — including `stop` when there was nothing to stop |
+| `1` | Error: unknown config, unreadable state, failed start |
+| `2` | State conflict: `start` while a team is already active |
+
+```bash
+$ momo-fetch team start yolo-trade-squad --project ~/workspace/momo-assistant
+Team 'team-20260824-230729' started from config 'yolo-trade-squad' with 3 worker(s).
+{
+  "team_id": "team-20260824-230729",
+  "name": "yolo-trade-squad",
+  "status": "running",
+  "workers": [
+    {
+      "name": "analyst",
+      "agent": "yolo-analyst",
+      "pane_id": "%1",
+      "worktree_path": null,
+      "work_dir": "/Users/you/workspace/momo-assistant",
+      "branch": "team/analyst",
+      "status": "starting",
+      "error": null,
+      "last_message_ts": null,
+      "task": "YOLO Trade analyst on standby…",
+      "result": null
+    }
+  ],
+  "mailbox": { "unread_by_recipient": { "analyst": 0, "executor": 0, "lead": 0 } },
+  "started_at": "2026-08-24T16:07:29.950Z",
+  "completed_at": null,
+  "project_path": "/Users/you/workspace/momo-assistant",
+  "mailbox_path": "/Users/you/workspace/momo-assistant/.harness/mailbox"
+}
+```
+
+`team start` returns the same document `team status` does — the caller does not
+need a second round trip to learn the pane ids. Notes worth having:
+
+- **Workers are sorted by name.** Two `status` calls differ only where the team
+  differs, never because a `HashMap` reshuffled.
+- **`status` is still "what the mailbox has heard"** — the same caveat as the
+  REPL's, explained in [Why `/team merge` says the team is not
+  completed](#why-team-merge-says-the-team-is-not-completed). `last_message_ts`
+  is the timestamp of the last message a worker sent, and `null` means it has
+  never sent one.
+- **Timestamps are ISO 8601 UTC** (`started_at`, `completed_at`,
+  `last_message_ts`), not the raw millis stored in `team.json`.
+- **`worktree_path` is null when the worker has no worktree**; `work_dir` always
+  says where it actually runs.
+- **`unread_by_recipient` lists every worker plus `lead`,** so a zero is a real
+  zero rather than an absent key.
+
+Starting a team while one is active is a conflict, not an error to retry:
+
+```bash
+$ momo-fetch team start yolo-trade-squad; echo "exit=$?"
+Team 'team-20260824-230729' is already active. Stop it first: momo-fetch team stop
+{
+  "error": "team_already_active",
+  "message": "Team 'team-20260824-230729' is already active. Stop it first: momo-fetch team stop",
+  "active": "team-20260824-230729",
+  "active_name": "yolo-trade-squad"
+}
+exit=2
+```
+
+Stopping is idempotent — an agent that stops twice has not done anything wrong:
+
+```bash
+$ momo-fetch team stop; echo "exit=$?"
+No active team; nothing to stop.
+{"status": "no_active_team", "forced": false}
+exit=0
+```
+
+`--force` is for a team stranded by a reboot: it kills the tmux session named in
+`.harness/team.json` whatever status that file claims, and deletes the file so
+it stops resurfacing. It is scoped to the project's own recorded team — tmux
+session names carry no project, so a wider sweep would take down other repos'
+teams.
+
+> ⚠️ `momo-fetch team stop` is the same destructive stop as `/team stop`:
+> worktrees go with `git worktree remove --force` and worker branches are
+> deleted. Merge first. See [Stopping a Team](#stopping-a-team).
+
 ### Requirements
 
 | | Needed for | Without it |
@@ -958,7 +1068,7 @@ Location: `<project>/.harness/`
 | `skills/` | Installed skills |
 | `agents/` | Agent personality files (`.md` and `.yml`) |
 | `commands/` | Custom slash command files (`.md`) |
-| `teams/` | Team config files (`.yml`) |
+| `teams/` | Team config files (`.json`, `.yml`, `.yaml`) |
 
 ### Context Files (auto-discovered)
 

@@ -4,7 +4,7 @@
 //! separate processes, each in its own tmux pane (with optional git worktree).
 //! Communication uses a file-based message queue (mailbox).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -126,6 +126,9 @@ pub mod sidecar_protocol {
 pub struct WorkerState {
     pub name: String,
     pub task: String,
+    /// Agent personality the worker was launched with, if any.
+    #[serde(default)]
+    pub agent: Option<String>,
     pub branch: String,
     pub use_worktree: bool,
     pub status: WorkerStatus,
@@ -137,6 +140,10 @@ pub struct WorkerState {
     pub pid: Option<u32>,
     /// Result from the worker (set on completion).
     pub result: Option<String>,
+    /// Timestamp (millis) of the last mailbox message received from this
+    /// worker. `None` until the worker posts one — see `status()`.
+    #[serde(default)]
+    pub last_message_ts: Option<u64>,
 }
 
 /// Persistent team state, serialized to `.harness/team.json`.
@@ -144,6 +151,9 @@ pub struct WorkerState {
 pub struct TeamState {
     /// Unique team session ID.
     pub id: String,
+    /// Name of the config this team was started from, when it came from one.
+    #[serde(default)]
+    pub name: Option<String>,
     /// Overall team status.
     pub status: TeamStatus,
     /// Project path.
@@ -256,6 +266,28 @@ impl Mailbox {
             .unwrap_or(0)
     }
 
+    /// Count queued messages per recipient in a single pass.
+    ///
+    /// Recipients with nothing queued are absent — seed the map with the
+    /// names you care about if you need them reported as zero.
+    pub fn unread_by_recipient(&self) -> anyhow::Result<BTreeMap<String, usize>> {
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+
+        for entry in std::fs::read_dir(&self.path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(msg) = serde_json::from_str::<MailboxMessage>(&content) {
+                        *counts.entry(msg.to).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(counts)
+    }
+
     /// Clear all messages from the mailbox.
     pub fn clear(&self) -> anyhow::Result<()> {
         let entries = std::fs::read_dir(&self.path)?;
@@ -284,17 +316,26 @@ impl TmuxManager {
             .unwrap_or(false)
     }
 
+    /// Check whether a tmux session with this name exists.
+    pub fn has_session(session_name: &str) -> bool {
+        std::process::Command::new("tmux")
+            .args(["has-session", "-t", session_name])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Name of the tmux session hosting a team's workers.
+    pub fn session_name(team_id: &str) -> String {
+        format!("team-{team_id}")
+    }
+
     /// Create a tmux session for the team.
     /// Returns the session name.
     pub fn create_session(team_id: &str) -> anyhow::Result<String> {
-        let session_name = format!("team-{team_id}");
+        let session_name = Self::session_name(team_id);
 
-        // Check if session already exists
-        let check = std::process::Command::new("tmux")
-            .args(["has-session", "-t", &session_name])
-            .output()?;
-
-        if check.status.success() {
+        if Self::has_session(&session_name) {
             return Ok(session_name);
         }
 
@@ -531,6 +572,9 @@ impl WorktreeManager {
 
 // ─── Team Service ──────────────────────────────────────────────────
 
+/// Extensions accepted for `.harness/teams/<name>.*`, in lookup order.
+pub const TEAM_CONFIG_EXTENSIONS: [&str; 3] = ["json", "yml", "yaml"];
+
 /// Central service for managing agent teams.
 pub struct TeamService {
     /// Path to the project directory.
@@ -579,33 +623,50 @@ impl TeamService {
         self.state.as_ref()
     }
 
-    /// Load a team config from `.harness/teams/<name>.yml`.
-    pub fn load_team_config(&self, name: &str) -> anyhow::Result<TeamConfig> {
-        let config_path = self
-            .project_path
-            .join(".harness")
-            .join("teams")
-            .join(format!("{name}.yml"));
+    /// The project this service is bound to.
+    pub fn project_path(&self) -> &Path {
+        &self.project_path
+    }
 
-        if !config_path.exists() {
-            // Also try .yaml extension
-            let yaml_path = config_path.with_extension("yaml");
-            if yaml_path.exists() {
-                return Self::parse_team_config(&yaml_path, name);
-            }
-            Err(anyhow::anyhow!(
-                "Team config '{}' not found at {}",
+    /// Directory holding this project's team configs.
+    pub fn teams_dir(&self) -> PathBuf {
+        self.project_path.join(".harness").join("teams")
+    }
+
+    /// Resolve `<name>` to a config file in `.harness/teams/`, trying each
+    /// supported extension in `TEAM_CONFIG_EXTENSIONS` order.
+    pub fn team_config_path(&self, name: &str) -> Option<PathBuf> {
+        let dir = self.teams_dir();
+        TEAM_CONFIG_EXTENSIONS
+            .iter()
+            .map(|ext| dir.join(format!("{name}.{ext}")))
+            .find(|p| p.exists())
+    }
+
+    /// Load a team config from `.harness/teams/<name>.{json,yml,yaml}`.
+    ///
+    /// All three extensions are accepted, and JSON parses through the YAML
+    /// reader (YAML 1.2 is a superset of JSON) — one loader, so the REPL and
+    /// the `team` subcommand can never disagree about what a config says.
+    pub fn load_team_config(&self, name: &str) -> anyhow::Result<TeamConfig> {
+        match self.team_config_path(name) {
+            Some(path) => Self::parse_team_config(&path, name),
+            None => Err(anyhow::anyhow!(
+                "Team config '{}' not found in {} (tried {})",
                 name,
-                config_path.display()
-            ))
-        } else {
-            Self::parse_team_config(&config_path, name)
+                self.teams_dir().display(),
+                TEAM_CONFIG_EXTENSIONS
+                    .iter()
+                    .map(|e| format!(".{e}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
         }
     }
 
     /// List all available team configs in `.harness/teams/`.
     pub fn list_team_configs(&self) -> anyhow::Result<Vec<String>> {
-        let teams_dir = self.project_path.join(".harness").join("teams");
+        let teams_dir = self.teams_dir();
         if !teams_dir.exists() {
             return Ok(Vec::new());
         }
@@ -615,13 +676,14 @@ impl TeamService {
             let entry = entry?;
             let path = entry.path();
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if ext == "yml" || ext == "yaml" {
+            if TEAM_CONFIG_EXTENSIONS.contains(&ext) {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     names.push(stem.to_string());
                 }
             }
         }
         names.sort();
+        names.dedup();
         Ok(names)
     }
 
@@ -665,7 +727,16 @@ impl TeamService {
     }
 
     /// Start a new team with the given workers.
-    pub fn start(&mut self, workers: Vec<WorkerDef>) -> anyhow::Result<String> {
+    ///
+    /// `name` is the config the team came from, when it came from one. It is
+    /// carried in `TeamState` so `status` can report which config is running
+    /// without the caller having to remember — pass `None` for a team defined
+    /// on the spot.
+    pub fn start(
+        &mut self,
+        name: Option<String>,
+        workers: Vec<WorkerDef>,
+    ) -> anyhow::Result<String> {
         if self.state.is_some() {
             return Err(anyhow::anyhow!(
                 "Team already active. Stop it first with /team stop."
@@ -781,6 +852,7 @@ impl TeamService {
                 WorkerState {
                     name: worker_def.name.clone(),
                     task: worker_def.task,
+                    agent: worker_def.agent.clone(),
                     branch,
                     use_worktree,
                     status: WorkerStatus::Starting,
@@ -788,6 +860,7 @@ impl TeamService {
                     pane_id,
                     pid: None,
                     result: None,
+                    last_message_ts: None,
                 },
             );
             worker_names.push(worker_def.name);
@@ -795,6 +868,7 @@ impl TeamService {
 
         let state = TeamState {
             id: team_id.clone(),
+            name,
             status: TeamStatus::Running,
             project_path: self.project_path.clone(),
             mailbox_path,
@@ -827,6 +901,7 @@ impl TeamService {
             for msg in &messages {
                 if let Some(ref mut state) = self.state {
                     if let Some(worker) = state.workers.get_mut(&msg.from) {
+                        worker.last_message_ts = Some(msg.timestamp);
                         match msg.msg_type.as_str() {
                             "ready" => {
                                 worker.status = WorkerStatus::Running;
@@ -939,7 +1014,7 @@ impl TeamService {
         })?;
 
         // Kill tmux session
-        let session_name = format!("team-{}", state.id);
+        let session_name = TmuxManager::session_name(&state.id);
         let _ = TmuxManager::kill_session(&session_name);
 
         // Clean up worktrees
@@ -966,6 +1041,62 @@ impl TeamService {
         Ok(())
     }
 
+    /// Stop the team, forcing the tmux session down even when the recorded
+    /// state has drifted from reality — a `team.json` left behind by a reboot,
+    /// or a session that outlived the state file.
+    ///
+    /// Scoped to this project: the only session it touches is the one named
+    /// after the team id recorded in `<project>/.harness/team.json`, whatever
+    /// status that file carries. tmux session names carry no project, so a
+    /// broader sweep would take down other projects' teams.
+    pub fn stop_force(&mut self) -> anyhow::Result<ForceStopReport> {
+        let session = self
+            .recorded_team_id()
+            .map(|id| TmuxManager::session_name(&id))
+            .filter(|s| TmuxManager::has_session(s));
+
+        let stopped_team = match self.state.as_ref().map(|s| s.id.clone()) {
+            Some(id) => {
+                self.stop()?;
+                Some(id)
+            }
+            None => None,
+        };
+
+        let mut killed_sessions = Vec::new();
+        if let Some(session) = session {
+            if TmuxManager::has_session(&session) {
+                TmuxManager::kill_session(&session)?;
+            }
+            killed_sessions.push(session);
+        }
+
+        // A state file the normal path leaves behind (status Stopped, or a
+        // shape `TeamService::new` declined to restore) would otherwise keep
+        // resurfacing.
+        if self.state_path.exists() {
+            std::fs::remove_file(&self.state_path)?;
+        }
+
+        Ok(ForceStopReport {
+            stopped_team,
+            killed_sessions,
+        })
+    }
+
+    /// Team id as recorded on disk, regardless of the status it carries.
+    ///
+    /// Read as loose JSON on purpose: a state file this build cannot
+    /// deserialize is exactly the case `stop_force` exists for.
+    fn recorded_team_id(&self) -> Option<String> {
+        let content = std::fs::read_to_string(&self.state_path).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+        value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    }
+
     // ── Persistence ────────────────────────────────────────────
 
     fn save_state(&self, state: &TeamState) -> anyhow::Result<()> {
@@ -989,6 +1120,16 @@ impl TeamService {
     }
 }
 
+/// What a forced stop actually tore down.
+#[derive(Debug, Clone)]
+pub struct ForceStopReport {
+    /// Id of the team that was stopped through the normal path, if one was
+    /// active.
+    pub stopped_team: Option<String>,
+    /// tmux sessions that existed when the force stop began and are now gone.
+    pub killed_sessions: Vec<String>,
+}
+
 /// Result of a merge operation.
 #[derive(Debug, Clone)]
 pub struct MergeResult {
@@ -1000,7 +1141,7 @@ pub struct MergeResult {
 
 // ─── Team Config File ──────────────────────────────────────────────
 
-/// Team configuration loaded from `.harness/teams/<name>.yml`.
+/// Team configuration loaded from `.harness/teams/<name>.{json,yml,yaml}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamConfig {
     /// Display name for the team.
@@ -1077,6 +1218,123 @@ mod tests {
         assert_eq!(sanitize_branch_name("my worker"), "my-worker");
         assert_eq!(sanitize_branch_name("fix: auth #123"), "fix--auth--123");
         assert_eq!(sanitize_branch_name("---leading"), "leading");
+    }
+
+    #[test]
+    fn test_load_team_config_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let teams = dir.path().join(".harness").join("teams");
+        std::fs::create_dir_all(&teams).unwrap();
+        std::fs::write(
+            teams.join("squad.json"),
+            r#"{
+              "name": "squad",
+              "description": "ignored extra key",
+              "workers": [
+                {"name": "analyst", "task": "gather evidence", "agent": "yolo-analyst"},
+                {"name": "executor", "task": "trade", "worktree": true}
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let service = TeamService::new(dir.path()).unwrap();
+        let config = service.load_team_config("squad").unwrap();
+
+        assert_eq!(config.name.as_deref(), Some("squad"));
+        assert_eq!(config.workers.len(), 2);
+        assert_eq!(config.workers[0].name, "analyst");
+        assert_eq!(config.workers[0].agent.as_deref(), Some("yolo-analyst"));
+        assert_eq!(config.workers[1].worktree, Some(true));
+    }
+
+    #[test]
+    fn test_load_team_config_yml_and_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let teams = dir.path().join(".harness").join("teams");
+        std::fs::create_dir_all(&teams).unwrap();
+        std::fs::write(
+            teams.join("squad.yml"),
+            "name: squad\nworkers:\n  - name: analyst\n    task: gather evidence\n",
+        )
+        .unwrap();
+        std::fs::write(
+            teams.join("other.yaml"),
+            "workers:\n  - name: solo\n    task: do it all\n",
+        )
+        .unwrap();
+
+        let service = TeamService::new(dir.path()).unwrap();
+
+        let squad = service.load_team_config("squad").unwrap();
+        assert_eq!(squad.workers[0].task, "gather evidence");
+
+        let other = service.load_team_config("other").unwrap();
+        assert_eq!(other.workers[0].name, "solo");
+        assert!(other.name.is_none());
+    }
+
+    #[test]
+    fn test_load_team_config_missing_names_the_extensions_tried() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = TeamService::new(dir.path()).unwrap();
+
+        let err = service.load_team_config("nope").unwrap_err().to_string();
+        assert!(err.contains(".json"), "{err}");
+        assert!(err.contains(".yml"), "{err}");
+        assert!(err.contains(".yaml"), "{err}");
+    }
+
+    #[test]
+    fn test_list_team_configs_covers_every_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let teams = dir.path().join(".harness").join("teams");
+        std::fs::create_dir_all(&teams).unwrap();
+        for file in ["a.json", "b.yml", "c.yaml", "notes.md"] {
+            std::fs::write(teams.join(file), "workers: []").unwrap();
+        }
+
+        let service = TeamService::new(dir.path()).unwrap();
+        assert_eq!(
+            service.list_team_configs().unwrap(),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_team_config_path_prefers_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let teams = dir.path().join(".harness").join("teams");
+        std::fs::create_dir_all(&teams).unwrap();
+        std::fs::write(teams.join("squad.json"), "{\"workers\": []}").unwrap();
+        std::fs::write(teams.join("squad.yml"), "workers: []").unwrap();
+
+        let service = TeamService::new(dir.path()).unwrap();
+        let path = service.team_config_path("squad").unwrap();
+        assert_eq!(path.extension().unwrap(), "json");
+    }
+
+    #[test]
+    fn test_mailbox_unread_by_recipient() {
+        let dir = tempfile::tempdir().unwrap();
+        let mailbox = Mailbox::open(dir.path()).unwrap();
+
+        for (i, to) in ["executor", "executor", "lead"].iter().enumerate() {
+            mailbox
+                .send(MailboxMessage {
+                    from: "lead".into(),
+                    to: (*to).into(),
+                    msg_type: "task".into(),
+                    body: "go".into(),
+                    timestamp: 1000 + i as u64,
+                })
+                .unwrap();
+        }
+
+        let counts = mailbox.unread_by_recipient().unwrap();
+        assert_eq!(counts.get("executor"), Some(&2));
+        assert_eq!(counts.get("lead"), Some(&1));
+        assert_eq!(counts.get("analyst"), None);
     }
 
     #[test]
@@ -1231,6 +1489,41 @@ mod tests {
     }
 
     #[test]
+    fn test_team_state_reads_pre_agent_state_files() {
+        // A `.harness/team.json` written before `name`, `agent` and
+        // `last_message_ts` existed must still load — otherwise upgrading the
+        // binary strands whatever team is running.
+        let json = r#"{
+          "id": "team-old",
+          "status": "Running",
+          "project_path": "/tmp/project",
+          "mailbox_path": "/tmp/project/.harness/mailbox",
+          "workers": {
+            "w1": {
+              "name": "w1",
+              "task": "old task",
+              "branch": "team/w1",
+              "use_worktree": false,
+              "status": "Starting",
+              "work_dir": "/tmp/project",
+              "pane_id": null,
+              "pid": null,
+              "result": null
+            }
+          },
+          "created_at": 1700000000000,
+          "started_at": 1700000000000,
+          "completed_at": null
+        }"#;
+
+        let state: TeamState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.id, "team-old");
+        assert!(state.name.is_none());
+        assert!(state.workers["w1"].agent.is_none());
+        assert!(state.workers["w1"].last_message_ts.is_none());
+    }
+
+    #[test]
     fn test_team_state_serialization() {
         let mut workers = HashMap::new();
         workers.insert(
@@ -1238,6 +1531,7 @@ mod tests {
             WorkerState {
                 name: "worker-1".into(),
                 task: "Fix lint".into(),
+                agent: Some("reviewer".into()),
                 branch: "team/worker-1".into(),
                 use_worktree: true,
                 status: WorkerStatus::Running,
@@ -1245,11 +1539,13 @@ mod tests {
                 pane_id: Some("%0".into()),
                 pid: None,
                 result: None,
+                last_message_ts: Some(1700000000123),
             },
         );
 
         let state = TeamState {
             id: "team-test".into(),
+            name: Some("squad".into()),
             status: TeamStatus::Running,
             project_path: PathBuf::from("/tmp/project"),
             mailbox_path: PathBuf::from("/tmp/project/.harness/mailbox"),
@@ -1262,7 +1558,11 @@ mod tests {
         let json = serde_json::to_string_pretty(&state).unwrap();
         let parsed: TeamState = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, "team-test");
+        assert_eq!(parsed.name.as_deref(), Some("squad"));
         assert_eq!(parsed.workers.len(), 1);
+        let worker = &parsed.workers["worker-1"];
+        assert_eq!(worker.agent.as_deref(), Some("reviewer"));
+        assert_eq!(worker.last_message_ts, Some(1700000000123));
         assert!(matches!(parsed.status, TeamStatus::Running));
     }
 
@@ -1283,7 +1583,7 @@ mod tests {
         std::fs::create_dir_all(project_path.join(".harness")).unwrap();
 
         let mut service = TeamService::new(project_path).unwrap();
-        let result = service.start(vec![]);
+        let result = service.start(None, vec![]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("No workers"));
     }
@@ -1306,7 +1606,7 @@ mod tests {
             })
             .collect();
 
-        let result = service.start(workers);
+        let result = service.start(None, workers);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Too many workers"));
     }
