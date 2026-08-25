@@ -1146,8 +1146,13 @@ misses is a worker that **ended**: the exit code and the pane are checked on
 every status call, so `completed`, `crashed` and `failed_to_start` arrive
 without the worker having said anything. See [When a worker
 dies](#when-a-worker-dies). For progress *during* a run, read the tmux windows
-or the `worker-<name>.log` files. When the branches are ready, merge them
-yourself:
+or the `worker-<name>.log` files.
+
+In the web and desktop UIs you do not have to ask: the right panel's **Running
+elsewhere** section polls the same liveness check every ten seconds, so a worker
+that dies in a detached pane surfaces there on its own (§18).
+
+When the branches are ready, merge them yourself:
 
 ```bash
 git merge --no-edit team/<worker-name>
@@ -1992,6 +1997,12 @@ Create `.harness/gateway.json` in your project to configure the gateway:
         "daily_quota": 0
       }
     }
+  },
+
+  // The routine scheduler (§18). On by default.
+  "routines": {
+    "enabled": true,
+    "tick_seconds": 30
   }
 }
 ```
@@ -2007,6 +2018,9 @@ Create `.harness/gateway.json` in your project to configure the gateway:
 | `auth.keys.*.name` | `string` | `""` | Human-readable key name |
 | `auth.keys.*.rate_limit` | `u32` | `0` | Max requests/minute (0 = unlimited) |
 | `auth.keys.*.daily_quota` | `u32` | `0` | Max requests/day (0 = unlimited) |
+| `ui_dir` | `string` | `"web/out"` | Directory served at `/ui`. Relative paths resolve against the project root. |
+| `routines.enabled` | `bool` | `true` | Advance the routine schedule while the gateway runs (§18). Nothing fires unless a routine exists, so the default costs one directory read per tick. |
+| `routines.tick_seconds` | `u64` | `30` | How often the scheduler looks — and therefore the resolution of every schedule. Floored at 5. |
 
 #### Auth Behavior
 

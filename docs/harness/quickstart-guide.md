@@ -260,6 +260,8 @@ Inside the REPL:
 | `/team start <name>` | Start a team from config file |
 | `/team status` | Check team progress |
 | `/team stop` | Stop the team — **destructive**, see §12 of the user guide |
+| `/routine list` | Scheduled routines and when each is next due |
+| `/routine run <name>` | Fire a routine now, outside its schedule |
 | `/clear` | Clear all context and start fresh |
 | `/compact` | Compact context (summarize into new session) |
 | `/quit` | Exit (or Ctrl+D) |

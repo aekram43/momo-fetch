@@ -14,7 +14,8 @@ web/src/
 │   ├── chat/               # Composer, messages, tool cards, approval dialog
 │   ├── layout/             # App shell, header, sidebar, status bar
 │   ├── settings/           # Settings dialog and four panels
-│   ├── detail/             # Right panel: this turn's tool calls + changed files
+│   ├── routines/           # Routines dialog (list + form + detail) and the rail row
+│   ├── detail/             # Right panel: this turn, changed files, work running elsewhere
 │   ├── sidebar/            # Session list, agent picker, tool status
 │   └── shared/             # Reusable: toaster, buttons, etc.
 ├── hooks/
@@ -26,6 +27,7 @@ web/src/
 │   ├── sse-parser.ts       # Hand-rolled SSE decoder
 │   ├── types.ts            # Wire types from gateway (source of truth is src/gateway/v2_types.rs)
 │   ├── preferences.ts      # localStorage: view state only, never server state
+│   ├── relative-time.ts    # "in 4h" / "3m ago" — schedule rows have no room for ISO
 │   └── *.ts                # Utilities: sounds, highlighting, etc.
 ├── stores/
 │   ├── ui-store.ts         # Panel visibility, theme, turn phase
@@ -40,6 +42,8 @@ web/src/
 | Add a new API call | `web/src/lib/api-client.ts` |
 | Handle new SSE event | `web/src/lib/sse-parser.ts` and `web/src/lib/types.ts` |
 | Add a settings panel | `web/src/components/settings/` and `web/src/stores/ui-store.ts` |
+| Change the routine form | `web/src/components/routines/routine-form.tsx` |
+| Show more background work | `web/src/components/detail/activity-section.tsx` |
 | Change the layout | `web/src/components/layout/app-shell.tsx` |
 | Add a store | `src/stores/`, export from the module |
 | Change theme colors | `web/src/app/globals.css` (CSS variables) and `web/src/lib/preferences.ts` |
@@ -130,6 +134,7 @@ Key test files:
 
 - `web/src/lib/sse-parser.test.ts` — Every edge case of the frame parser (split frames, encoding, etc.)
 - `web/src/lib/preferences.test.ts` — Theme resolution and `localStorage` round-trip
+- `web/src/lib/relative-time.test.ts` — Which side of "now" a timestamp falls on, and the units it collapses to
 
 ## Building
 
@@ -205,6 +210,17 @@ Not a frontend concern, but worth knowing: `memory/vault.rs` has a `std::sync::M
 
 The panels are plain components taking no props. They fetch their own data with
 `useGatewayResource`, so nothing has to be threaded through the dialog.
+
+### Poll something the gateway owns
+
+`useGatewayResource(fetcher, deps, intervalMs)`. The third argument is for state
+**this tab does not cause and is not told about** — a team worker finishing in a
+tmux pane, a routine firing on the gateway's timer. `activity-section.tsx` polls
+at 10 s.
+
+Leave it off for anything that only changes because someone clicked here:
+`serverStateNonce` already refetches every reader after a mutation, and a poll
+on top of that is just traffic.
 
 ### Add a gateway resource fetch
 

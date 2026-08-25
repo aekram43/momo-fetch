@@ -47,9 +47,10 @@ The dev server resolves the gateway URL in this order:
 
 ## What You Get
 
-- **Left panel** — Sessions list, agents, tools, memory, files
+- **Left panel** — Sessions list, agents, tools, routines, memory, files
 - **Center** — Chat composer and message history
-- **Right panel** — What the agent is working on right now (details)
+- **Right panel** — What the agent is working on: this turn, the files it
+  changed, and anything running elsewhere (team workers, scheduled runs)
 - **Header** — Current model, cost, gateway health
 - **Status bar** — Standing permissions, token usage
 

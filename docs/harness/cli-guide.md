@@ -738,4 +738,8 @@ Project instructions and agent personality files auto-discovered and injected in
 | Custom commands | `<project>/.harness/commands/` |
 | Team configs | `<project>/.harness/teams/` (`.json`, `.yml`, `.yaml`) |
 | Worker logs / exit codes / heartbeats | `<project>/.harness/worker-<name>.{log,exit,heartbeat}` |
+| Routine definitions | `<project>/.harness/routines/<id>.json` |
+| Routine schedule state / run log | `<project>/.harness/routines/{state,runs}.json` |
+| Routine run scripts / logs / exit codes | `<project>/.harness/routines/runs/<run-id>.{sh,log,exit}` |
+| Gateway config | `<project>/.harness/gateway.json` |
 | Knowledge bases | `<project>/.kms/` |

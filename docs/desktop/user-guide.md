@@ -63,6 +63,32 @@ Sessions live in one SQLite database per machine, not per project:
 `~/.config/momo-fetch/sessions.db` (`src/harness.rs:49`). Switching projects does
 not change which sessions are listed — the list is global.
 
+## Scheduled work
+
+**Customization → Routines** in the left panel. A routine hands a task to the
+agent — or to a standby team worker — on a cron schedule or a fixed interval,
+without anyone at the keyboard.
+
+The app's gateway advances the schedule while the app is open, every 30 seconds.
+**Close the app and nothing fires**: routines are not a background service, and
+the desktop shell does not keep one alive after you quit. For schedules that
+have to hold on a machine you are not sitting at, put `momo-fetch routine tick`
+in system cron — it is the same step.
+
+Routines belong to the **project**, in `<project>/.harness/routines/`. Switching
+projects switches which routines exist, the same way it switches the memory
+vault.
+
+Each firing runs in its **own process**, beside your session rather than inside
+it — so a routine that fires while you are mid-conversation does not interleave
+with it, and its output goes to the run's log rather than into your chat. The
+right panel's **Running elsewhere** section shows anything in flight; the
+Routines dialog shows each run's exit code and log path.
+
+A scheduled run defaults to `auto` permission, because nothing can answer a
+confirmation prompt at 03:00 — see [Approvals and
+permissions](#approvals-and-permissions) for what that allows.
+
 ## Approvals and permissions
 
 The app starts in strict permission mode: the agent asks before taking any action that changes your machine (running shell commands, reading files outside the sandbox, etc).

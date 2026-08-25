@@ -49,7 +49,7 @@ One session is active across all tabs; switching in one tab affects all of them.
 
 ### Customization (collapsible group)
 
-A group that expands/collapses, containing four registers:
+A group that expands/collapses, containing five registers:
 
 #### Agents
 
@@ -65,6 +65,19 @@ Each row displays:
 - Tool count (or `—` if unknown; `null` never renders as `0`)
 
 Header shows `X/Y` (running servers / total servers).
+
+#### Routines
+
+**Recurring work, and when it next fires.** Each row is a routine: a dot for its
+state (green armed, grey off, amber a run in flight, red the last run failed),
+its name, and when it is next due (`in 4h`, `manual`, `off`).
+
+Click a row to open the **Routines dialog** on that routine; **manage** opens the
+dialog with nothing selected.
+
+Rows are a summary and a way in, not a control surface — everything you can *do*
+to a routine lives in the dialog. Run and delete buttons in a 288px rail would be
+hit by accident.
 
 #### Memory
 
@@ -93,7 +106,7 @@ Below the history is the **message composer**:
 
 ## Detail Panel (right panel; `xl` and up)
 
-Shows what the agent is doing in the current turn. Contains two fixed sections:
+What the agent is doing — in this turn, and outside it. Three fixed sections:
 
 ### This turn
 
@@ -111,6 +124,29 @@ Header optionally shows token count in monospace: `{prompt}↑ {completion}↓` 
 Turn-scoped and not stored: reopening a past session shows none.
 
 If empty, a hint says "Files this turn changed show up here."
+
+### Running elsewhere
+
+**Work the agent started that is not this turn**: team workers in their tmux
+panes, and routine runs in their own processes.
+
+Worker rows show the worker name, its agent (if it has one), and its state —
+`running`, `completed`, `crashed`, `failed_to_start`. A failure prints its
+reason underneath, clamped to two lines with the full text (including the log
+path) in the tooltip. A worker with queued mail or a heartbeat shows
+`3 queued · beat 40s ago`.
+
+Run rows show the routine name and how long it has been going; clicking one
+opens the Routines dialog on that routine. The section header shows how many
+routines are armed, and is also a way into the dialog.
+
+**Polled every 10 seconds**, because none of it is caused by this tab — the
+gateway fires routines on its own timer and tmux never reports to anyone. The
+poll refreshes worker liveness and settles finished runs as it goes, so a worker
+whose pane died reads `crashed` here before anything else notices.
+
+If nothing is in flight, a hint says so — which is a real answer, not an empty
+state.
 
 ## Status Bar (bottom)
 
@@ -199,11 +235,58 @@ If you click `yolo`, a confirmation prompt appears (red border): "In `yolo` the 
 
 **Sound** — Toggle (off by default; an app that makes noise unasked is muted at the OS level).
 
+### Routines Dialog
+
+Opens from the left rail's **Routines** section (**manage**, or any row), and
+from the right panel's **Running elsewhere** header. Escape closes it, unless an
+approval is pending — dismissing a dialog is never a request to stop the agent.
+
+Wider than settings, because the two halves have to be visible together: a
+schedule list you cannot see the outcomes beside is how a routine fails quietly
+for a week.
+
+**Left rail** — every routine with its state dot and next window, `+ New
+routine`, and **check** (advance the schedule now instead of waiting for the
+gateway's next tick).
+
+**Right pane**, one of three things:
+
+- **Detail** — the trigger, the assignee, counters (`fired`, `skipped`, `in
+  flight`, `queued`), the task template, and **recent runs** with their exit
+  codes and log paths. Buttons: **Run now**, **Edit**, **Enable/Disable**, and
+  **Delete** off on its own at the right.
+- **New routine / Edit** — the form below.
+- Nothing selected — a short explanation of what a routine is.
+
+#### The routine form
+
+| Field | Notes |
+|---|---|
+| **Name** | What the routine is called |
+| **Assignee** | `lead`, an agent from `.harness/agents/`, or a standby team worker. Workers only appear while a team is running; one that has gone away stays listed as "not currently available" rather than silently reassigning the routine |
+| **Trigger** | Cron schedule · Every N minutes (heartbeat) · Manual only |
+| **Concurrency** | Queue · Skip · Parallel — the hint under it says what each does |
+| **Cron helper** | Preset dropdown, timezone, the expression itself, catch-up |
+| **Task template** | Title, priority, and the description — which *is* the prompt |
+| **Permission** | `auto` recommended; the hint says why `strict` and `yolo` are both wrong for an unattended run |
+
+The presets **write into the expression field**; the field is always the truth.
+A schedule builder that hides the expression cannot say what crontab can, and
+the people most likely to want a routine already know the syntax.
+
+The timezone defaults to **this machine's IANA zone**, not UTC. Somebody typing
+"09:00" means nine in the morning where they are; storing that as UTC is the bug
+the field exists to prevent.
+
+Validation happens in the form before the request goes out (field count on the
+cron expression, minimum interval, required fields), and the gateway's own
+message is shown if it still refuses.
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| Escape | Interrupt the current turn (not active during approval or settings dialog) |
+| Escape | Interrupt the current turn (not active during the approval, settings or routines dialogs) |
 | Cmd+B (Mac) / Ctrl+B | Toggle sidebar |
 | Cmd+J (Mac) / Ctrl+J | Toggle detail panel |
 | Cmd+, (Mac) / Ctrl+, | Open Settings |
@@ -213,7 +296,7 @@ If you click `yolo`, a confirmation prompt appears (red border): "In `yolo` the 
 - **Composition** — You type, hit Enter, message posts to `/v2/chat/stream` and streams back via SSE
 - **Real-time updates** — Tool calls, approvals, usage arrive as SSE events
 - **Server state always wins** — Active session, model, permissions come from `/health` and event streams, not cached locally
-- **Polling** — Header polls `/health` and `/v1/cost` every 10 seconds; changes in one tab appear in all others
+- **Polling** — Header polls `/health` and `/v1/cost` every 10 seconds; the right panel polls `/v2/activity` on the same cadence for work outside this turn; changes in one tab appear in all others
 
 One global session is held by the gateway (spec §2.3). Switching sessions in one tab affects all tabs.
 
