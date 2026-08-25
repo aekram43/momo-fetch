@@ -772,6 +772,7 @@ workers:
     agent: researcher
     worktree: true
     permission: auto        # optional — this is the default
+    mode: oneshot           # optional — `standby` keeps the worker alive
   - name: coder
     task: "Implement the new auth flow with JWT + refresh tokens"
     agent: coder
@@ -872,10 +873,12 @@ subcommand, for the agent *inside* a session to run through `shell_exec` — or
 for a script, a cron job, or you in another terminal:
 
 ```bash
-momo-fetch team list   [--project <dir>]
+momo-fetch team list    [--project <dir>]
 momo-fetch team start <name> [--project <dir>]
-momo-fetch team status [--project <dir>]
-momo-fetch team stop   [--project <dir>] [--force]
+momo-fetch team status  [--project <dir>]
+momo-fetch team send <worker> <message> [--type <type>] [--project <dir>]
+momo-fetch team restart <worker> [--project <dir>]
+momo-fetch team stop    [--project <dir>] [--force]
 ```
 
 `--project` defaults to the current directory and is resolved to an absolute
@@ -939,6 +942,9 @@ need a second round trip to learn the pane ids. Notes worth having:
   says where it actually runs.
 - **`permission` is the mode the worker was launched with** — see [Worker
   permissions](#worker-permissions).
+- **`mode` is `oneshot` or `standby`**, and `last_heartbeat` is when a standby
+  worker last completed a poll (`null` for a one-shot) — see [Standby
+  workers](#standby-workers).
 - **`unread_by_recipient` lists every worker plus `lead`,** so a zero is a real
   zero rather than an absent key.
 
@@ -1015,24 +1021,104 @@ The mode is passed to the worker explicitly as `--permission`, so it does not
 depend on the project's `settings.json` — a team behaves the same in a repo
 configured `strict` and one configured `yolo`.
 
+### Standby workers
+
+A worker is a one-shot: it runs the task and the process ends. That is the
+right shape for fanning work out once, and no shape at all for a worker you
+want to keep asking things — there is nothing left alive to ask.
+
+`mode: standby` keeps the process up. After its opening task it polls its inbox,
+runs a turn per message, answers whoever asked, and writes a heartbeat file each
+poll so the lead can tell "thinking" from "wedged". It ends on a `shutdown`
+message, or when its pane goes.
+
+```json
+{
+  "workers": [
+    { "name": "analyst",  "task": "Stand by for market briefs.", "mode": "standby" },
+    { "name": "reporter", "task": "Write today's summary.",      "mode": "oneshot" }
+  ]
+}
+```
+
+One team can mix both, and `oneshot` stays the default, so a config written
+before standby existed behaves exactly as it did.
+
+Talking to a standby worker:
+
+```bash
+momo-fetch team send analyst "BTC and ETH, 1h interval"
+momo-fetch team status | jq '.workers[] | {name, status, result, last_heartbeat}'
+```
+
+`team send` refuses a one-shot worker rather than queueing a message nothing
+will ever read:
+
+```
+Worker 'reporter' runs in oneshot mode — it exits after its task and never
+reads its inbox. Give it "mode": "standby" in the team config.
+```
+
+A standby worker reporting `completed` means *that task* is done, not that the
+worker is. Its status stays `running` and the reply lands in `result`. As a
+consequence a team with a standby worker in it never reaches `completed` on its
+own — it stays `running` until you stop it.
+
+### When a worker dies
+
+Worker status used to move for exactly one reason: a message arriving for
+`lead`. Nothing in a default run sends one, so a worker that died in its first
+second sat at `starting` forever and the team never finished.
+
+`team status` now also reads what a dead worker could not tell you:
+
+| Status | What it means |
+|--------|---------------|
+| `completed` | The process exited 0 — for a one-shot worker, its job is done |
+| `failed_to_start` | Exited non-zero having never reported: a bad agent name, a missing key, a config it refused. The message names the log |
+| `crashed` | Exited non-zero after it had started working, or its tmux pane went away underneath it |
+| `restarting` | A restart was issued; the replacement pane has not reported yet |
+
+The evidence is the exit code the worker's own shell writes to
+`.harness/worker-<name>.exit` when the process ends — the tmux window survives
+either way, so nothing else can tell a finished worker from a dead one. A
+missing pane only counts as a crash while the team's tmux session is still up;
+if the whole session is gone, that says nothing about any individual worker.
+
+Bring one back in a fresh pane, same task and settings:
+
+```bash
+momo-fetch team restart executor
+```
+
+The team goes back to `running` if it had already been written off as
+`completed`, and the worker's log is appended to rather than replaced, so the
+crash that prompted the restart is still there above it.
+
 ### What a worker actually is
 
 A separate `momo-fetch` process, one per worker, each in its own tmux **window**
 named after the worker:
 
-```
-cd <work_dir> && momo-fetch [-a <agent>] --permission <mode> -p '<task>' 2>&1 | tee .harness/worker-<name>.log
+```sh
+cd <work_dir> && { momo-fetch [-a <agent>] [--team-worker <name>] \
+    --permission <mode> --mailbox <lead>/.harness/mailbox -p '<task>'
+  echo $? > <lead>/.harness/worker-<name>.exit
+} 2>&1 | tee -a <lead>/.harness/worker-<name>.log
 ```
 
 - `<work_dir>` is the worktree when `worktree: true` in a git repo, otherwise the
   project root — so **without worktrees every worker edits the same files at the
   same time.**
-- The log is inside the worker's own directory, so with worktrees it lands in
-  `.harness/worktrees/<name>/.harness/worker-<name>.log`.
+- The log, the exit file and the heartbeat all land in the **lead's**
+  `.harness/`, whatever directory the worker runs in — one place to look, and
+  the same place `team status` reads. The log is appended to, so a restart
+  keeps the crash that prompted it.
 - Watch them live with `tmux ls` then `tmux attach -t <session>`. The session is
   named `team-<team-id>`, and since the id itself starts with `team-` it reads
   `team-team-20260820-…` — `tmux ls` is easier than typing it.
-- Each worker is a **one-shot run**, not a REPL. It gets the task, works, exits.
+- A worker is a **one-shot run** by default: it gets the task, works, exits.
+  `mode: standby` keeps it alive instead — see [Standby workers](#standby-workers).
 
 ### Why `/team merge` says the team is not completed
 
@@ -1049,14 +1135,18 @@ Two consequences worth knowing before you wait on it:
   `momo-fetch -p` run. The only way one is sent is if the worker's agent
   personality has the orchestrator tools and the model chooses to call
   `send_message(to: "lead", msg_type: "completed", …)`.
-- **A worker in a worktree writes to the wrong mailbox anyway.** It resolves
-  `.harness/mailbox` relative to *its* directory — the worktree — while the lead
-  reads the one in the main checkout.
+- ~~**A worker in a worktree writes to the wrong mailbox.**~~ Fixed: workers
+  are launched with `--mailbox <lead>/.harness/mailbox`, so a worktree's own
+  `.harness/` no longer swallows the conversation.
 
-So treat `/team status` as "what the mailbox has heard", not as ground truth:
-it only refreshes when you run it, and silence means nothing was reported, not
-that nothing happened. To see real progress, read the tmux windows or the
-`worker-<name>.log` files. When the branches are ready, merge them yourself:
+`/team status` still only refreshes when you run it, and a worker that is
+quietly working looks the same as one that is quietly stuck. What it no longer
+misses is a worker that **ended**: the exit code and the pane are checked on
+every status call, so `completed`, `crashed` and `failed_to_start` arrive
+without the worker having said anything. See [When a worker
+dies](#when-a-worker-dies). For progress *during* a run, read the tmux windows
+or the `worker-<name>.log` files. When the branches are ready, merge them
+yourself:
 
 ```bash
 git merge --no-edit team/<worker-name>

@@ -23,6 +23,15 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
         }
     }
 
+    run_turn(harness, &full_prompt).await.map(|_| ())
+}
+
+/// Run one turn the way one-shot mode does — printing text to stdout and tool
+/// calls to stderr — and return what the agent said.
+///
+/// Shared with the team-worker loop, which runs turn after turn against the
+/// same harness and needs the reply text to send back to the lead.
+pub async fn run_turn(harness: &Harness, full_prompt: &str) -> anyhow::Result<String> {
     // Cost lifecycle. One-shot is a third caller alongside the REPL and the
     // gateway, and it was silently missing this — `momo-fetch -p …` spent real
     // money and recorded nothing, so `/cost` under-reported by every scripted
@@ -31,9 +40,9 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
     harness.begin_turn();
 
     // Run a single turn (with memory enrichment if auto_search is enabled)
-    match harness.run_turn_enriched(&full_prompt).await {
+    match harness.run_turn_enriched(full_prompt).await {
         Ok((_enriched, stream)) => {
-            let success = consume_stream_oneshot(harness, stream).await;
+            let (success, reply) = consume_stream_oneshot(harness, stream).await;
             harness.end_turn();
             if success {
                 // Post-turn auto-write memory
@@ -46,7 +55,7 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
                         .unwrap_or_default();
 
                     let turn_summary = crate::memory::sidecar::TurnSummary {
-                        user_message: full_prompt.clone(),
+                        user_message: full_prompt.to_string(),
                         tool_calls: Vec::new(),
                         response_preview: String::new(),
                         project: project_name,
@@ -59,7 +68,7 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
                         None,
                     );
                 }
-                Ok(())
+                Ok(reply)
             } else {
                 // Stream completed but with errors
                 Err(anyhow::anyhow!("Agent returned errors"))
@@ -81,9 +90,10 @@ pub async fn run(harness: &Harness, prompt: &str) -> anyhow::Result<()> {
 /// - Print tool calls to stderr (yellow, dimmed)
 /// - Print text output to stdout
 /// - Return false if any errors occurred
-async fn consume_stream_oneshot(harness: &Harness, mut stream: EventStream) -> bool {
+async fn consume_stream_oneshot(harness: &Harness, mut stream: EventStream) -> (bool, String) {
     let mut success = true;
     let mut in_tool_call = false;
+    let mut reply = String::new();
 
     loop {
         match stream.next().await {
@@ -94,6 +104,7 @@ async fn consume_stream_oneshot(harness: &Harness, mut stream: EventStream) -> b
                         match part {
                             Part::Text { text } => {
                                 // Agent text output goes to stdout (for piping)
+                                reply.push_str(text);
                                 print!("{}", text);
                                 let _ = std::io::stdout().flush();
                                 in_tool_call = false;
@@ -164,7 +175,7 @@ async fn consume_stream_oneshot(harness: &Harness, mut stream: EventStream) -> b
     // Ensure final newline on stdout
     println!();
 
-    success
+    (success, reply)
 }
 
 /// Summarize tool arguments for display.

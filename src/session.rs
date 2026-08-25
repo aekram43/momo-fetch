@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
 
 use adk_session::{
@@ -50,6 +51,109 @@ pub fn title_from_prompt(text: &str) -> Option<String> {
         out.push('…');
     }
     Some(out)
+}
+
+/// Wraps a session service, retrying the writes SQLite refuses outright.
+///
+/// WAL and a busy timeout get a lone writer to wait its turn. Neither helps a
+/// transaction that began as a reader and then tried to write: SQLite fails
+/// that one immediately and on purpose, because two readers both waiting to
+/// upgrade would deadlock forever. adk-session opens every write exactly that
+/// way — `BEGIN`, read the existing state, insert — so two agents writing in
+/// the same instant still cost one of them its turn, with the same
+/// `database is locked (code: 5)` a team of workers used to die on.
+///
+/// The transaction is already rolled back by the time the error reaches us, so
+/// the retry starts clean. Backoff is jittered because the whole point is that
+/// two processes are in step, and retrying in step would keep them there.
+struct RetryingSessionService {
+    inner: Arc<dyn SessionService>,
+}
+
+/// Enough attempts to cover a whole team arriving at once; the last delay is
+/// still under a second, so a genuinely stuck database is not hidden behind
+/// minutes of waiting.
+const RETRY_ATTEMPTS: usize = 6;
+const RETRY_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+
+impl RetryingSessionService {
+    fn new(inner: impl SessionService + 'static) -> Self {
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    /// Run `op`, retrying while SQLite says the database is busy.
+    async fn retrying<T, F, Fut>(&self, mut op: F) -> adk_rust::Result<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = adk_rust::Result<T>>,
+    {
+        let mut delay = RETRY_BASE_DELAY;
+
+        for attempt in 1..=RETRY_ATTEMPTS {
+            match op().await {
+                Err(e) if attempt < RETRY_ATTEMPTS && is_locked(&e) => {
+                    tracing::debug!(
+                        attempt,
+                        "session store busy, retrying in {}ms",
+                        delay.as_millis()
+                    );
+                    tokio::time::sleep(delay + jitter(delay)).await;
+                    delay *= 2;
+                }
+                other => return other,
+            }
+        }
+
+        unreachable!("the loop returns on its final attempt")
+    }
+}
+
+/// Whether an error is SQLite saying "come back later" rather than "no".
+fn is_locked(error: &adk_rust::AdkError) -> bool {
+    let text = error.to_string();
+    text.contains("database is locked")
+        || text.contains("database table is locked")
+        || text.contains("(code: 5)")
+        || text.contains("(code: 6)")
+}
+
+/// Up to a full delay of extra wait, so two processes that collided do not
+/// simply collide again one delay later.
+fn jitter(delay: std::time::Duration) -> std::time::Duration {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0);
+    let span = delay.as_millis().max(1) as u64;
+    std::time::Duration::from_millis(nanos % span)
+}
+
+#[adk_rust::async_trait]
+impl SessionService for RetryingSessionService {
+    async fn create(&self, req: CreateRequest) -> adk_rust::Result<Box<dyn Session>> {
+        self.retrying(|| self.inner.create(req.clone())).await
+    }
+
+    async fn get(&self, req: GetRequest) -> adk_rust::Result<Box<dyn Session>> {
+        self.retrying(|| self.inner.get(req.clone())).await
+    }
+
+    async fn list(&self, req: ListRequest) -> adk_rust::Result<Vec<Box<dyn Session>>> {
+        self.retrying(|| self.inner.list(req.clone())).await
+    }
+
+    async fn delete(&self, req: DeleteRequest) -> adk_rust::Result<()> {
+        self.retrying(|| self.inner.delete(req.clone())).await
+    }
+
+    async fn append_event(&self, session_id: &str, event: Event) -> adk_rust::Result<()> {
+        // The hot one: every event of every turn is a write, so this is where
+        // two agents in the same second actually meet.
+        self.retrying(|| self.inner.append_event(session_id, event.clone()))
+            .await
+    }
 }
 
 /// Manages session persistence using adk-session SQLite backend.
@@ -105,7 +209,7 @@ impl SessionManager {
         service.migrate().await?;
 
         Ok(Self {
-            service: Arc::new(service),
+            service: Arc::new(RetryingSessionService::new(service)),
         })
     }
 
@@ -437,5 +541,116 @@ mod title_tests {
     fn nothing_to_title_yields_none() {
         assert_eq!(title_from_prompt(""), None);
         assert_eq!(title_from_prompt("   \n\t\n  "), None);
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A session store that reports the database busy a fixed number of times
+    /// before working, so the retry loop can be tested without two processes
+    /// and a real lock.
+    struct Flaky {
+        failures_left: Mutex<usize>,
+        calls: AtomicUsize,
+    }
+
+    /// A cloneable handle, so the test can still read the call count after the
+    /// service has taken ownership.
+    #[derive(Clone)]
+    struct FlakyHandle(Arc<Flaky>);
+
+    impl FlakyHandle {
+        fn new(failures: usize) -> Self {
+            Self(Arc::new(Flaky {
+                failures_left: Mutex::new(failures),
+                calls: AtomicUsize::new(0),
+            }))
+        }
+
+        fn calls(&self) -> usize {
+            self.0.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[adk_rust::async_trait]
+    impl SessionService for FlakyHandle {
+        async fn create(&self, _req: CreateRequest) -> adk_rust::Result<Box<dyn Session>> {
+            unimplemented!("delete is the method under test")
+        }
+
+        async fn get(&self, _req: GetRequest) -> adk_rust::Result<Box<dyn Session>> {
+            unimplemented!("delete is the method under test")
+        }
+
+        async fn list(&self, _req: ListRequest) -> adk_rust::Result<Vec<Box<dyn Session>>> {
+            unimplemented!("delete is the method under test")
+        }
+
+        async fn delete(&self, _req: DeleteRequest) -> adk_rust::Result<()> {
+            self.0.calls.fetch_add(1, Ordering::SeqCst);
+
+            let mut left = self.0.failures_left.lock().unwrap();
+            if *left > 0 {
+                *left -= 1;
+                return Err(adk_rust::AdkError::session(
+                    "insert failed: error returned from database: (code: 5) database is locked",
+                ));
+            }
+            Ok(())
+        }
+
+        async fn append_event(&self, _session_id: &str, _event: Event) -> adk_rust::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn delete_request() -> DeleteRequest {
+        DeleteRequest {
+            app_name: APP_NAME.to_string(),
+            user_id: DEFAULT_USER.to_string(),
+            session_id: "s1".to_string(),
+        }
+    }
+
+    #[test]
+    fn locked_errors_are_recognised() {
+        assert!(is_locked(&adk_rust::AdkError::session(
+            "insert failed: error returned from database: (code: 5) database is locked"
+        )));
+        assert!(is_locked(&adk_rust::AdkError::session(
+            "database table is locked"
+        )));
+
+        // Anything else is a real failure and must surface on the first try.
+        assert!(!is_locked(&adk_rust::AdkError::session("no such table: sessions")));
+        assert!(!is_locked(&adk_rust::AdkError::session("UNIQUE constraint failed")));
+    }
+
+    #[tokio::test]
+    async fn a_busy_database_is_retried_until_it_yields() {
+        let flaky = FlakyHandle::new(3);
+        let service = RetryingSessionService::new(flaky.clone());
+
+        service.delete(delete_request()).await.unwrap();
+
+        // Three refusals, then the one that worked.
+        assert_eq!(flaky.calls(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_database_that_stays_busy_still_reports_the_error() {
+        // Retrying forever would turn a wedged database into a hang, which is
+        // worse than the error it replaced.
+        let flaky = FlakyHandle::new(RETRY_ATTEMPTS + 1);
+        let service = RetryingSessionService::new(flaky.clone());
+
+        let err = service.delete(delete_request()).await.unwrap_err();
+
+        assert!(err.to_string().contains("database is locked"), "{err}");
+        assert_eq!(flaky.calls(), RETRY_ATTEMPTS);
     }
 }

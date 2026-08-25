@@ -23,6 +23,10 @@ pub struct HarnessConfig {
     pub memory: MemorySettings,
     /// Agent personality name (from .harness/agents/<name>.md). None = default mode.
     pub agent_name: Option<String>,
+    /// Where this process reads and writes agent messages. Normally
+    /// `<project>/.harness/mailbox`; a team worker running in a worktree is
+    /// pointed at the main checkout's, which is the one the lead reads.
+    pub mailbox_path: PathBuf,
     /// Per-model context window overrides from settings.json.
     pub context_window_overrides: HashMap<String, u64>,
     /// This run has no one at a keyboard: `momo-fetch -p …`, which is also how
@@ -201,6 +205,10 @@ impl HarnessConfig {
                 .unwrap_or_default(),
             agent_name: args.agent.clone(),
             headless: args.prompt.is_some(),
+            mailbox_path: match &args.mailbox {
+                Some(dir) => PathBuf::from(dir),
+                None => project_path.join(".harness").join("mailbox"),
+            },
             context_window_overrides: project_settings
                 .context_window
                 .or(global_settings.context_window)

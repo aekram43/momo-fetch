@@ -200,6 +200,7 @@ impl Harness {
             agent_def.as_ref(),
             &approved_tools,
             &status_channel,
+            &config.mailbox_path,
         )?;
 
         // Initialize cost tracker session context
@@ -248,6 +249,7 @@ impl Harness {
         agent_def: Option<&crate::agent::AgentDef>,
         approved_tools: &std::collections::HashSet<String>,
         status_channel: &crate::cli::status::StatusChannel,
+        mailbox_path: &std::path::Path,
     ) -> anyhow::Result<Runner> {
         let tools = crate::tools::build_tool_registry_with_orchestrator(
             sandbox.clone(),
@@ -306,7 +308,7 @@ impl Harness {
                                 project_path.join(".harness").join("agents")
                             )),
                         project_path: project_path.clone(),
-                        mailbox_path: project_path.join(".harness").join("mailbox"),
+                        mailbox_path: mailbox_path.to_path_buf(),
                         identity: def.name.clone(),
                     },
                 );
@@ -381,6 +383,7 @@ impl Harness {
             agent_def,
             &approved,
             &self.status_channel,
+            &self.config.mailbox_path,
         )?;
         Ok(())
     }
@@ -613,7 +616,7 @@ impl Harness {
                             project_path.join(".harness").join("agents")
                         )),
                     project_path: project_path.clone(),
-                    mailbox_path: project_path.join(".harness").join("mailbox"),
+                    mailbox_path: self.config.mailbox_path.clone(),
                     identity: agent_def.name.clone(),
                 },
             );
@@ -651,6 +654,7 @@ impl Harness {
             agent_def,
             &approved,
             &self.status_channel,
+            &self.config.mailbox_path,
         )?;
 
         // Update task context with the new system prompt
@@ -712,9 +716,13 @@ impl Harness {
         &self.status_channel
     }
 
-    /// Get the mailbox path for this project (used for Option C sidecar IPC).
+    /// Where this process exchanges agent messages.
+    ///
+    /// `<project>/.harness/mailbox` unless `--mailbox` overrode it — which is
+    /// how a worker in a worktree reaches the lead's mailbox instead of the
+    /// private one inside its own checkout.
     pub fn mailbox_path(&self) -> std::path::PathBuf {
-        self.config.project_path.join(".harness").join("mailbox")
+        self.config.mailbox_path.clone()
     }
 
     /// Get a reference to the session manager.

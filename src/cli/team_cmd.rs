@@ -72,6 +72,32 @@ pub enum TeamAction {
         #[command(flatten)]
         scope: TeamScope,
     },
+
+    /// Send a message to a standby worker's inbox
+    ///
+    /// Only reaches a worker configured `"mode": "standby"` — a one-shot
+    /// worker has already exited by the time anyone can write to it.
+    Send {
+        /// Worker name, as it appears in `team status`
+        worker: String,
+        /// Message body — the task, in the worker's own terms
+        message: String,
+        /// Message type the worker sees (default: `task`)
+        #[arg(long = "type", value_name = "TYPE", default_value = "task")]
+        msg_type: String,
+        #[command(flatten)]
+        scope: TeamScope,
+    },
+
+    /// Relaunch one worker in a fresh pane, same task and settings
+    ///
+    /// For a worker that crashed or whose pane was torn down. Needs tmux.
+    Restart {
+        /// Worker name, as it appears in `team status`
+        worker: String,
+        #[command(flatten)]
+        scope: TeamScope,
+    },
 }
 
 impl TeamAction {
@@ -80,7 +106,9 @@ impl TeamAction {
             Self::Start { scope, .. }
             | Self::Stop { scope, .. }
             | Self::Status { scope }
-            | Self::List { scope } => scope,
+            | Self::List { scope }
+            | Self::Send { scope, .. }
+            | Self::Restart { scope, .. } => scope,
         }
     }
 }
@@ -156,6 +184,10 @@ fn execute(action: &TeamAction, fallback_project: Option<&str>) -> Outcome {
         TeamAction::Stop { force, .. } => stop(&mut service, *force),
         TeamAction::Status { .. } => status(&mut service),
         TeamAction::List { .. } => list(&mut service),
+        TeamAction::Send { worker, message, msg_type, .. } => {
+            send(&mut service, worker, msg_type, message)
+        }
+        TeamAction::Restart { worker, .. } => restart(&mut service, worker),
     }
 }
 
@@ -178,6 +210,56 @@ fn resolve_project(project: Option<&str>) -> anyhow::Result<PathBuf> {
 }
 
 // ─── Actions ───────────────────────────────────────────────────────
+
+/// Send a message to a standby worker.
+fn send(service: &mut TeamService, worker: &str, msg_type: &str, body: &str) -> Outcome {
+    // Refresh first: telling a crashed worker to do something is worth an
+    // error, not a message that will never be read.
+    service.status();
+
+    match service.send_to_worker(worker, msg_type, body) {
+        Ok(()) => Outcome::ok(json!({
+            "status": "sent",
+            "worker": worker,
+            "type": msg_type,
+        }))
+        .note(format!("Message queued for '{worker}'.")),
+        Err(e) => Outcome::error(
+            EXIT_ERROR,
+            "send_failed",
+            e.to_string(),
+            json!({ "worker": worker }),
+        ),
+    }
+}
+
+/// Relaunch one worker.
+fn restart(service: &mut TeamService, worker: &str) -> Outcome {
+    if service.state().is_none() {
+        return Outcome::error(
+            EXIT_ERROR,
+            "no_active_team",
+            "No active team — nothing to restart.".to_string(),
+            json!({ "worker": worker }),
+        );
+    }
+
+    match service.restart(worker) {
+        Ok(()) => {
+            let mut payload = team_payload(service);
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("restarted".to_string(), json!(worker));
+            }
+            Outcome::ok(payload).note(format!("Worker '{worker}' relaunched in a fresh pane."))
+        }
+        Err(e) => Outcome::error(
+            EXIT_ERROR,
+            "restart_failed",
+            e.to_string(),
+            json!({ "worker": worker }),
+        ),
+    }
+}
 
 fn start(service: &mut TeamService, name: &str) -> Outcome {
     if let Some(state) = service.state() {
@@ -226,7 +308,7 @@ fn start(service: &mut TeamService, name: &str) -> Outcome {
     let worker_count = workers.len();
     match service.start(Some(name.to_string()), workers) {
         Ok(team_id) => {
-            let mut outcome = Outcome::ok(team_payload(service.state()));
+            let mut outcome = Outcome::ok(team_payload(service));
             outcome = outcome.note(format!(
                 "Team '{team_id}' started from config '{name}' with {worker_count} worker(s)."
             ));
@@ -303,9 +385,10 @@ fn stop(service: &mut TeamService, force: bool) -> Outcome {
 }
 
 fn status(service: &mut TeamService) -> Outcome {
-    // Drains the mailbox into worker state, exactly as `/team status` does.
+    // Drains the mailbox into worker state and reconciles it with the exit
+    // codes and panes on disk, exactly as `/team status` does.
     service.status();
-    Outcome::ok(team_payload(service.state()))
+    Outcome::ok(team_payload(service))
 }
 
 fn list(service: &mut TeamService) -> Outcome {
@@ -338,6 +421,8 @@ fn list(service: &mut TeamService) -> Outcome {
                         "worktree": w.worktree.unwrap_or(false),
                         "permission": w.permission.clone()
                             .unwrap_or_else(|| crate::team::DEFAULT_WORKER_PERMISSION.to_string()),
+                        "mode": w.mode.clone()
+                            .unwrap_or_else(|| crate::team::WorkerMode::default().to_string()),
                     })).collect::<Vec<_>>(),
                 }),
                 // A config that will not parse still belongs in the listing —
@@ -368,8 +453,8 @@ fn list(service: &mut TeamService) -> Outcome {
 
 /// The `team status` document — also what `team start` returns, so a caller
 /// gets the same shape whether it just started the team or asked about it.
-fn team_payload(state: Option<&TeamState>) -> Value {
-    let Some(state) = state else {
+fn team_payload(service: &TeamService) -> Value {
+    let Some(state) = service.state() else {
         return json!({
             "team_id": null,
             "name": null,
@@ -396,13 +481,19 @@ fn team_payload(state: Option<&TeamState>) -> Value {
             "name": w.name,
             "agent": w.agent,
             "permission": w.permission,
+            "mode": w.mode.to_string(),
+            "last_heartbeat": service.worker_heartbeat(&w.name).and_then(iso8601),
             "pane_id": w.pane_id,
             "worktree_path": if w.use_worktree { Some(w.work_dir.display().to_string()) } else { None },
             "work_dir": w.work_dir.display().to_string(),
             "branch": w.branch,
             "status": w.status.to_string(),
+            // Every status that carries a reason surfaces it here, so a
+            // caller never has to parse the status string to find out why.
             "error": match &w.status {
-                WorkerStatus::Failed(e) => Some(e.clone()),
+                WorkerStatus::Failed(e)
+                | WorkerStatus::Crashed(e)
+                | WorkerStatus::FailedToStart(e) => Some(e.clone()),
                 _ => None,
             },
             "last_message_ts": w.last_message_ts.and_then(iso8601),
@@ -458,6 +549,10 @@ mod tests {
     /// "is a team active" is that file, so a fabricated one exercises the
     /// conflict path without tmux — which CI does not have.
     fn project(config: Option<&str>, running: bool) -> tempfile::TempDir {
+        project_with_mode(config, running, "oneshot")
+    }
+
+    fn project_with_mode(config: Option<&str>, running: bool, mode: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let harness = dir.path().join(".harness");
         std::fs::create_dir_all(harness.join("teams")).unwrap();
@@ -480,6 +575,8 @@ mod tests {
                             "name": "analyst",
                             "task": "gather evidence",
                             "agent": "yolo-analyst",
+                            "permission": "auto",
+                            "mode": mode,
                             "branch": "team/analyst",
                             "use_worktree": false,
                             "status": "Starting",
@@ -653,6 +750,102 @@ mod tests {
 
         assert_eq!(out.code, EXIT_OK);
         assert_eq!(out.stdout["team_id"], "team-20260101-000000");
+    }
+
+    #[test]
+    fn send_reaches_a_standby_worker() {
+        let dir = project_with_mode(Some(SQUAD), true, "standby");
+
+        let out = execute(
+            &TeamAction::Send {
+                worker: "analyst".into(),
+                message: "BTC 1h please".into(),
+                msg_type: "task".into(),
+                scope: scope(&dir),
+            },
+            None,
+        );
+
+        assert_eq!(out.code, EXIT_OK);
+        assert_eq!(out.stdout["status"], "sent");
+        assert_eq!(out.stdout["worker"], "analyst");
+
+        // It is really in the worker's inbox, not just reported as sent.
+        let mailbox =
+            crate::team::Mailbox::open(&dir.path().join(".harness").join("mailbox")).unwrap();
+        let queued = mailbox.peek("analyst").unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].from, "lead");
+        assert_eq!(queued[0].body, "BTC 1h please");
+        assert_eq!(queued[0].msg_type, "task");
+    }
+
+    #[test]
+    fn send_to_a_oneshot_worker_is_refused() {
+        // The message would sit there forever: a one-shot worker exits after
+        // its task and never reads an inbox.
+        let dir = project_with_mode(Some(SQUAD), true, "oneshot");
+
+        let out = execute(
+            &TeamAction::Send {
+                worker: "analyst".into(),
+                message: "hello?".into(),
+                msg_type: "task".into(),
+                scope: scope(&dir),
+            },
+            None,
+        );
+
+        assert_eq!(out.code, EXIT_ERROR);
+        assert_eq!(out.stdout["error"], "send_failed");
+        assert!(
+            out.stdout["message"].as_str().unwrap().contains("standby"),
+            "{}",
+            out.stdout["message"]
+        );
+    }
+
+    #[test]
+    fn send_to_an_unknown_worker_lists_the_real_ones() {
+        let dir = project_with_mode(Some(SQUAD), true, "standby");
+
+        let out = execute(
+            &TeamAction::Send {
+                worker: "ghost".into(),
+                message: "hi".into(),
+                msg_type: "task".into(),
+                scope: scope(&dir),
+            },
+            None,
+        );
+
+        assert_eq!(out.code, EXIT_ERROR);
+        let msg = out.stdout["message"].as_str().unwrap();
+        assert!(msg.contains("ghost"), "{msg}");
+        assert!(msg.contains("analyst"), "{msg}");
+    }
+
+    #[test]
+    fn restart_without_a_team_is_an_error_not_a_panic() {
+        let dir = project(Some(SQUAD), false);
+
+        let out = execute(
+            &TeamAction::Restart { worker: "analyst".into(), scope: scope(&dir) },
+            None,
+        );
+
+        assert_eq!(out.code, EXIT_ERROR);
+        assert_eq!(out.stdout["error"], "no_active_team");
+    }
+
+    #[test]
+    fn status_reports_each_worker_mode() {
+        let dir = project_with_mode(Some(SQUAD), true, "standby");
+        let out = execute(&TeamAction::Status { scope: scope(&dir) }, None);
+
+        assert_eq!(out.stdout["workers"][0]["mode"], "standby");
+        // No heartbeat file yet — the worker has not reached its first poll.
+        assert!(out.stdout["workers"][0]["last_heartbeat"].is_null());
     }
 
     #[test]

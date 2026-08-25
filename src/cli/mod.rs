@@ -1,9 +1,10 @@
 mod banner;
 mod commands;
-mod oneshot;
+pub mod oneshot;
 mod repl;
 pub mod status;
 pub mod team_cmd;
+mod team_worker;
 
 use std::sync::Arc;
 
@@ -59,6 +60,20 @@ pub struct CliArgs {
     /// Test MCP server connections and exit
     #[arg(long = "test-mcp")]
     pub test_mcp: bool,
+
+    /// Run as a team worker under this name: do the `-p` task, then stay up
+    /// polling the mailbox for more (see `momo-fetch team start`).
+    ///
+    /// Without it, `-p` is a one-shot: the task runs and the process exits.
+    #[arg(long = "team-worker", value_name = "NAME")]
+    pub team_worker: Option<String>,
+
+    /// Mailbox directory, overriding `<project>/.harness/mailbox`.
+    ///
+    /// A worker in a git worktree has its own `.harness/`, so without this it
+    /// would talk into a mailbox the lead never reads.
+    #[arg(long = "mailbox", value_name = "DIR")]
+    pub mailbox: Option<String>,
 
     /// Start the API gateway server
     #[arg(long = "gateway")]
@@ -143,6 +158,14 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
         }
     } else if let Some(model) = &args.model {
         harness.switch_model(model)?;
+    }
+
+    // A standby team worker: same one-shot turn first, then it stays up
+    // polling its inbox instead of exiting.
+    if let Some(worker_name) = &args.team_worker {
+        let result = team_worker::run(&harness, worker_name, args.prompt.as_deref()).await;
+        let _ = harness.mcp_service().shutdown().await;
+        return result;
     }
 
     match &args.prompt {
@@ -485,6 +508,60 @@ mod tests {
             args.command,
             Some(Command::Team { action: team_cmd::TeamAction::Start { .. } })
         ));
+    }
+
+    #[test]
+    fn team_worker_flags_parse() {
+        let args = parse(&[
+            "--team-worker", "validator",
+            "--mailbox", "/repo/.harness/mailbox",
+            "--permission", "auto",
+            "-p", "stand by",
+        ]);
+        assert_eq!(args.team_worker.as_deref(), Some("validator"));
+        assert_eq!(args.mailbox.as_deref(), Some("/repo/.harness/mailbox"));
+        assert_eq!(args.prompt.as_deref(), Some("stand by"));
+        assert!(args.command.is_none());
+
+        // Neither flag is required, and their absence is the old behaviour.
+        let plain = parse(&["-p", "hi"]);
+        assert!(plain.team_worker.is_none());
+        assert!(plain.mailbox.is_none());
+    }
+
+    #[test]
+    fn team_send_and_restart_parse() {
+        let args = parse(&["team", "send", "analyst", "BTC 1h", "--type", "task"]);
+        let Some(Command::Team { action: team_cmd::TeamAction::Send {
+            worker, message, msg_type, ..
+        } }) = args.command else {
+            panic!("expected a team send command");
+        };
+        assert_eq!(worker, "analyst");
+        assert_eq!(message, "BTC 1h");
+        assert_eq!(msg_type, "task");
+
+        // --type defaults rather than being required.
+        let args = parse(&["team", "send", "analyst", "go"]);
+        let Some(Command::Team { action: team_cmd::TeamAction::Send { msg_type, .. } }) =
+            args.command
+        else {
+            panic!("expected a team send command");
+        };
+        assert_eq!(msg_type, "task");
+
+        let args = parse(&["team", "restart", "executor", "--project", "/repo"]);
+        let Some(Command::Team { action: team_cmd::TeamAction::Restart { worker, scope } }) =
+            args.command
+        else {
+            panic!("expected a team restart command");
+        };
+        assert_eq!(worker, "executor");
+        assert_eq!(scope.project.as_deref(), Some("/repo"));
+
+        // Both need a worker name.
+        assert!(CliArgs::try_parse_from(["momo-fetch", "team", "send", "analyst"]).is_err());
+        assert!(CliArgs::try_parse_from(["momo-fetch", "team", "restart"]).is_err());
     }
 
     #[test]

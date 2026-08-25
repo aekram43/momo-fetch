@@ -24,8 +24,30 @@ pub enum WorkerStatus {
     Completed,
     /// Worker failed with an error.
     Failed(String),
+    /// Process exited non-zero before it ever reported for duty — a bad
+    /// agent name, a missing API key, a config the worker refused.
+    FailedToStart(String),
+    /// Process is gone and did not leave cleanly: non-zero exit after it had
+    /// started working, or a tmux pane that disappeared under it.
+    Crashed(String),
+    /// A restart has been issued; the replacement pane has not reported yet.
+    Restarting,
     /// Worker was stopped by the user.
     Stopped,
+}
+
+impl WorkerStatus {
+    /// Whether this worker will do no more work without intervention.
+    ///
+    /// Drives "is the team finished" — a crashed worker ends the team's wait
+    /// just as a completed one does, which is the whole reason the crash
+    /// states exist.
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Failed(_) | Self::FailedToStart(_) | Self::Crashed(_)
+        )
+    }
 }
 
 impl std::fmt::Display for WorkerStatus {
@@ -35,6 +57,9 @@ impl std::fmt::Display for WorkerStatus {
             Self::Running => write!(f, "running"),
             Self::Completed => write!(f, "completed"),
             Self::Failed(e) => write!(f, "failed: {e}"),
+            Self::FailedToStart(e) => write!(f, "failed_to_start: {e}"),
+            Self::Crashed(e) => write!(f, "crashed: {e}"),
+            Self::Restarting => write!(f, "restarting"),
             Self::Stopped => write!(f, "stopped"),
         }
     }
@@ -64,6 +89,42 @@ impl std::fmt::Display for TeamStatus {
     }
 }
 
+/// What a worker's process does once its opening task is done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkerMode {
+    /// Run the task, report, exit. What a worker has always been, and still
+    /// the default — a team that only needs work fanned out once wants this.
+    #[default]
+    Oneshot,
+    /// Stay up after the task, polling the mailbox for more work until told to
+    /// shut down. For a worker the lead talks to repeatedly.
+    Standby,
+}
+
+impl std::fmt::Display for WorkerMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Oneshot => write!(f, "oneshot"),
+            Self::Standby => write!(f, "standby"),
+        }
+    }
+}
+
+impl std::str::FromStr for WorkerMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "oneshot" | "one-shot" => Ok(Self::Oneshot),
+            "standby" => Ok(Self::Standby),
+            _ => Err(format!(
+                "Unknown worker mode '{s}'. Expected: oneshot or standby"
+            )),
+        }
+    }
+}
+
 /// Definition of a single worker agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerDef {
@@ -83,6 +144,9 @@ pub struct WorkerDef {
     /// is not `strict`.
     #[serde(default)]
     pub permission: Option<String>,
+    /// `oneshot` (default) or `standby` — see [`WorkerMode`].
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 /// A message in the mailbox queue.
@@ -137,6 +201,9 @@ pub struct WorkerState {
     /// Permission mode the worker was launched with.
     #[serde(default = "default_worker_permission")]
     pub permission: String,
+    /// Whether the worker exits after its task or stays up polling.
+    #[serde(default)]
+    pub mode: WorkerMode,
     pub branch: String,
     pub use_worktree: bool,
     pub status: WorkerStatus,
@@ -199,10 +266,20 @@ impl Mailbox {
     }
 
     /// Send a message to the mailbox.
+    ///
+    /// The filename carries a unique suffix because the timestamp is only
+    /// milliseconds: a worker that reports a result and then reports ready —
+    /// back to back, same sender, same recipient — produced the same name
+    /// twice and the second message silently replaced the first. The result
+    /// simply disappeared, and only sometimes, depending on which side of a
+    /// millisecond the two sends landed.
     pub fn send(&self, msg: MailboxMessage) -> anyhow::Result<()> {
         let filename = format!(
-            "{}_{}_{}.json",
-            msg.timestamp, msg.from, msg.to
+            "{}_{}_{}_{}.json",
+            msg.timestamp,
+            msg.from,
+            msg.to,
+            &uuid::Uuid::new_v4().to_string()[..8]
         );
         let filepath = self.path.join(&filename);
         let tmp = filepath.with_extension("tmp");
@@ -401,6 +478,34 @@ impl TmuxManager {
             .args(["send-keys", "-t", pane_id, command, "Enter"])
             .output()?;
 
+        Ok(())
+    }
+
+    /// Whether a pane still exists anywhere in tmux.
+    ///
+    /// A worker's window outlives its process (the shell stays), so this only
+    /// answers "was the window torn down", not "is the agent still running" —
+    /// the exit file answers that.
+    pub fn has_pane(pane_id: &str) -> bool {
+        let output = std::process::Command::new("tmux")
+            .args(["list-panes", "-a", "-F", "#{pane_id}"])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|line| line.trim() == pane_id),
+            // No tmux, or no server running: nothing to distinguish a dead
+            // pane from a machine without tmux, so claim nothing.
+            _ => false,
+        }
+    }
+
+    /// Kill a single pane (used when restarting one worker).
+    pub fn kill_pane(pane_id: &str) -> anyhow::Result<()> {
+        std::process::Command::new("tmux")
+            .args(["kill-pane", "-t", pane_id])
+            .output()?;
         Ok(())
     }
 
@@ -724,6 +829,7 @@ impl TeamService {
                 use_worktree: w.worktree,
                 agent: w.agent.clone(),
                 permission: w.permission.clone(),
+                mode: w.mode.clone(),
             })
             .collect()
     }
@@ -790,6 +896,10 @@ impl TeamService {
             .iter()
             .map(|w| resolve_worker_permission(&w.name, w.permission.as_deref()))
             .collect::<anyhow::Result<Vec<_>>>()?;
+        let modes = workers
+            .iter()
+            .map(|w| resolve_worker_mode(&w.name, w.mode.as_deref()))
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         let team_id = format!(
             "team-{}",
@@ -799,7 +909,8 @@ impl TeamService {
             .duration_since(UNIX_EPOCH)?
             .as_millis() as u64;
 
-        let mailbox_path = self.project_path.join(".harness").join("mailbox");
+        let harness_dir = self.project_path.join(".harness");
+        let mailbox_path = harness_dir.join("mailbox");
         let mailbox = Mailbox::open(&mailbox_path)?;
         mailbox.clear()?;
 
@@ -814,7 +925,9 @@ impl TeamService {
         let mut worker_states = HashMap::new();
         let mut worker_names = Vec::new();
 
-        for (worker_def, permission) in workers.into_iter().zip(permissions) {
+        for ((worker_def, permission), mode) in
+            workers.into_iter().zip(permissions).zip(modes)
+        {
             let branch = worker_def
                 .branch
                 .clone()
@@ -857,14 +970,30 @@ impl TeamService {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "momo-fetch".into());
 
-                let cmd = build_worker_command(
-                    &binary_path,
-                    &work_dir,
-                    worker_def.agent.as_deref(),
+                // Evidence from a previous team, which would otherwise be
+                // read as this one's: an old exit code makes a worker born
+                // "crashed", and an old log makes its first failure look like
+                // it already happened. The log is appended to from here on, so
+                // a restart keeps the crash that prompted it.
+                for stale in [
+                    worker_exit_path(&harness_dir, &worker_def.name),
+                    worker_log_path(&harness_dir, &worker_def.name),
+                    worker_heartbeat_path(&harness_dir, &worker_def.name),
+                ] {
+                    let _ = std::fs::remove_file(stale);
+                }
+
+                let cmd = build_worker_command(&WorkerLaunch {
+                    binary_path: &binary_path,
+                    work_dir: &work_dir,
+                    harness_dir: &harness_dir,
+                    mailbox_path: &mailbox_path,
+                    agent: worker_def.agent.as_deref(),
                     permission,
-                    &worker_def.task,
-                    &worker_def.name,
-                );
+                    mode,
+                    task: &worker_def.task,
+                    name: &worker_def.name,
+                });
 
                 if let Err(e) = TmuxManager::send_keys(pid, &cmd) {
                     tracing::warn!(
@@ -881,6 +1010,7 @@ impl TeamService {
                     task: worker_def.task,
                     agent: worker_def.agent.clone(),
                     permission: permission.to_string(),
+                    mode,
                     branch,
                     use_worktree,
                     status: WorkerStatus::Starting,
@@ -938,7 +1068,13 @@ impl TeamService {
                                 worker.status = WorkerStatus::Running;
                             }
                             "completed" => {
-                                worker.status = WorkerStatus::Completed;
+                                // A standby worker finishing a task is not
+                                // finished — it goes back to waiting. Only a
+                                // one-shot's "completed" is the end of it.
+                                worker.status = match worker.mode {
+                                    WorkerMode::Standby => WorkerStatus::Running,
+                                    WorkerMode::Oneshot => WorkerStatus::Completed,
+                                };
                                 worker.result = Some(msg.body.clone());
                             }
                             "failed" => {
@@ -952,11 +1088,15 @@ impl TeamService {
             let _ = self.save_current_state();
         }
 
-        // Check if all workers have completed
+        // What the workers did not say for themselves: exit codes and panes.
+        self.refresh_liveness();
+
+        // Check if every worker is done for good. A standby worker never is —
+        // it goes back to waiting after each task — so a team with one stays
+        // Running until it is stopped.
         let should_complete = if let Some(ref state) = self.state {
-            state.status == TeamStatus::Running && state.workers.values().all(|w| {
-                matches!(w.status, WorkerStatus::Completed | WorkerStatus::Failed(_))
-            })
+            state.status == TeamStatus::Running
+                && state.workers.values().all(|w| w.status.is_terminal())
         } else {
             false
         };
@@ -1125,6 +1265,169 @@ impl TeamService {
             .map(|s| s.to_string())
     }
 
+    /// Reconcile worker state with what the processes actually did.
+    ///
+    /// The mailbox only carries what a worker chose to say, and nothing in a
+    /// default run says anything. This reads what it could not: the exit code
+    /// its shell wrote when the process ended, and whether its tmux pane is
+    /// still there. Without this, a worker that died in its first second sits
+    /// at `starting` forever and the team never finishes.
+    fn refresh_liveness(&mut self) {
+        let harness_dir = self.project_path.join(".harness");
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+
+        // Only trust a missing pane as evidence while the team's session is
+        // still up. If the whole session is gone — or tmux is not installed —
+        // "pane not found" says nothing about any individual worker.
+        let session_alive = TmuxManager::has_session(&TmuxManager::session_name(&state.id));
+
+        let mut changed = false;
+        for worker in state.workers.values_mut() {
+            if matches!(worker.status, WorkerStatus::Stopped) || worker.status.is_terminal() {
+                continue;
+            }
+            if let Some(next) = observed_status(&harness_dir, worker, session_alive) {
+                worker.status = next;
+                changed = true;
+            }
+        }
+
+        if changed {
+            let _ = self.save_current_state();
+        }
+    }
+
+    /// When a standby worker last touched its heartbeat file, in millis.
+    ///
+    /// `None` for a one-shot worker, or a standby one that has not reached its
+    /// first poll.
+    pub fn worker_heartbeat(&self, worker_name: &str) -> Option<u64> {
+        let path = worker_heartbeat_path(&self.project_path.join(".harness"), worker_name);
+        std::fs::read_to_string(path)
+            .ok()?
+            .trim()
+            .parse::<u64>()
+            .ok()
+    }
+
+    /// Put a message in a worker's inbox, from the lead.
+    ///
+    /// Only a standby worker reads its inbox; a one-shot worker has already
+    /// exited by the time anyone could write to it.
+    pub fn send_to_worker(
+        &self,
+        worker_name: &str,
+        msg_type: &str,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        let state = self
+            .state
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No active team."))?;
+
+        let worker = state
+            .workers
+            .get(worker_name)
+            .ok_or_else(|| anyhow::anyhow!(
+                "Unknown worker '{worker_name}'. This team has: {}",
+                sorted_worker_names(state).join(", ")
+            ))?;
+
+        if worker.mode != WorkerMode::Standby {
+            return Err(anyhow::anyhow!(
+                "Worker '{worker_name}' runs in {} mode — it exits after its task and never \
+                 reads its inbox. Give it \"mode\": \"standby\" in the team config.",
+                worker.mode
+            ));
+        }
+
+        let mailbox = Mailbox::open(&state.mailbox_path)?;
+        mailbox.send(MailboxMessage {
+            from: "lead".to_string(),
+            to: worker_name.to_string(),
+            msg_type: msg_type.to_string(),
+            body: body.to_string(),
+            timestamp: now_millis(),
+        })
+    }
+
+    /// Relaunch one worker in a fresh pane, same task and settings.
+    ///
+    /// For a worker that crashed, or one whose pane was torn down. Requires
+    /// tmux, since a pane is the only thing that ever runs a worker.
+    pub fn restart(&mut self, worker_name: &str) -> anyhow::Result<()> {
+        if !TmuxManager::is_available() {
+            return Err(anyhow::anyhow!(
+                "Restart needs tmux — a worker only ever runs inside a pane."
+            ));
+        }
+
+        let harness_dir = self.project_path.join(".harness");
+        let binary_path = std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "momo-fetch".into());
+
+        let state = self
+            .state
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("No active team."))?;
+
+        let known = sorted_worker_names(state);
+        let mailbox_path = state.mailbox_path.clone();
+        let session = TmuxManager::create_session(&state.id)?;
+
+        let worker = state.workers.get_mut(worker_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown worker '{worker_name}'. This team has: {}",
+                known.join(", ")
+            )
+        })?;
+
+        if let Some(old_pane) = &worker.pane_id {
+            let _ = TmuxManager::kill_pane(old_pane);
+        }
+
+        // Both are evidence from the previous life and would be read as this
+        // one's.
+        let _ = std::fs::remove_file(worker_exit_path(&harness_dir, worker_name));
+        let _ = std::fs::remove_file(worker_heartbeat_path(&harness_dir, worker_name));
+
+        let pane_id = TmuxManager::create_worker_pane(&session, worker_name)?;
+        let permission = worker
+            .permission
+            .parse::<crate::sandbox::PermissionMode>()
+            .unwrap_or(crate::sandbox::PermissionMode::Auto);
+
+        let cmd = build_worker_command(&WorkerLaunch {
+            binary_path: &binary_path,
+            work_dir: &worker.work_dir,
+            harness_dir: &harness_dir,
+            mailbox_path: &mailbox_path,
+            agent: worker.agent.as_deref(),
+            permission,
+            mode: worker.mode,
+            task: &worker.task,
+            name: worker_name,
+        });
+        TmuxManager::send_keys(&pane_id, &cmd)?;
+
+        worker.pane_id = Some(pane_id);
+        worker.status = WorkerStatus::Restarting;
+        worker.result = None;
+        worker.last_message_ts = None;
+
+        // A team that had finished has work in it again — leaving it
+        // `completed` would describe a team that is demonstrably running.
+        if state.status == TeamStatus::Completed {
+            state.status = TeamStatus::Running;
+            state.completed_at = None;
+        }
+
+        self.save_current_state()
+    }
+
     // ── Persistence ────────────────────────────────────────────
 
     fn save_state(&self, state: &TeamState) -> anyhow::Result<()> {
@@ -1199,6 +1502,9 @@ pub struct TeamWorkerConfig {
     /// Omitted means [`DEFAULT_WORKER_PERMISSION`].
     #[serde(default)]
     pub permission: Option<String>,
+    /// `oneshot` (default) or `standby` — see [`WorkerMode`].
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────
@@ -1209,28 +1515,77 @@ pub struct TeamWorkerConfig {
 /// `settings.json` or, failing that, `strict` — and a strict worker in a
 /// detached pane stops at its first mutating tool waiting for an answer that
 /// cannot arrive.
-fn build_worker_command(
-    binary_path: &str,
-    work_dir: &Path,
-    agent: Option<&str>,
-    permission: crate::sandbox::PermissionMode,
-    task: &str,
-    worker_name: &str,
-) -> String {
-    let agent_flag = match agent {
+/// Everything the shell line for one worker depends on.
+pub struct WorkerLaunch<'a> {
+    /// Path to the momo-fetch binary the lead is running.
+    pub binary_path: &'a str,
+    /// Where the worker runs — its worktree, or the project root.
+    pub work_dir: &'a Path,
+    /// The **lead's** `.harness/`. Logs and exit files land here even when the
+    /// worker lives in a worktree, so one directory answers "how is the team
+    /// doing" instead of one per checkout.
+    pub harness_dir: &'a Path,
+    /// The lead's mailbox. A worker in a worktree would otherwise resolve
+    /// `.harness/mailbox` inside its own checkout and talk to nobody.
+    pub mailbox_path: &'a Path,
+    pub agent: Option<&'a str>,
+    pub permission: crate::sandbox::PermissionMode,
+    pub mode: WorkerMode,
+    pub task: &'a str,
+    pub name: &'a str,
+}
+
+/// The shell line a worker's tmux window runs.
+///
+/// Three things are never left implicit:
+///
+/// - `--permission`, because the fallback is `strict` and a strict worker in a
+///   detached pane stops at its first mutating tool forever.
+/// - `--mailbox`, because a worktree has its own `.harness/`.
+/// - the exit code, written to `worker-<name>.exit` the moment the process
+///   ends. It is the only thing that can tell a finished worker from a dead
+///   one: the tmux window survives either way.
+fn build_worker_command(launch: &WorkerLaunch<'_>) -> String {
+    let agent_flag = match launch.agent {
         Some(name) => format!(" -a '{}'", shell_quote(name)),
         None => String::new(),
     };
 
+    let standby_flag = match launch.mode {
+        WorkerMode::Standby => format!(" --team-worker '{}'", shell_quote(launch.name)),
+        WorkerMode::Oneshot => String::new(),
+    };
+
+    // The braces keep `$?` as momo-fetch's status rather than tee's, and are
+    // POSIX sh — tmux runs whatever login shell the user has.
     format!(
-        "cd {} && {}{} --permission {} -p '{}' 2>&1 | tee .harness/worker-{}.log",
-        work_dir.display(),
-        binary_path,
+        "cd '{}' && {{ '{}'{}{} --permission {} --mailbox '{}' -p '{}'; echo $? > '{}'; }} 2>&1 | tee -a '{}'",
+        shell_quote(&launch.work_dir.display().to_string()),
+        shell_quote(launch.binary_path),
         agent_flag,
-        permission,
-        shell_quote(task),
-        worker_name,
+        standby_flag,
+        launch.permission,
+        shell_quote(&launch.mailbox_path.display().to_string()),
+        shell_quote(launch.task),
+        shell_quote(&worker_exit_path(launch.harness_dir, launch.name).display().to_string()),
+        shell_quote(&worker_log_path(launch.harness_dir, launch.name).display().to_string()),
     )
+}
+
+/// Where a worker's process writes its exit code.
+pub fn worker_exit_path(harness_dir: &Path, worker_name: &str) -> PathBuf {
+    harness_dir.join(format!("worker-{worker_name}.exit"))
+}
+
+/// Where a worker's output is teed.
+pub fn worker_log_path(harness_dir: &Path, worker_name: &str) -> PathBuf {
+    harness_dir.join(format!("worker-{worker_name}.log"))
+}
+
+/// Where a standby worker touches down each poll, so the lead can tell
+/// "thinking" from "wedged" without a message having been sent.
+pub fn worker_heartbeat_path(harness_dir: &Path, worker_name: &str) -> PathBuf {
+    harness_dir.join(format!("worker-{worker_name}.heartbeat"))
 }
 
 /// Escape a value for a single-quoted shell string.
@@ -1249,6 +1604,75 @@ fn resolve_worker_permission(
     raw.parse::<crate::sandbox::PermissionMode>().map_err(|e| {
         anyhow::anyhow!("Worker '{worker}': {e}")
     })
+}
+
+/// What the filesystem and tmux say about a worker, when it said nothing.
+///
+/// Returns `None` when there is no evidence either way — which is the normal
+/// case for a worker that is simply still working.
+fn observed_status(
+    harness_dir: &Path,
+    worker: &WorkerState,
+    session_alive: bool,
+) -> Option<WorkerStatus> {
+    // The exit code is the process's own last word, so it wins.
+    if let Some(code) = read_exit_code(harness_dir, &worker.name) {
+        return Some(match code {
+            0 => WorkerStatus::Completed,
+            c if worker.last_message_ts.is_none() => WorkerStatus::FailedToStart(format!(
+                "exited {c} without reporting — check {}",
+                worker_log_path(harness_dir, &worker.name).display()
+            )),
+            c => WorkerStatus::Crashed(format!("exited {c}")),
+        });
+    }
+
+    // No exit code written, yet the window it would have been written from is
+    // gone: something took the pane down mid-run.
+    match &worker.pane_id {
+        Some(pane) if session_alive && !TmuxManager::has_pane(pane) => {
+            Some(WorkerStatus::Crashed(format!("tmux pane {pane} is gone")))
+        }
+        _ => None,
+    }
+}
+
+/// Read a worker's recorded exit code, if its process has ended.
+///
+/// An unparseable file means the shell is mid-write; treat it as "no answer
+/// yet" rather than as a crash.
+fn read_exit_code(harness_dir: &Path, worker_name: &str) -> Option<i32> {
+    std::fs::read_to_string(worker_exit_path(harness_dir, worker_name))
+        .ok()?
+        .trim()
+        .parse::<i32>()
+        .ok()
+}
+
+/// Worker names of a team, sorted, for error messages that have to list them.
+fn sorted_worker_names(state: &TeamState) -> Vec<String> {
+    let mut names: Vec<String> = state.workers.keys().cloned().collect();
+    names.sort();
+    names
+}
+
+/// Milliseconds since the Unix epoch.
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Resolve a worker's configured mode, defaulting to [`WorkerMode::Oneshot`]
+/// so a config written before standby existed behaves exactly as it did.
+fn resolve_worker_mode(worker: &str, configured: Option<&str>) -> anyhow::Result<WorkerMode> {
+    match configured {
+        None => Ok(WorkerMode::default()),
+        Some(raw) => raw
+            .parse::<WorkerMode>()
+            .map_err(|e| anyhow::anyhow!("Worker '{worker}': {e}")),
+    }
 }
 
 /// Sanitize a name for use as a git branch name.
@@ -1329,37 +1753,165 @@ mod tests {
         assert!(err.contains("relaxed"), "{err}");
     }
 
+    fn launch<'a>(
+        agent: Option<&'a str>,
+        permission: crate::sandbox::PermissionMode,
+        mode: WorkerMode,
+        task: &'a str,
+        name: &'a str,
+    ) -> WorkerLaunch<'a> {
+        WorkerLaunch {
+            binary_path: "/usr/local/bin/momo-fetch",
+            work_dir: Path::new("/repo"),
+            harness_dir: Path::new("/repo/.harness"),
+            mailbox_path: Path::new("/repo/.harness/mailbox"),
+            agent,
+            permission,
+            mode,
+            task,
+            name,
+        }
+    }
+
     #[test]
-    fn test_worker_command_always_carries_a_permission_flag() {
+    fn test_worker_command_always_carries_permission_and_mailbox() {
         use crate::sandbox::PermissionMode;
 
-        let cmd = build_worker_command(
-            "/usr/local/bin/momo-fetch",
-            Path::new("/repo"),
+        let cmd = build_worker_command(&launch(
             Some("yolo-validator"),
             PermissionMode::Auto,
+            WorkerMode::Oneshot,
             "Backtest the strategy",
             "validator",
-        );
+        ));
 
         assert!(cmd.contains("--permission auto"), "{cmd}");
+        assert!(cmd.contains("--mailbox '/repo/.harness/mailbox'"), "{cmd}");
         assert!(cmd.contains("-a 'yolo-validator'"), "{cmd}");
-        assert!(cmd.starts_with("cd /repo && /usr/local/bin/momo-fetch"), "{cmd}");
-        assert!(cmd.ends_with("| tee .harness/worker-validator.log"), "{cmd}");
+        assert!(cmd.starts_with("cd '/repo' && { '/usr/local/bin/momo-fetch'"), "{cmd}");
+        // Logs and exit codes land in the lead's .harness, not the worker's.
+        assert!(cmd.contains("echo $? > '/repo/.harness/worker-validator.exit'"), "{cmd}");
+        assert!(cmd.ends_with("| tee -a '/repo/.harness/worker-validator.log'"), "{cmd}");
+        // A one-shot stays a one-shot.
+        assert!(!cmd.contains("--team-worker"), "{cmd}");
 
         // No agent, and a task carrying a quote that must not break out of the
         // single-quoted argument.
-        let cmd = build_worker_command(
-            "momo-fetch",
-            Path::new("/repo"),
+        let cmd = build_worker_command(&launch(
             None,
             PermissionMode::Strict,
+            WorkerMode::Oneshot,
             "don't stop",
             "solo",
-        );
-        assert!(!cmd.contains(" -a "), "{cmd}");
+        ));
+        // Precise: `tee -a` also contains " -a ".
+        assert!(!cmd.contains("momo-fetch' -a "), "{cmd}");
         assert!(cmd.contains("--permission strict"), "{cmd}");
         assert!(cmd.contains(r"-p 'don'\''t stop'"), "{cmd}");
+    }
+
+    #[test]
+    fn test_standby_worker_command_carries_the_loop_flag() {
+        use crate::sandbox::PermissionMode;
+
+        let cmd = build_worker_command(&launch(
+            None,
+            PermissionMode::Auto,
+            WorkerMode::Standby,
+            "Stand by for trade requests",
+            "executor",
+        ));
+
+        assert!(cmd.contains("--team-worker 'executor'"), "{cmd}");
+        assert!(cmd.contains("-p 'Stand by for trade requests'"), "{cmd}");
+    }
+
+    #[test]
+    fn test_worker_mode_parsing() {
+        assert_eq!(resolve_worker_mode("w", None).unwrap(), WorkerMode::Oneshot);
+        assert_eq!(
+            resolve_worker_mode("w", Some("standby")).unwrap(),
+            WorkerMode::Standby
+        );
+        assert_eq!(
+            resolve_worker_mode("w", Some("oneshot")).unwrap(),
+            WorkerMode::Oneshot
+        );
+
+        let err = resolve_worker_mode("analyst", Some("daemon"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("analyst"), "{err}");
+        assert!(err.contains("daemon"), "{err}");
+    }
+
+    #[test]
+    fn test_observed_status_reads_the_exit_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let harness_dir = dir.path();
+
+        let mut worker = WorkerState {
+            name: "w".into(),
+            task: "t".into(),
+            agent: None,
+            permission: "auto".into(),
+            mode: WorkerMode::Oneshot,
+            branch: "team/w".into(),
+            use_worktree: false,
+            status: WorkerStatus::Starting,
+            work_dir: harness_dir.to_path_buf(),
+            pane_id: None,
+            pid: None,
+            result: None,
+            last_message_ts: None,
+        };
+
+        // Still running: nothing on disk, nothing to say.
+        assert!(observed_status(harness_dir, &worker, false).is_none());
+
+        // Died before ever reporting — that is a failure to start, not a
+        // crash, and the message points at the log.
+        std::fs::write(worker_exit_path(harness_dir, "w"), "1\n").unwrap();
+        match observed_status(harness_dir, &worker, false) {
+            Some(WorkerStatus::FailedToStart(msg)) => {
+                assert!(msg.contains("exited 1"), "{msg}");
+                assert!(msg.contains("worker-w.log"), "{msg}");
+            }
+            other => panic!("expected FailedToStart, got {other:?}"),
+        }
+
+        // Same exit code, but it had reported in: that is a crash.
+        worker.last_message_ts = Some(1);
+        assert!(matches!(
+            observed_status(harness_dir, &worker, false),
+            Some(WorkerStatus::Crashed(_))
+        ));
+
+        // Clean exit is a completion whatever else happened.
+        std::fs::write(worker_exit_path(harness_dir, "w"), "0").unwrap();
+        assert_eq!(
+            observed_status(harness_dir, &worker, false),
+            Some(WorkerStatus::Completed)
+        );
+
+        // A half-written file is not evidence.
+        std::fs::write(worker_exit_path(harness_dir, "w"), "").unwrap();
+        assert!(observed_status(harness_dir, &worker, false).is_none());
+    }
+
+    #[test]
+    fn test_worker_status_is_terminal() {
+        assert!(WorkerStatus::Completed.is_terminal());
+        assert!(WorkerStatus::Failed("e".into()).is_terminal());
+        assert!(WorkerStatus::Crashed("e".into()).is_terminal());
+        assert!(WorkerStatus::FailedToStart("e".into()).is_terminal());
+
+        // A worker that can still do something is not terminal — Stopped
+        // included, since the team is over by then anyway.
+        assert!(!WorkerStatus::Starting.is_terminal());
+        assert!(!WorkerStatus::Running.is_terminal());
+        assert!(!WorkerStatus::Restarting.is_terminal());
+        assert!(!WorkerStatus::Stopped.is_terminal());
     }
 
     #[test]
@@ -1477,6 +2029,32 @@ mod tests {
         let service = TeamService::new(dir.path()).unwrap();
         let path = service.team_config_path("squad").unwrap();
         assert_eq!(path.extension().unwrap(), "json");
+    }
+
+    #[test]
+    fn test_mailbox_keeps_messages_sent_in_the_same_millisecond() {
+        // A standby worker sends its result and its ready flag one after the
+        // other. Sharing a filename cost it the result.
+        let dir = tempfile::tempdir().unwrap();
+        let mailbox = Mailbox::open(dir.path()).unwrap();
+
+        for msg_type in ["completed", "ready"] {
+            mailbox
+                .send(MailboxMessage {
+                    from: "keeper".into(),
+                    to: "lead".into(),
+                    msg_type: msg_type.into(),
+                    body: format!("body of {msg_type}"),
+                    timestamp: 1_700_000_000_000,
+                })
+                .unwrap();
+        }
+
+        let queued = mailbox.peek("lead").unwrap();
+        assert_eq!(queued.len(), 2, "one message overwrote the other");
+        let types: Vec<&str> = queued.iter().map(|m| m.msg_type.as_str()).collect();
+        assert!(types.contains(&"completed"), "{types:?}");
+        assert!(types.contains(&"ready"), "{types:?}");
     }
 
     #[test]
@@ -1687,6 +2265,8 @@ mod tests {
         assert!(state.workers["w1"].agent.is_none());
         assert!(state.workers["w1"].last_message_ts.is_none());
         assert_eq!(state.workers["w1"].permission, DEFAULT_WORKER_PERMISSION);
+        // A state file from before standby existed is a team of one-shots.
+        assert_eq!(state.workers["w1"].mode, WorkerMode::Oneshot);
     }
 
     #[test]
@@ -1699,6 +2279,7 @@ mod tests {
                 task: "Fix lint".into(),
                 agent: Some("reviewer".into()),
                 permission: "auto".into(),
+                mode: WorkerMode::Standby,
                 branch: "team/worker-1".into(),
                 use_worktree: true,
                 status: WorkerStatus::Running,
@@ -1771,6 +2352,7 @@ mod tests {
                 use_worktree: Some(false),
                 agent: None,
                 permission: None,
+                mode: None,
             })
             .collect();
 

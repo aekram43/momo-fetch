@@ -858,7 +858,7 @@ impl Command {
                     // Interactive mode
                     println!("Define worker agents (one per line, empty line to finish):");
                     println!(
-                        "  Format: <name> <task> [--agent <personality>] [--branch <name>] [--worktree] [--permission <mode>]"
+                        "  Format: <name> <task> [--agent <personality>] [--branch <name>] [--worktree] [--permission <mode>] [--standby]"
                     );
                     println!(
                         "  Permission defaults to '{}' — a headless worker cannot answer a confirmation prompt.",
@@ -892,6 +892,7 @@ impl Command {
                         let mut use_worktree = false;
                         let mut agent = None;
                         let mut permission = None;
+                        let mut mode = None;
 
                         let rest_parts: Vec<&str> = rest.split("--").collect();
                         let task = rest_parts[0].trim().to_string();
@@ -913,6 +914,10 @@ impl Command {
                                 agent = Some(v);
                             } else if let Some(v) = flag_value(flag, "permission") {
                                 permission = Some(v);
+                            } else if let Some(v) = flag_value(flag, "mode") {
+                                mode = Some(v);
+                            } else if flag == "standby" {
+                                mode = Some("standby".to_string());
                             } else if flag == "worktree" {
                                 use_worktree = true;
                             }
@@ -925,6 +930,7 @@ impl Command {
                             use_worktree: if use_worktree { Some(true) } else { None },
                             agent,
                             permission,
+                            mode,
                         });
                     }
                     workers

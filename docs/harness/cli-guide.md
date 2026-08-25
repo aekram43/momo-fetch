@@ -394,6 +394,12 @@ worktrees are disabled for the whole team with a warning.
 falling back to `git branch -D` when the branch is unmerged. Merge, or branch a
 copy, before stopping.
 
+**Workers are one-shot unless told otherwise.** `"mode": "standby"` in the team
+config keeps a worker alive after its task, polling its inbox — that is the only
+way `team send` reaches anything. `team status` reports `crashed` /
+`failed_to_start` from the worker's exit code, and `team restart <worker>` brings
+one back. See the [user guide](user-guide.md#standby-workers).
+
 **Workers run as `auto` by default, not `strict`.** Set `permission` per worker
 in the config (`strict` / `auto` / `yolo`) — but a `strict` worker deadlocks at
 its first mutating tool, since a detached pane has nobody to answer the
@@ -416,7 +422,9 @@ through `shell_exec` (or a script, or you in another terminal):
 |---------|-------------|
 | `momo-fetch team list` | Every config in `.harness/teams/`, plus which team is active |
 | `momo-fetch team start <name>` | Start from a config — exits **2** if a team is already active |
-| `momo-fetch team status` | Team, workers, pane ids, mailbox backlog |
+| `momo-fetch team status` | Team, workers, pane ids, mailbox backlog, liveness |
+| `momo-fetch team send <worker> <msg>` | Queue a task for a **standby** worker |
+| `momo-fetch team restart <worker>` | Relaunch one worker in a fresh pane |
 | `momo-fetch team stop [--force]` | Stop the team; exits **0** when there is nothing to stop |
 
 Every action takes `--project <dir>` (default: the current directory, resolved
