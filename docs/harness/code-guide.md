@@ -802,6 +802,28 @@ describe the same routine differently.
 `momo-fetch routine tick` is the same step from the shell, for machines with no
 gateway running.
 
+### Surfacing it: `/v2/activity`
+
+`gateway/activity.rs` answers "what is working in the background" for the UI's
+right panel — team workers and routine runs in one document. It refreshes worker
+liveness and reconciles finished runs on the way through, so it reports the
+present rather than the last tick's memory of it, and it renders through
+`team_cmd::team_payload` and `routine::view::run_payload` so it cannot disagree
+with `momo-fetch team status` or `momo-fetch routine runs`.
+
+It is polled, not pushed: nothing about a tmux pane or a scheduler tick is
+caused by the tab asking, so there is no event to subscribe to. Like
+`/v2/routines` it takes no harness lock, which is what stops a 10 s poll from
+queueing behind a streaming turn.
+
+### In the REPL
+
+`/routine list|show|run|enable|disable` (`cli/commands.rs`). Read-only plus
+`run` on purpose — `add` is a fourteen-field form, and a mistyped cron typed as
+one REPL line would be saved without ever showing the field names. The name is
+the rest of the line, not the next word: every routine anyone writes has a space
+in it.
+
 ---
 
 ## 17. Agent Personalities (`src/agent/`)
@@ -915,7 +937,7 @@ tokio::fs::rename(&tmp, &path).await?;
   clear_sandbox();
   ```
 - Session tests use `InMemorySessionService`
-- Total: 454 tests across all modules
+- Total: 465 tests across all modules
 
 ### UTF-8 Safe String Truncation
 

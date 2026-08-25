@@ -1,3 +1,4 @@
+mod activity;
 mod auth;
 mod files;
 mod handlers;
@@ -393,6 +394,7 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
         // gateway tasks don't all contend on this file, and so the frontend can
         // build against real HTTP. Each returns 501 in the standard error
         // shape. Swap the handler, not the route. See spec §12.3.
+        .route("/v2/activity", get(activity::v2_activity))
         .route(
             "/v2/routines",
             get(routines::v2_routines).post(routines::v2_routines_create),
@@ -532,6 +534,7 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
     println!("     POST /v2/agents/switch|default       — Switch agent");
     println!("     GET  /v2/providers                   — List providers + models");
     println!("     POST /v2/switch-model|switch-provider — Switch model/provider");
+    println!("     GET  /v2/activity                    — Workers and runs in flight");
     println!("     GET  /v2/routines                    — Scheduled routines");
     println!("     POST /v2/routines                    — Create a routine");
     println!("     POST /v2/routines/:id/run            — Fire a routine now");

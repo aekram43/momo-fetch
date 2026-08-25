@@ -89,11 +89,6 @@ pub enum Assignee {
 }
 
 impl Assignee {
-    /// True when firing means spawning a process rather than posting a message.
-    pub fn spawns_process(&self) -> bool {
-        !matches!(self, Self::Worker { .. })
-    }
-
     /// The `-a` argument for this assignee, if any.
     pub fn agent_name(&self) -> Option<&str> {
         match self {
@@ -163,6 +158,16 @@ pub enum Concurrency {
     Skip,
     /// Fire anyway, alongside the run already going.
     Parallel,
+}
+
+impl std::fmt::Display for Concurrency {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Queue => "queue",
+            Self::Skip => "skip",
+            Self::Parallel => "parallel",
+        })
+    }
 }
 
 /// How urgent the created task is. Carried into the prompt, not enforced —
@@ -494,13 +499,11 @@ pub fn decide(
 
     // A held window comes first: firing a fresh one while an older one waits
     // would reorder the backlog, and the queue exists to preserve order.
-    if routine.concurrency == Concurrency::Queue && active == 0 {
-        if !next.queue.is_empty() {
-            let scheduled = next.queue.remove(0);
-            next.fired += 1;
-            next.last_run_at = Some(now_ms);
-            return (Decision::Fire { scheduled }, next);
-        }
+    if routine.concurrency == Concurrency::Queue && active == 0 && !next.queue.is_empty() {
+        let scheduled = next.queue.remove(0);
+        next.fired += 1;
+        next.last_run_at = Some(now_ms);
+        return (Decision::Fire { scheduled }, next);
     }
 
     let anchor = runtime
@@ -675,14 +678,6 @@ impl RoutineService {
         self.state = read_json(&self.state_path()).unwrap_or_default();
         self.runs = read_json(&self.runs_path()).unwrap_or_default();
         Ok(())
-    }
-
-    pub fn project_path(&self) -> &Path {
-        &self.project_path
-    }
-
-    pub fn dir(&self) -> &Path {
-        &self.dir
     }
 
     fn state_path(&self) -> PathBuf {

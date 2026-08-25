@@ -453,7 +453,12 @@ fn list(service: &mut TeamService) -> Outcome {
 
 /// The `team status` document — also what `team start` returns, so a caller
 /// gets the same shape whether it just started the team or asked about it.
-fn team_payload(service: &TeamService) -> Value {
+/// The team, its workers and their mailbox backlog, as one document.
+///
+/// `pub` because `/v2/activity` renders the same picture into the UI's right
+/// panel. One builder, so a worker that reads `crashed` in `team status` cannot
+/// read `running` in the app.
+pub fn team_payload(service: &TeamService) -> Value {
     let Some(state) = service.state() else {
         return json!({
             "team_id": null,

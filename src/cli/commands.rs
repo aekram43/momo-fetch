@@ -31,6 +31,14 @@ pub enum Command {
     TeamStatus,
     TeamStop,
     TeamMerge,
+    // Routines are read-only from here plus `run`. Creating one is a
+    // fourteen-field form — `momo-fetch routine add` and the UI's Routines
+    // panel both give you the field names; a single mistyped cron line in the
+    // REPL would not.
+    RoutineList,
+    RoutineShow { name: String },
+    RoutineRun { name: String },
+    RoutineSetEnabled { name: String, enabled: bool },
     Permission { mode: String },
     Clear,
     Compact,
@@ -202,6 +210,20 @@ impl Command {
                     "status" | "" => Some(Self::TeamStatus),
                     "stop" => Some(Self::TeamStop),
                     "merge" => Some(Self::TeamMerge),
+                    _ => Some(Self::Unknown(input.to_string())),
+                }
+            }
+            &"routine" | &"routines" => {
+                let sub = parts.get(1).unwrap_or(&"");
+                // Routine names have spaces in them ("Nightly digest"), so the
+                // rest of the line is the name — not just the next word.
+                let name = parts.get(2..).unwrap_or_default().join(" ");
+                match *sub {
+                    "list" | "" => Some(Self::RoutineList),
+                    "show" => Some(Self::RoutineShow { name }),
+                    "run" => Some(Self::RoutineRun { name }),
+                    "enable" => Some(Self::RoutineSetEnabled { name, enabled: true }),
+                    "disable" => Some(Self::RoutineSetEnabled { name, enabled: false }),
                     _ => Some(Self::Unknown(input.to_string())),
                 }
             }
@@ -1032,6 +1054,203 @@ impl Command {
                 }
                 Ok(true)
             }
+            Self::RoutineList => {
+                let mut service = match routine_service(harness) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                        return Ok(true);
+                    }
+                };
+                // Settle anything that finished while nobody was looking, so a
+                // run that ended an hour ago does not still read "running".
+                let _ = service.reconcile();
+
+                let routines = service.list();
+                if routines.is_empty() {
+                    println!("No routines.");
+                    println!("Create one with: momo-fetch routine add --help");
+                    return Ok(true);
+                }
+
+                println!("Routines ({}):", routines.len());
+                for r in &routines {
+                    let dot = if !r.enabled {
+                        "\u{25cb}".bright_black()
+                    } else if service.active_runs(&r.id) > 0 {
+                        "\u{25cf}".yellow()
+                    } else {
+                        "\u{25cf}".green()
+                    };
+                    let when = if !r.enabled {
+                        "off".to_string()
+                    } else {
+                        service
+                            .next_due(r)
+                            .map(crate::routine::format_timestamp)
+                            .unwrap_or_else(|| "manual".to_string())
+                    };
+                    println!(
+                        "  {dot} {}  {}  \u{2192} {}",
+                        r.name,
+                        r.trigger.summary().bright_black(),
+                        r.assignee.to_string().bright_black()
+                    );
+                    println!("      next: {}", when.bright_black());
+                }
+                Ok(true)
+            }
+            Self::RoutineShow { name } => {
+                if name.trim().is_empty() {
+                    println!("Usage: /routine show <name>");
+                    return Ok(true);
+                }
+                let mut service = match routine_service(harness) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                        return Ok(true);
+                    }
+                };
+                let _ = service.reconcile();
+
+                let Some(routine) = service.resolve(name).cloned() else {
+                    println!("{} No routine '{name}'.", "\u{2717}".red());
+                    println!("Use /routine list to see them.");
+                    return Ok(true);
+                };
+
+                let runtime = service.runtime(&routine.id);
+                println!("Routine: {} ({})", routine.name, routine.id);
+                println!("Task:    {}", routine.task.title);
+                println!("Trigger: {}", routine.trigger.summary());
+                println!("Assignee: {}", routine.assignee);
+                println!(
+                    "State:   {} \u{b7} priority {} \u{b7} permission {} \u{b7} {} concurrency",
+                    if routine.enabled { "on" } else { "off" },
+                    routine.task.priority,
+                    routine.permission,
+                    routine.concurrency
+                );
+                println!(
+                    "Next:    {}",
+                    service
+                        .next_due(&routine)
+                        .map(crate::routine::format_timestamp)
+                        .unwrap_or_else(|| "never (manual or disabled)".to_string())
+                );
+                println!(
+                    "Counters: fired {} \u{b7} skipped {} \u{b7} queued {} \u{b7} in flight {}",
+                    runtime.fired,
+                    runtime.skipped,
+                    runtime.queue.len(),
+                    service.active_runs(&routine.id)
+                );
+                println!();
+                println!("{}", routine.task.description);
+
+                let runs = service.runs(Some(&routine.id), 5);
+                if !runs.is_empty() {
+                    println!();
+                    println!("Recent runs:");
+                    for run in runs {
+                        let reason = match &run.status {
+                            crate::routine::RunStatus::Failed { reason }
+                            | crate::routine::RunStatus::Skipped { reason } => {
+                                format!(" \u{2014} {reason}")
+                            }
+                            _ => String::new(),
+                        };
+                        println!(
+                            "  {}  {}{reason}",
+                            crate::routine::format_timestamp(run.started_at).bright_black(),
+                            run.status.label()
+                        );
+                        if let Some(log) = &run.log_path {
+                            println!("      {}", log.bright_black());
+                        }
+                    }
+                }
+                Ok(true)
+            }
+            Self::RoutineRun { name } => {
+                if name.trim().is_empty() {
+                    println!("Usage: /routine run <name>");
+                    return Ok(true);
+                }
+                let mut service = match routine_service(harness) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                        return Ok(true);
+                    }
+                };
+                let Some(routine) = service.resolve(name).cloned() else {
+                    println!("{} No routine '{name}'.", "\u{2717}".red());
+                    return Ok(true);
+                };
+
+                match service.run_now(&routine.id) {
+                    Ok(record) => {
+                        println!(
+                            "{} Fired '{}' \u{2192} {} ({}).",
+                            "\u{2713}".green(),
+                            routine.name,
+                            routine.assignee,
+                            record.status.label()
+                        );
+                        // The run is a separate process; its output lands in the
+                        // log, not in this REPL.
+                        if let Some(log) = &record.log_path {
+                            println!("  {}", log.bright_black());
+                        }
+                        if let crate::routine::RunStatus::Failed { reason } = &record.status {
+                            println!("  {}", reason.red());
+                        }
+                    }
+                    Err(e) => println!("{} {e}", "\u{2717}".red()),
+                }
+                Ok(true)
+            }
+            Self::RoutineSetEnabled { name, enabled } => {
+                if name.trim().is_empty() {
+                    println!(
+                        "Usage: /routine {} <name>",
+                        if *enabled { "enable" } else { "disable" }
+                    );
+                    return Ok(true);
+                }
+                let mut service = match routine_service(harness) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        println!("{} {e}", "\u{2717}".red());
+                        return Ok(true);
+                    }
+                };
+                let Some(routine) = service.resolve(name).cloned() else {
+                    println!("{} No routine '{name}'.", "\u{2717}".red());
+                    return Ok(true);
+                };
+
+                match service.set_enabled(&routine.id, *enabled) {
+                    Ok(saved) if *enabled => println!(
+                        "{} '{}' is on. Next due: {}.",
+                        "\u{2713}".green(),
+                        saved.name,
+                        service
+                            .next_due(&saved)
+                            .map(crate::routine::format_timestamp)
+                            .unwrap_or_else(|| "never (manual)".to_string())
+                    ),
+                    Ok(saved) => println!(
+                        "{} '{}' is off. Definition and history are kept.",
+                        "\u{2713}".green(),
+                        saved.name
+                    ),
+                    Err(e) => println!("{} {e}", "\u{2717}".red()),
+                }
+                Ok(true)
+            }
             Self::TeamStop => {
                 match harness.team_service_mut().stop() {
                     Ok(()) => {
@@ -1176,8 +1395,89 @@ impl Command {
   /team status         Show team status and worker progress
   /team merge          Merge completed workers' branches
   /team stop           Stop team and clean up worktrees
+  /routine list        List scheduled routines and when each is next due
+  /routine show <name> Show one routine and its recent runs
+  /routine run <name>  Fire a routine now, outside its schedule
+  /routine enable|disable <name>  Arm or disarm a routine
   /permission [mode]   Switch permission mode (strict/auto/yolo)
   /quit                Exit
   !<command>           Run shell command directly"#
+    }
+}
+
+/// Open the routine store for the harness's project.
+///
+/// Routines live entirely in `.harness/routines/` — nothing about them goes
+/// through the harness, which is exactly why a routine can fire while a turn is
+/// running. The REPL reaches them the same way the CLI and the gateway do.
+fn routine_service(harness: &Harness) -> anyhow::Result<crate::routine::RoutineService> {
+    crate::routine::RoutineService::new(&harness.config().project_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A routine name is the rest of the line, not the next word — every
+    /// routine anyone actually writes has a space in it.
+    #[test]
+    fn routine_names_keep_their_spaces() {
+        match Command::parse("/routine show Nightly digest") {
+            Some(Command::RoutineShow { name }) => assert_eq!(name, "Nightly digest"),
+            _ => panic!("expected /routine show"),
+        }
+        match Command::parse("/routine run Team heartbeat") {
+            Some(Command::RoutineRun { name }) => assert_eq!(name, "Team heartbeat"),
+            _ => panic!("expected /routine run"),
+        }
+    }
+
+    #[test]
+    fn bare_routine_lists() {
+        assert!(matches!(Command::parse("/routine"), Some(Command::RoutineList)));
+        assert!(matches!(Command::parse("/routine list"), Some(Command::RoutineList)));
+        assert!(matches!(Command::parse("/routines"), Some(Command::RoutineList)));
+    }
+
+    #[test]
+    fn enable_and_disable_are_one_variant() {
+        match Command::parse("/routine enable Nightly digest") {
+            Some(Command::RoutineSetEnabled { name, enabled }) => {
+                assert_eq!(name, "Nightly digest");
+                assert!(enabled);
+            }
+            _ => panic!("expected enable"),
+        }
+        match Command::parse("/routine disable Nightly digest") {
+            Some(Command::RoutineSetEnabled { enabled, .. }) => assert!(!enabled),
+            _ => panic!("expected disable"),
+        }
+    }
+
+    /// Creating a routine is deliberately not in the REPL — a mistyped cron
+    /// line here would be saved without ever showing you the field names.
+    #[test]
+    fn add_is_not_a_repl_command() {
+        assert!(matches!(
+            Command::parse("/routine add --name x"),
+            Some(Command::Unknown(_))
+        ));
+    }
+
+    #[test]
+    fn a_missing_name_is_parsed_and_reported_at_run_time() {
+        // Parsing must not reject it: the handler prints a usage line, which is
+        // more use than "unknown command".
+        match Command::parse("/routine show") {
+            Some(Command::RoutineShow { name }) => assert!(name.is_empty()),
+            _ => panic!("expected /routine show with an empty name"),
+        }
+    }
+
+    #[test]
+    fn team_commands_still_parse() {
+        assert!(matches!(Command::parse("/team status"), Some(Command::TeamStatus)));
+        assert!(matches!(Command::parse("/team"), Some(Command::TeamStatus)));
+        assert!(matches!(Command::parse("/team stop"), Some(Command::TeamStop)));
     }
 }

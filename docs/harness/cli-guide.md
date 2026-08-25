@@ -456,10 +456,27 @@ the [user guide §12](user-guide.md#driving-a-team-from-the-shell).
 
 ### Routines
 
-Recurring work: a task template, a trigger, and somebody to hand it to. There is
-no slash command — routines are managed from `momo-fetch routine` and from the
-UI's **Customization → Routines** panel, because a schedule outlives the session
-that created it.
+Recurring work: a task template, a trigger, and somebody to hand it to.
+
+In the REPL, `/routine` is **read-only plus `run`**:
+
+| Command | Description |
+|---------|-------------|
+| `/routine list` | Every routine, its trigger and when it is next due |
+| `/routine show <name>` | One routine, its counters and its last five runs |
+| `/routine run <name>` | Fire one now, outside its schedule |
+| `/routine enable\|disable <name>` | Arm or disarm without deleting |
+
+The name is the rest of the line, so `/routine show Nightly digest` works
+without quoting. There is deliberately no `/routine add`: creating one is a
+fourteen-field form, and a mistyped cron line typed as a single REPL line would
+be saved without ever showing you the field names. Use `momo-fetch routine add`
+(which lists them in `--help`) or the UI's **Customization → Routines** panel.
+
+A run started from the REPL is a **separate process** — its output goes to the
+run's log, not into your session. `/routine show` prints the path.
+
+#### Headless: `momo-fetch routine`
 
 | Command | Description |
 |---------|-------------|

@@ -165,6 +165,29 @@ POST /v2/settings/permission  body:{mode}  # Set "strict", "auto", or "yolo"
 DELETE /v2/settings/approved-tools     # Revoke all sticky approvals
 ```
 
+### Background activity
+
+```
+GET  /v2/activity      # Team workers + routine runs in flight
+```
+
+```json
+{
+  "team": { "team_id": "...", "workers": [ … ] } | null,
+  "runs": [ … ],
+  "counts": { "workers_running": 0, "runs_active": 1, "routines_armed": 3 }
+}
+```
+
+What the agent is doing *outside* this turn: workers in their tmux panes,
+routine runs in their own processes. It refreshes worker liveness and settles
+finished runs on the way through, so a worker whose pane died reads `crashed`
+here before anything else notices.
+
+Poll it — nothing about it is caused by the tab asking, so there is no event to
+subscribe to. The right panel uses 10 s. Like `/v2/routines`, it takes no
+harness lock, which is what keeps a poll from queueing behind a streaming turn.
+
 ### Routines
 
 ```

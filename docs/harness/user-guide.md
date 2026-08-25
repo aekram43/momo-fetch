@@ -2679,6 +2679,15 @@ momo-fetch routine run "Nightly digest"    # fire now, outside the schedule
 momo-fetch routine disable "Team heartbeat"
 ```
 
+The same four are in the REPL as `/routine list`, `/routine show <name>`,
+`/routine run <name>` and `/routine enable|disable <name>` — read-only plus
+`run`. Creating one stays in the CLI and the UI, where the field names are in
+front of you.
+
+The right-hand panel's **Running elsewhere** section shows anything in flight —
+team workers in their panes and routine runs in their processes — so a run that
+fails at 03:00 is visible next time you look, without going to find it.
+
 The UI shows the same thing: each routine's next window, its counters, and its
 recent runs with exit codes and log paths. A schedule you cannot see the
 outcomes of is a schedule that can fail every night for a week and look healthy

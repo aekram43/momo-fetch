@@ -58,8 +58,8 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 |---|---:|---:|---|
 | **`memory/`** | 4,618 | 7 | `vault.rs` (the largest file in the repo), `sidecar.rs`, `retrieval.rs`, `parser.rs`, `lifecycle.rs`, `types.rs` |
 | **`tools/`** | 4,489 | 8 | `file` · `shell` · `search` · `web` · `kms` · `memory` · `task` (sub-agent spawn) |
-| **`gateway/`** | 4,219 | 10 | `mod` (router + the routine tick loop) · `v2_handlers` · `handlers` (v1) · `files` (sandboxed reads) · `models` (provider catalogue) · `routines` (`/v2/routines`) · `turn` (one-turn-at-a-time guard) · `auth` · `types`/`v2_types` |
-| **`cli/`** | 5,416 | 9 | `repl` · `commands` (slash commands) · `oneshot` · `team_cmd` (headless `momo-fetch team …`) · `routine_cmd` (headless `momo-fetch routine …`) · `team_worker` (standby worker loop) · `status` · `banner` · `mod` (arg parsing) |
+| **`gateway/`** | 4,616 | 11 | `mod` (router + the routine tick loop) · `v2_handlers` · `handlers` (v1) · `files` (sandboxed reads) · `models` (provider catalogue) · `routines` (`/v2/routines`) · `activity` (`/v2/activity`) · `turn` (one-turn-at-a-time guard) · `auth` · `types`/`v2_types` |
+| **`cli/`** | 5,814 | 9 | `repl` · `commands` (slash commands, incl. `/routine`) · `oneshot` · `team_cmd` (headless `momo-fetch team …`) · `routine_cmd` (headless `momo-fetch routine …`) · `team_worker` (standby worker loop) · `status` · `banner` · `mod` (arg parsing) |
 
 ### The core
 
@@ -79,7 +79,7 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 | Module | Lines | Role |
 |---|---:|---|
 | `team/` | 2,404 | Multi-agent teams: mailbox, tmux panes, worktrees, worker liveness |
-| `routine/` | 2,451 | Scheduled work: `cron` (five-field parser) · `exec` (detached run + exit file) · `view` (JSON shapes) · `mod` (store + the pure `decide`) |
+| `routine/` | 2,446 | Scheduled work: `cron` (five-field parser) · `exec` (detached run + exit file) · `view` (JSON shapes) · `mod` (store + the pure `decide`) |
 | `agent/` | 844 | Agent personalities + `orchestrator` (sub-agent spawn/message) |
 | `mcp/` | 777 | MCP servers, stdio + HTTP, merged into one toolset |
 | `sandbox/` | 672 | Path resolution and destructive-command detection |
@@ -216,7 +216,7 @@ move — no logic changes, no behaviour changes.
 
 ## 5. `web/` and `desktop/`
 
-### `web/src` — 57 files, 7.2k lines
+### `web/src` — 58 files, 7.4k lines
 
 Next.js **static export** (`output: 'export'`). No JavaScript server exists at
 any point; the gateway serves the built files.
@@ -226,7 +226,7 @@ any point; the gateway serves the built files.
 | `components/chat/` (6) | Chat panel, message content, tool-call cards, **approval dialog**, deep-link prompt |
 | `components/layout/` (4) | `app-shell`, `header`, `sidebar`, `standing-permissions` |
 | `components/settings/` (6) | `settings-dialog` + `model-panel`, `model-picker`, `api-keys-panel`, `permissions-panel`, `appearance-panel` |
-| `components/detail/` (3) | `detail-panel`, `files-tab`, `memory-tab` |
+| `components/detail/` (4) | `detail-panel`, `activity-section` (workers + runs in flight), `files-tab`, `memory-tab` |
 | `components/routines/` (5) | `routines-dialog` (list + form + detail), `routine-form`, `routine-detail`, `routines-section` (the rail row), `form-controls` |
 | `components/sidebar/` (3) | `session-list`, `agent-picker`, `tool-status` |
 | `components/shared/` (6) | `panel-section`, `collapsible-group`, `toaster`, `wordmark`, `skeleton`, `turn-rail` |

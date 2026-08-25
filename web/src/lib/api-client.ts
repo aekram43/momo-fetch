@@ -6,6 +6,7 @@
  */
 
 import type {
+  Activity,
   Agent,
   ApprovalRequest,
   AssigneeOption,
@@ -344,6 +345,14 @@ export const getRoutineRuns = (id: string, limit = 20) =>
   request<{ runs: RoutineRun[]; count: number }>(
     `/v2/routines/${encodeURIComponent(id)}/runs?limit=${limit}`,
   );
+
+/**
+ * Team workers and routine runs in flight.
+ *
+ * Never takes the harness lock, so it stays answerable while a turn streams —
+ * which is exactly when the right panel is being watched.
+ */
+export const getActivity = () => request<Activity>("/v2/activity");
 
 export const getAssignees = () =>
   request<{ assignees: AssigneeOption[] }>("/v2/routines/assignees");

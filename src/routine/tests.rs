@@ -195,10 +195,18 @@ fn assignees_round_trip_through_text() {
 }
 
 #[test]
-fn only_worker_assignees_skip_the_process_spawn() {
-    assert!(Assignee::Lead.spawns_process());
-    assert!(Assignee::Agent { name: "p".into() }.spawns_process());
-    assert!(!Assignee::Worker { name: "b".into() }.spawns_process());
+fn only_a_specialist_assignee_carries_an_agent_flag() {
+    assert_eq!(Assignee::Lead.agent_name(), None);
+    assert_eq!(Assignee::Agent { name: "p".into() }.agent_name(), Some("p"));
+    // A worker never spawns a process, so it never has one either.
+    assert_eq!(Assignee::Worker { name: "b".into() }.agent_name(), None);
+}
+
+#[test]
+fn concurrency_prints_the_word_the_flag_takes() {
+    assert_eq!(Concurrency::Queue.to_string(), "queue");
+    assert_eq!(Concurrency::Skip.to_string(), "skip");
+    assert_eq!(Concurrency::Parallel.to_string(), "parallel");
 }
 
 #[test]

@@ -89,11 +89,6 @@ impl CronExpr {
         })
     }
 
-    /// The normalised expression — whitespace collapsed, nothing else changed.
-    pub fn as_str(&self) -> &str {
-        &self.source
-    }
-
     /// The next firing at or after `after`, in `tz`, as a UTC instant.
     ///
     /// Strictly *after*: a schedule that already fired at this minute must not
@@ -176,7 +171,7 @@ fn start_of_next_day(t: NaiveDateTime) -> Option<NaiveDateTime> {
 }
 
 fn start_of_next_hour(t: NaiveDateTime) -> Option<NaiveDateTime> {
-    Some((t + Duration::hours(1)).with_minute(0)?.with_second(0)?)
+    (t + Duration::hours(1)).with_minute(0)?.with_second(0)
 }
 
 fn start_of_next_month(t: NaiveDateTime) -> Option<NaiveDateTime> {

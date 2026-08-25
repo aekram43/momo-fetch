@@ -917,7 +917,7 @@ fn summarize_response(response: &serde_json::Value) -> String {
 const BUILTIN_COMMANDS: &[&str] = &[
     "help", "quit", "exit", "model", "provider", "models",
     "sessions", "resume", "cost", "mem", "kms", "skill",
-    "mcp", "key", "agent", "team", "permission", "perm",
+    "mcp", "key", "agent", "team", "routine", "routines", "permission", "perm",
     "clear", "compact",
 ];
 

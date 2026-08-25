@@ -28,11 +28,12 @@ pub struct SpawnRequest<'a> {
     pub run_id: &'a str,
 }
 
+/// Only what the caller records. The exit file and the script are derived from
+/// the run id whenever they are needed ([`exit_path`], [`script_path`]), so
+/// carrying them here would be two sources for one path.
 pub struct Spawned {
     pub pid: u32,
     pub log_path: PathBuf,
-    pub exit_path: PathBuf,
-    pub script_path: PathBuf,
 }
 
 /// Start a run and return as soon as it is up.
@@ -73,12 +74,7 @@ pub fn spawn(req: SpawnRequest<'_>) -> anyhow::Result<Spawned> {
         .and_then(|s| s.trim().parse::<u32>().ok())
         .ok_or_else(|| anyhow::anyhow!("The run started but reported no pid."))?;
 
-    Ok(Spawned {
-        pid,
-        log_path,
-        exit_path,
-        script_path,
-    })
+    Ok(Spawned { pid, log_path })
 }
 
 /// The script one run executes.
@@ -231,8 +227,9 @@ mod tests {
         .expect("spawn");
 
         assert!(spawned.pid > 0);
+        let exit = exit_path(&run_dir, "run-test");
         for _ in 0..100 {
-            if read_exit_code(&spawned.exit_path) == Some(0) {
+            if read_exit_code(&exit) == Some(0) {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));

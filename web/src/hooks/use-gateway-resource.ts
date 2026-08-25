@@ -16,6 +16,16 @@ import { useUiStore } from "@/stores/ui-store";
 export function useGatewayResource<T>(
   fetcher: () => Promise<T>,
   deps: unknown[] = [],
+  /**
+   * Refetch every N ms as well.
+   *
+   * For state this tab does not cause and is not told about — a team worker
+   * finishing in a tmux pane, a routine firing on the gateway's timer. Leave it
+   * off for anything that only changes because someone clicked something here;
+   * `serverStateNonce` already covers that, and a poll on top of it is just
+   * traffic.
+   */
+  intervalMs?: number,
 ) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,11 +50,18 @@ export function useGatewayResource<T>(
       }
     };
     void load();
+    if (!intervalMs) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timer = setInterval(() => void load(), intervalMs);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, serverStateNonce, ...deps]);
+  }, [nonce, serverStateNonce, intervalMs, ...deps]);
 
   return { data, error, reload };
 }

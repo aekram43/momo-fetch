@@ -1,5 +1,6 @@
 "use client";
 
+import { ActivitySection } from "@/components/detail/activity-section";
 import { Hint, PanelSection } from "@/components/shared/panel-section";
 import { ToolCallCard } from "@/components/chat/tool-call-card";
 import { useChatStore } from "@/stores/chat-store";
@@ -12,6 +13,10 @@ import { useChatStore } from "@/stores/chat-store";
  * a column shared with configuration. Memory and files moved to the left rail's
  * Customization group; models, keys, permissions and appearance moved into the
  * settings dialog.
+ *
+ * "Running elsewhere" is the one addition, and it belongs to the same question:
+ * team workers and routine runs are the agent working, they are just not
+ * working *here*. Last, because the live turn stays at the top.
  */
 export function DetailPanel() {
   const messages = useChatStore((s) => s.messages);
@@ -86,6 +91,7 @@ export function DetailPanel() {
         )}
       </PanelSection>
 
+      <ActivitySection />
     </aside>
   );
 }

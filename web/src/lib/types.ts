@@ -452,3 +452,48 @@ export interface TickReport {
   queued: { routine_id: string; scheduled_at: string | null }[];
   skipped: { routine_id: string; reason: string }[];
 }
+
+// ─── Background activity (`/v2/activity`) ──────────────────────
+
+/** A team worker, as `momo-fetch team status` reports it. */
+export interface TeamWorker {
+  name: string;
+  agent: string | null;
+  permission: string;
+  mode: string;
+  status: string;
+  error: string | null;
+  branch: string | null;
+  pane_id: string | null;
+  worktree_path: string | null;
+  work_dir: string;
+  task: string;
+  result: string | null;
+  last_heartbeat: string | null;
+  last_message_ts: string | null;
+}
+
+export interface TeamSummary {
+  team_id: string | null;
+  name: string | null;
+  status: string;
+  workers: TeamWorker[];
+  mailbox: { unread_by_recipient: Record<string, number> };
+  started_at: string | null;
+  project_path: string | null;
+}
+
+/**
+ * What is working in the background right now — outside this turn, and outside
+ * this process.
+ */
+export interface Activity {
+  team: TeamSummary | null;
+  /** Routine runs still in flight. */
+  runs: RoutineRun[];
+  counts: {
+    workers_running: number;
+    runs_active: number;
+    routines_armed: number;
+  };
+}
