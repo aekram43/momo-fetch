@@ -856,7 +856,7 @@ gpt-4o> /team stop
 > ⚠️ **`/team stop` throws the work away.** "Cleaned up" means
 > `git worktree remove --force` — which discards uncommitted changes in the
 > worker's directory — followed by `git branch -d` and, if that fails because
-> the branch is unmerged, `git branch -D` (`src/team/mod.rs:944`). A worker that
+> the branch is unmerged, `git branch -D` (`src/team/mod.rs:667`). A worker that
 > committed to `team/coder` but was never merged loses that branch too.
 >
 > Merge first, or save what you want before stopping:
@@ -991,7 +991,7 @@ teams.
 **tmux is not optional, whatever the warning says.** If tmux is missing,
 `/team start` prints *"Workers will run in background without pane isolation"*
 and then starts nothing: a worker is launched by sending its command to a tmux
-window, so with no window there is no process (`src/team/mod.rs:748`). The team is
+window, so with no window there is no process (`src/team/mod.rs:998`). The team is
 recorded, `/team status` shows every worker as `starting`, and it stays that way
 forever. Install tmux before using teams.
 
@@ -1126,7 +1126,7 @@ cd <work_dir> && { momo-fetch [-a <agent>] [--team-worker <name>] \
 becomes `Completed` when **every** worker's status is `Completed` or `Failed`.
 Worker status changes in exactly one way: a message addressed to `lead` arriving
 in `<project>/.harness/mailbox` with `msg_type` `ready` / `progress` /
-`completed` / `failed` (`src/team/mod.rs:826`). There is no fallback that
+`completed` / `failed` (`src/team/mod.rs:1070`). There is no fallback that
 notices a worker's process exited.
 
 Two consequences worth knowing before you wait on it:

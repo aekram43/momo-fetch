@@ -59,7 +59,7 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 | **`memory/`** | 4,618 | 7 | `vault.rs` (the largest file in the repo), `sidecar.rs`, `retrieval.rs`, `parser.rs`, `lifecycle.rs`, `types.rs` |
 | **`tools/`** | 4,489 | 8 | `file` · `shell` · `search` · `web` · `kms` · `memory` · `task` (sub-agent spawn) |
 | **`gateway/`** | 3,874 | 9 | `mod` (router) · `v2_handlers` · `handlers` (v1) · `files` (sandboxed reads) · `models` (provider catalogue) · `turn` (one-turn-at-a-time guard) · `auth` · `types`/`v2_types` |
-| **`cli/`** | 3,141 | 6 | `repl` · `commands` (slash commands) · `oneshot` · `status` · `banner` · `mod` (arg parsing) |
+| **`cli/`** | 4,509 | 8 | `repl` · `commands` (slash commands) · `oneshot` · `team_cmd` (headless `momo-fetch team …`) · `team_worker` (standby worker loop) · `status` · `banner` · `mod` (arg parsing) |
 
 ### The core
 
@@ -69,7 +69,7 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 | `cost.rs` | 955 | Token accounting and pricing. `:free` models short-circuit to zero |
 | `providers.rs` | 544 | Provider registry, availability, liveness probe |
 | `context_window.rs` | 492 | Model context sizes |
-| `session.rs` | 255 | SQLite session store |
+| `session.rs` | 656 | SQLite session store. Owns the pool (WAL + busy timeout) and retries the writes SQLite refuses under concurrency |
 | `artifacts.rs` | 323 | Stamps the sandbox tree before/after a turn; the `artifacts` event is the difference |
 | `transcript.rs` | 335 | Reassembles a streamed reply into one stored event — adk persists none of it |
 | `main.rs` | 39 | Declares the modules and calls `cli` |
@@ -78,7 +78,7 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 
 | Module | Lines | Role |
 |---|---:|---|
-| `team/` | 1,354 | Multi-agent teams |
+| `team/` | 2,404 | Multi-agent teams: mailbox, tmux panes, worktrees, worker liveness |
 | `agent/` | 844 | Agent personalities + `orchestrator` (sub-agent spawn/message) |
 | `mcp/` | 777 | MCP servers, stdio + HTTP, merged into one toolset |
 | `sandbox/` | 672 | Path resolution and destructive-command detection |

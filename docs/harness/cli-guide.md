@@ -48,6 +48,8 @@ Options:
       --mode <MODE>           Run mode: default (repl) or memory-sidecar
       --resume <SESSION_ID>   Resume a previous session
       --test-mcp              Test MCP server connections and exit
+      --team-worker <NAME>    Run as a standby team worker (see Agent Teams)
+      --mailbox <DIR>         Mailbox directory, overriding <project>/.harness/mailbox
       --gateway               Start the API gateway server
       --gateway-port <PORT>   Gateway port (0 = let the OS pick a free one)
       --gateway-bind <ADDR>   Gateway bind address (default: 127.0.0.1)
@@ -406,11 +408,14 @@ its first mutating tool, since a detached pane has nobody to answer the
 confirmation prompt. `shell_exec`'s destructive-command check still applies in
 `auto`. See the [user guide](user-guide.md#worker-permissions).
 
-**`/team status` is not a process check.** A worker's state changes only when a
-message arrives in `<project>/.harness/mailbox` addressed to `lead`, and nothing
-in a worker's default run posts one — so workers can sit at `starting` while
-they are in fact working, and `/team merge` will refuse. Read the tmux windows
-or `.harness/worker-<name>.log`, and merge the branches by hand if needed. Full
+**`/team status` shows progress only if a worker reports it.** A worker moves to
+`running` or `completed` when a message arrives in `<project>/.harness/mailbox`
+addressed to `lead`, and nothing in a default run posts one — so a worker can
+sit at `starting` while it is in fact working, and `/team merge` will refuse.
+What status *does* catch without being told is a worker that **ended**: the exit
+code in `.harness/worker-<name>.exit` and the pane are checked on every call, so
+`completed`, `crashed` and `failed_to_start` arrive on their own. For progress
+during a run, read the tmux windows or `.harness/worker-<name>.log`. Full
 explanation in the [user guide §12](user-guide.md#12-agent-teams).
 
 #### Headless: `momo-fetch team`
@@ -654,5 +659,6 @@ Project instructions and agent personality files auto-discovered and injected in
 | Skills | `<project>/.harness/skills/`, `<project>/.skills/`, `<project>/.claude/skills/` |
 | Agent personalities | `<project>/.harness/agents/` |
 | Custom commands | `<project>/.harness/commands/` |
-| Team configs | `<project>/.harness/teams/` |
+| Team configs | `<project>/.harness/teams/` (`.json`, `.yml`, `.yaml`) |
+| Worker logs / exit codes / heartbeats | `<project>/.harness/worker-<name>.{log,exit,heartbeat}` |
 | Knowledge bases | `<project>/.kms/` |

@@ -14,6 +14,8 @@ cli/mod.rs (clap arg parsing)
   |
   +---> oneshot.rs    (momo-fetch -p "prompt")
   +---> repl.rs       (interactive REPL, default)
+  +---> team_cmd.rs   (momo-fetch team ... — headless team control, JSON out)
+  +---> team_worker.rs (momo-fetch --team-worker <name> — standby worker loop)
           |
           v
         harness.rs     (central orchestrator)
@@ -63,11 +65,11 @@ This is the central construction sequence. Order matters:
 3. **Provider manager** — `ProviderManager::from_env()` auto-detects LLM provider from env vars / OS keychain
 4. **Filesystem sandbox** — `FilesystemSandbox::new(project_path, permission_mode)` canonicalizes root, loads `.agentignore`
 5. **Context builder** — `ContextBuilder::new(project_path, vault)` walks up directories finding `SOUL.md` / `AGENTS.md` / `CLAUDE.md` / `.harness/SOUL.md` / `.harness/AGENTS.md`
-6. **Session manager** — `SessionManager::new(sessions.db)` opens SQLite, runs migrations
+6. **Session manager** — `SessionManager::new(sessions.db)` builds the SQLite pool (WAL, 5s busy timeout), wraps it in `RetryingSessionService`, runs migrations
 7. **Session** — creates a new session or resumes an existing one by ID
 8. **MCP service** — `McpService::new()` loads `.harness/mcp.json`, starts configured servers
 9. **Skill service** — `SkillService::new()` discovers skills from `.skills/`, `.claude/skills/`, `.harness/skills/`
-10. **Team service** — `TeamService::new()` initializes team coordination
+10. **Team service** — `TeamService::new()` initializes team coordination (loads `.harness/team.json` if a team is running)
 11. **Agent registry** — `AgentRegistry::new(project_path)` scans `.harness/agents/` for `.md` and `.yml` personality files
 12. **Cost tracker** — `CostTracker::new()` loads cost data from JSON file
 13. **Runner** — `build_runner()` creates the adk-rust `Runner` with:
@@ -385,6 +387,33 @@ Two system prompt methods:
 - Backend: SQLite via `adk_session::SqliteSessionService`
 - Location: `~/.config/momo-fetch/sessions.db`
 - Auto-migrates schema on startup
+
+### Concurrency: one database, many processes
+
+Every momo-fetch process on the machine writes this one file, and a team starts
+several at once. Two things had to be added before that worked *(both fixed
+2026-08-25)*.
+
+**The pool is built here, not by `SqliteSessionService::new`.** That
+constructor calls `SqlitePool::connect` with defaults — rollback journal, **no
+busy timeout** — so the second writer to arrive did not wait, it failed
+instantly with `database is locked (code: 5)` and took the worker with it. We
+build `SqliteConnectOptions` ourselves (WAL, `busy_timeout(5s)`,
+`create_if_missing`, `foreign_keys`) and hand the pool to
+`SqliteSessionService::from_pool`. This is why `sqlx` is a direct dependency,
+pinned to the same 0.8 line adk-session uses — a second semver-incompatible
+sqlx would mean a second `SqlitePool` type, and `from_pool` would not accept
+ours.
+
+**`RetryingSessionService` wraps the service.** WAL and a busy timeout only help
+a transaction that starts as a writer. SQLite refuses *immediately*, timeout or
+not, when a transaction that began as a reader tries to upgrade to a write —
+deliberately, since two readers both waiting to upgrade would deadlock. Every
+adk-session write is that shape (`BEGIN`, read the existing state, insert), so
+concurrent agents still lost one. The wrapper retries the whole call up to
+`RETRY_ATTEMPTS` times with jittered backoff; the failed transaction is already
+rolled back when the error surfaces, so the retry starts clean. `is_locked()`
+decides what is retryable — anything else surfaces on the first attempt.
 - Each REPL session gets a UUID; events are auto-saved by adk-runner
 - `/sessions` lists past sessions, `/resume <id>` restores one
 - `/clear` deletes current session and creates a fresh one
@@ -584,17 +613,87 @@ rmcp = { path = "patches/rmcp-1.6.0" }
 
 ## 15. Agent Teams (`src/team/mod.rs`)
 
-- File-based mailbox for inter-agent messaging (`.harness/mailbox/`)
+- File-based mailbox for inter-agent messaging (`.harness/mailbox/`). Message
+  filenames carry a uuid suffix: the timestamp is only milliseconds, and two
+  messages from the same sender to the same recipient in the same millisecond
+  used to overwrite each other *(fixed 2026-08-25)*
 - Workers spawned as separate `momo-fetch` processes in tmux panes
 - Optional git worktrees for isolation
-- `WorkerDef` has optional `agent` field — when set, worker spawn command includes `-a <agent_name>` so each worker loads its own personality from `.harness/agents/`
-- **Team config files** — `.harness/teams/<name>.yml` defines workers with `TeamConfig` struct (`name`, `workers[]`). Each `TeamWorkerConfig` has `name`, `task`, `agent`, `branch`, `worktree`
-- `TeamService::load_team_config(name)` parses YAML from `.harness/teams/`, `TeamService::list_team_configs()` discovers all available configs, `TeamService::config_to_workers()` converts `TeamConfig` → `Vec<WorkerDef>`
-- `/team start <name>` — load workers from config file (no interactive input)
-- `/team start` (no arg) — interactive mode, also shows available team configs
-- `/team status` — check worker progress and mailbox
-- `/team merge` — merge completed workers' branches
-- `/team stop` — terminate workers, clean up worktrees
+- **Team config files** — `.harness/teams/<name>.{json,yml,yaml}` defines workers
+  with `TeamConfig` (`name`, `workers[]`). Each `TeamWorkerConfig` has `name`,
+  `task`, `agent`, `branch`, `worktree`, `permission`, `mode`
+- `TeamService::load_team_config(name)` tries all three extensions in
+  `TEAM_CONFIG_EXTENSIONS` order and parses through the YAML reader (YAML 1.2 is
+  a superset of JSON), `list_team_configs()` discovers all of them,
+  `config_to_workers()` converts `TeamConfig` → `Vec<WorkerDef>`. The REPL and
+  the `team` subcommand share this loader so they cannot disagree
+
+### The worker command (`build_worker_command`)
+
+One function builds the shell line, from a `WorkerLaunch`, and nothing in it is
+left implicit:
+
+```sh
+cd '<work_dir>' && { '<binary>' [-a '<agent>'] [--team-worker '<name>'] \
+    --permission <mode> --mailbox '<lead>/.harness/mailbox' -p '<task>'
+  echo $? > '<lead>/.harness/worker-<name>.exit'
+} 2>&1 | tee -a '<lead>/.harness/worker-<name>.log'
+```
+
+- **`--permission`** defaults to `DEFAULT_WORKER_PERMISSION` (`auto`), never
+  `strict`: a headless pane cannot answer a confirmation prompt, so a strict
+  worker stops at its first mutating tool forever. Values parse through
+  `PermissionMode` *before* any tmux session or worktree exists, so a typo fails
+  the whole start and only the three canonical words reach the shell
+- **`--mailbox`** points at the lead's mailbox — a worker in a worktree would
+  otherwise resolve `.harness/mailbox` inside its own checkout
+- **`echo $?`** inside the braces (so it is momo-fetch's status, not `tee`'s) is
+  the only thing that can tell a finished worker from a dead one: the tmux
+  window survives either way
+- Logs, exit files and heartbeats live in the **lead's** `.harness/`, which is
+  the one directory `team status` reads. The log is appended, so a restart keeps
+  the crash that prompted it
+
+### Worker modes (`WorkerMode`)
+
+`oneshot` (default) runs the task and exits — what a worker has always been.
+`standby` adds `--team-worker <name>`, which routes the process into
+`cli/team_worker.rs`: it runs the opening task, then polls its inbox every 2s,
+runs a turn per message, replies to whoever asked, and touches
+`worker-<name>.heartbeat` each poll. It exits on a `shutdown` message.
+
+A standby worker reporting `completed` means *that task* is done, so
+`TeamService::status()` maps it back to `Running` rather than `Completed` — which
+is why a team containing one never completes on its own.
+
+### Liveness (`refresh_liveness`, `observed_status`)
+
+Worker status used to move for exactly one reason: a message addressed to
+`lead`. Nothing in a default run sends one, so a worker that died in its first
+second sat at `starting` forever. `status()` now also reads the evidence the
+worker could not send:
+
+| Source | Result |
+|--------|--------|
+| `worker-<name>.exit` contains `0` | `Completed` |
+| non-zero, and the worker never reported | `FailedToStart` (message names the log) |
+| non-zero, after it had reported | `Crashed` |
+| pane missing **while the session is alive** | `Crashed` |
+| unparseable/absent exit file | nothing — it is still working |
+
+The session check matters: without it, a machine with no tmux would report every
+worker crashed. `WorkerStatus::is_terminal()` drives "is the team finished".
+
+### Commands
+
+REPL: `/team start [name]`, `/team status`, `/team merge`, `/team stop`.
+
+Headless (`src/cli/team_cmd.rs`, JSON on stdout, exit `0`/`1`/`2`):
+`team list`, `team start <name>`, `team status`, `team send <worker> <msg>`,
+`team restart <worker>`, `team stop [--force]`. `send` refuses a one-shot worker
+instead of queueing a message nothing will read; `restart` relaunches one worker
+in a fresh pane and returns a team that had been written off as `completed` to
+`running`. There is no headless `merge` — merging has conflicts to resolve.
 
 ---
 

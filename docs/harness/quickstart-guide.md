@@ -259,6 +259,7 @@ Inside the REPL:
 | `/agent default` | Switch back to default mode |
 | `/team start <name>` | Start a team from config file |
 | `/team status` | Check team progress |
+| `/team stop` | Stop the team — **destructive**, see §12 of the user guide |
 | `/clear` | Clear all context and start fresh |
 | `/compact` | Compact context (summarize into new session) |
 | `/quit` | Exit (or Ctrl+D) |
@@ -282,7 +283,8 @@ The `$ARG` placeholder is replaced with everything typed after the command name.
 
 ### Team Config Files
 
-Define a team of workers in `.harness/teams/<name>.yml` and start them with one command:
+Define a team of workers in `.harness/teams/<name>.yml` (`.yaml` and `.json`
+work too) and start them with one command:
 
 ```yaml
 # .harness/teams/auth-squad.yml
@@ -297,13 +299,28 @@ workers:
     agent: coder
     branch: feature/auth
     worktree: true
+  - name: reviewer
+    task: "Stand by to review each change as it lands"
+    agent: reviewer
+    mode: standby      # stays up; the others exit when their task is done
 ```
+
+Teams need **tmux** — a worker only ever runs inside a pane.
 
 ```bash
 mkdir -p .harness/teams
-# Then in the REPL:
-# /team start auth-squad
+# In the REPL:
+#   /team start auth-squad
+# Or headlessly, which is how an agent drives it (JSON on stdout):
+momo-fetch team start auth-squad
+momo-fetch team status
+momo-fetch team send reviewer "PR #42 is ready"
+momo-fetch team stop
 ```
+
+`/team stop` and `momo-fetch team stop` are destructive — worktrees go with
+`git worktree remove --force` and worker branches are deleted. Merge first. Full
+detail in the [user guide §12](user-guide.md#12-agent-teams).
 
 ## 6. Memory Vault (Optional)
 

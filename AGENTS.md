@@ -80,7 +80,7 @@ Build artifacts: `target/debug/momo-fetch` / `target/release/momo-fetch`
 | `src/tools/` | Built-in tools (file, shell, search, web, memory, kms, task) |
 | `src/sandbox/` | Filesystem isolation, .agentignore, permission modes |
 | `src/skill/` | Skill discovery and execution |
-| `src/team/` | Multi-agent coordination, mailbox, worktrees |
+| `src/team/` | Multi-agent coordination, mailbox, worktrees, worker modes + liveness |
 | `src/mcp/` | MCP server management (stdio + HTTP) |
 | `docs/` | PRD, SRS, SDS, user guides, code guidelines |
 | `memory-vault/` | EverMemOS structured memory store |
