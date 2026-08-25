@@ -216,7 +216,7 @@ move — no logic changes, no behaviour changes.
 
 ## 5. `web/` and `desktop/`
 
-### `web/src` — 58 files, 7.4k lines
+### `web/src` — 59 files, 7.6k lines
 
 Next.js **static export** (`output: 'export'`). No JavaScript server exists at
 any point; the gateway serves the built files.
@@ -228,7 +228,7 @@ any point; the gateway serves the built files.
 | `components/settings/` (6) | `settings-dialog` + `model-panel`, `model-picker`, `api-keys-panel`, `permissions-panel`, `appearance-panel` |
 | `components/detail/` (4) | `detail-panel`, `activity-section` (workers + runs in flight), `files-tab`, `memory-tab` |
 | `components/routines/` (5) | `routines-dialog` (list + form + detail), `routine-form`, `routine-detail`, `routines-section` (the rail row), `form-controls` |
-| `components/sidebar/` (3) | `session-list`, `agent-picker`, `tool-status` |
+| `components/sidebar/` (4) | `session-list`, `agent-picker`, `team-section`, `tool-status` |
 | `components/shared/` (6) | `panel-section`, `collapsible-group`, `toaster`, `wordmark`, `skeleton`, `turn-rail` |
 | `lib/` | `api-client` · `sse-parser` (hand-rolled) · `desktop` · `preferences` · `recent-models` · `relative-time` · `highlight` · `sounds` · `types` |
 | `stores/` | zustand: `chat-store`, `ui-store`, `toast-store` |

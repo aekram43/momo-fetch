@@ -471,7 +471,7 @@ The name is the rest of the line, so `/routine show Nightly digest` works
 without quoting. There is deliberately no `/routine add`: creating one is a
 fourteen-field form, and a mistyped cron line typed as a single REPL line would
 be saved without ever showing you the field names. Use `momo-fetch routine add`
-(which lists them in `--help`) or the UI's **Customization → Routines** panel.
+(which lists them in `--help`) or the UI's **Squad → Routines** panel.
 
 A run started from the REPL is a **separate process** — its output goes to the
 run's log, not into your session. `/routine show` prints the path.

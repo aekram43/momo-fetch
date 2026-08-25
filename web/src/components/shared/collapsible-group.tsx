@@ -3,14 +3,13 @@
 /**
  * A named group of panel sections that can be folded away.
  *
- * Used for "Customization" in the left rail, which gathers the four registers
- * describing what the agent can draw on — agents, tools, memory, files. They
- * belong together and they are also the tallest thing in the rail, so they get
- * one heading and one control instead of four sections a user has to scroll
- * past to reach the session list.
+ * Used twice in the left rail — "Squad" (who does the work) and
+ * "Customization" (what they have to work with). Between them they are the
+ * tallest thing in the rail, so each gets one heading and one control instead
+ * of six sections a user has to scroll past to reach the session list.
  *
  * The heading is a real `<button>` with `aria-expanded`, not a styled `div`:
- * folding away four panels is exactly the kind of control that must be
+ * folding away several panels is exactly the kind of control that must be
  * reachable by keyboard and announced as a disclosure.
  */
 export function CollapsibleGroup({
@@ -45,8 +44,8 @@ export function CollapsibleGroup({
       {/* Unmounted, not hidden: the panels inside poll the gateway, and a
           collapsed group should stop asking rather than keep fetching for a
           view nobody is looking at. */}
-      {/* Indented against a hairline so the four sections read as *inside* the
-          group. Without it the group heading looks like a fifth sibling, since
+      {/* Indented against a hairline so the sections read as *inside* the
+          group. Without it the group heading looks like one more sibling, since
           every section heading in this rail is set the same way. */}
       {open && (
         <div className="flex flex-col gap-5 border-l border-rule pl-2.5">

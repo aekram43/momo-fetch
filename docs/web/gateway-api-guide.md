@@ -174,10 +174,16 @@ GET  /v2/activity      # Team workers + routine runs in flight
 ```json
 {
   "team": { "team_id": "...", "workers": [ … ] } | null,
+  "team_configs": ["demo", "solo"],
   "runs": [ … ],
   "counts": { "workers_running": 0, "runs_active": 1, "routines_armed": 3 }
 }
 ```
+
+`team_configs` is what is defined in `.harness/teams/`, so an idle rail can say
+*what could run* rather than only that nothing is. Starting one is still a
+command — the UI does not offer it, because it needs a config name and its
+counterpart (`team stop`) removes worktrees and deletes branches.
 
 What the agent is doing *outside* this turn: workers in their tmux panes,
 routine runs in their own processes. It refreshes worker liveness and settles

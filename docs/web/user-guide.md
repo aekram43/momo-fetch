@@ -47,24 +47,38 @@ Controls:
 
 One session is active across all tabs; switching in one tab affects all of them.
 
-### Customization (collapsible group)
+### Squad (collapsible group)
 
-A group that expands/collapses, containing five registers:
+**Who does the work.** Three registers, each an actor with a state: the agent
+this session talks to, the team of workers running beside it, and the routines
+that hand out work when nobody is here.
+
+Separate from Customization below, which holds what they have to work *with*.
+Agents used to sit with tools and files, which put "who is answering me" next to
+"which MCP servers are up".
 
 #### Agents
 
 Choose which agent the model adopts. Click to switch. The gateway holds the current agent and broadcasts it to all tabs.
 
-#### Tools
+#### Team
 
-**MCP server status.** Shows which servers are running and how many tools they expose.
+**The squad's standing composition.** When a team is running: its config name,
+a worker count in the header, and a row per worker with a state dot, the name,
+`standby` if it can be given more work, and either its state or how many
+messages are queued for it. `N waiting for you` appears when the lead has unread
+mail.
 
-Each row displays:
-- Status dot (green = running, amber = error, grey = offline)
-- Server ID (monospace)
-- Tool count (or `—` if unknown; `null` never renders as `0`)
+When no team is running, it lists the configs in `.harness/teams/` and the
+command that starts one.
 
-Header shows `X/Y` (running servers / total servers).
+Read-only, deliberately. Starting a team needs a config name and stopping one
+removes worktrees and deletes branches — neither belongs behind a single click
+in a 288px rail.
+
+Not the same question as the right panel's **Running elsewhere**: that is what
+is in flight this minute across teams *and* routines. This is who is on the
+squad.
 
 #### Routines
 
@@ -79,6 +93,22 @@ Rows are a summary and a way in, not a control surface — everything you can *d
 to a routine lives in the dialog. Run and delete buttons in a 288px rail would be
 hit by accident.
 
+### Customization (collapsible group)
+
+**What the squad has to work with.** Three registers, all inert — none of them
+does anything on its own.
+
+#### Tools
+
+**MCP server status.** Shows which servers are running and how many tools they expose.
+
+Each row displays:
+- Status dot (green = running, amber = error, grey = offline)
+- Server ID (monospace)
+- Tool count (or `—` if unknown; `null` never renders as `0`)
+
+Header shows `X/Y` (running servers / total servers).
+
 #### Memory
 
 Search the vault. Shows stats: total memories, events, foresights, pending foresights, and auto-write status.
@@ -86,6 +116,10 @@ Search the vault. Shows stats: total memories, events, foresights, pending fores
 #### Files
 
 Browse the project tree from the sandbox root. Click a file to preview it in the detail panel (read-only).
+
+Both groups remember whether they were open (`localStorage`, view state only).
+A collapsed group **unmounts** its panels rather than hiding them, so it stops
+polling the gateway for a view nobody is looking at.
 
 ## Chat Panel (center)
 

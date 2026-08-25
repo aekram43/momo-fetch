@@ -347,7 +347,7 @@ momo-fetch routine run "Morning standup"   # fire one now
 
 The schedule advances while the gateway (or the desktop app) is running. Without
 one, put `momo-fetch routine tick` in system cron. The same routines are
-editable in the UI under **Customization → Routines**.
+editable in the UI under **Squad → Routines**.
 
 See [user guide §18](user-guide.md#18-routines--heartbeats).
 

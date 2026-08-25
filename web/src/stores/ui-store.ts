@@ -37,6 +37,8 @@ interface UiState {
   theme: ThemeChoice;
   turnPhase: TurnPhase;
   mobileDrawer: MobileDrawer;
+  /** The Squad group in the left rail (F28 view state). */
+  squadOpen: boolean;
   /** The Customization group in the left rail (F28 view state). */
   customizationOpen: boolean;
   /**
@@ -71,6 +73,7 @@ interface UiState {
   hydrated: boolean;
   toggleSidebar: () => void;
   toggleDetail: () => void;
+  toggleSquad: () => void;
   toggleCustomization: () => void;
   openRoutines: (focusId?: string | null) => void;
   closeRoutines: () => void;
@@ -89,7 +92,12 @@ interface UiState {
 function persist(
   s: Pick<
     UiState,
-    "sidebarOpen" | "detailOpen" | "soundEnabled" | "theme" | "customizationOpen"
+    | "sidebarOpen"
+    | "detailOpen"
+    | "soundEnabled"
+    | "theme"
+    | "squadOpen"
+    | "customizationOpen"
   >,
 ) {
   savePreferences({
@@ -97,6 +105,7 @@ function persist(
     detailOpen: s.detailOpen,
     soundEnabled: s.soundEnabled,
     theme: s.theme,
+    squadOpen: s.squadOpen,
     customizationOpen: s.customizationOpen,
   });
 }
@@ -124,6 +133,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   toggleDetail: () => {
     set((s) => ({ detailOpen: !s.detailOpen }));
+    persist(get());
+  },
+  toggleSquad: () => {
+    set((s) => ({ squadOpen: !s.squadOpen }));
     persist(get());
   },
   toggleCustomization: () => {

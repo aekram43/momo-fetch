@@ -12,11 +12,11 @@ web/src/
 │   └── page.tsx            # App root
 ├── components/
 │   ├── chat/               # Composer, messages, tool cards, approval dialog
-│   ├── layout/             # App shell, header, sidebar, status bar
+│   ├── layout/             # App shell, header, sidebar (Squad + Customization), status bar
 │   ├── settings/           # Settings dialog and four panels
 │   ├── routines/           # Routines dialog (list + form + detail) and the rail row
 │   ├── detail/             # Right panel: this turn, changed files, work running elsewhere
-│   ├── sidebar/            # Session list, agent picker, tool status
+│   ├── sidebar/            # Session list, agent picker, team roster, tool status
 │   └── shared/             # Reusable: toaster, buttons, etc.
 ├── hooks/
 │   ├── use-chat-stream.ts  # Opens stream, fans events into store
@@ -45,6 +45,7 @@ web/src/
 | Change the routine form | `web/src/components/routines/routine-form.tsx` |
 | Show more background work | `web/src/components/detail/activity-section.tsx` |
 | Change the layout | `web/src/components/layout/app-shell.tsx` |
+| Add a rail section | `web/src/components/layout/sidebar.tsx` — pick the group by what the section *is*: an actor (Squad) or a capability (Customization) |
 | Add a store | `src/stores/`, export from the module |
 | Change theme colors | `web/src/app/globals.css` (CSS variables) and `web/src/lib/preferences.ts` |
 

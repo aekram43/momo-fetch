@@ -63,9 +63,19 @@ Sessions live in one SQLite database per machine, not per project:
 `~/.config/momo-fetch/sessions.db` (`src/harness.rs:49`). Switching projects does
 not change which sessions are listed — the list is global.
 
-## Scheduled work
+## The squad
 
-**Customization → Routines** in the left panel. A routine hands a task to the
+The left panel's **Squad** group is who does the work: the **agent** this
+session talks to, the **team** of workers running beside it, and the
+**routines** that hand out work when nobody is here. **Customization** below it
+is what they have to work with — tools, memory, files.
+
+Team and routines are both read from the project, so switching projects switches
+both.
+
+### Scheduled work
+
+**Squad → Routines** in the left panel. A routine hands a task to the
 agent — or to a standby team worker — on a cron schedule or a fixed interval,
 without anyone at the keyboard.
 
@@ -88,6 +98,13 @@ Routines dialog shows each run's exit code and log path.
 A scheduled run defaults to `auto` permission, because nothing can answer a
 confirmation prompt at 03:00 — see [Approvals and
 permissions](#approvals-and-permissions) for what that allows.
+
+### The team
+
+**Squad → Team** shows the running team and each worker's state, or the configs
+in `.harness/teams/` when none is running. It is read-only: starting a team
+needs a config name and stopping one removes worktrees and deletes branches, so
+both stay in the CLI (`momo-fetch team start <name>` / `team stop`).
 
 ## Approvals and permissions
 

@@ -489,6 +489,8 @@ export interface TeamSummary {
  */
 export interface Activity {
   team: TeamSummary | null;
+  /** Config names in `.harness/teams/` — what could be started. */
+  team_configs: string[];
   /** Routine runs still in flight. */
   runs: RoutineRun[];
   counts: {

@@ -6,41 +6,53 @@ import { FilesTab } from "@/components/detail/files-tab";
 import { MemoryTab } from "@/components/detail/memory-tab";
 import { RoutinesSection } from "@/components/routines/routines-section";
 import { SessionList } from "@/components/sidebar/session-list";
+import { TeamSection } from "@/components/sidebar/team-section";
 import { ToolStatus } from "@/components/sidebar/tool-status";
 import { useUiStore } from "@/stores/ui-store";
 
 /**
- * Left rail: your sessions, and everything the agent can draw on.
+ * Left rail: your sessions, who is working, and what they have to work with.
  *
- * The registers under "Customization" — agents, tools, routines, memory, files —
- * answer one question between them: *what does this agent have to work with?*
- * Routines belong with them: a schedule is standing instructions, which is a
- * capability the agent has whether or not anyone is at the keyboard.
- * They were split across both side panels, so the answer was in two places and
- * neither was complete. Now they are one group behind one control, which leaves
- * the right panel free to do its own job: what the agent is doing right now.
+ * Two groups, because the registers answer two different questions and mixing
+ * them made both harder to read:
  *
- * Sections are labelled but not numbered — these are parallel registers, not a
- * sequence, and numbering would imply an order that does not exist.
+ * - **Squad** — *who is doing the work.* The agent this session is talking to,
+ *   the team of workers running beside it, and the routines that hand out work
+ *   when nobody is here. All three are actors with a schedule and a state.
+ * - **Customization** — *what they have to work with.* Tools, memory, files.
+ *   Inert capabilities; none of them does anything on its own.
+ *
+ * Agents used to sit with tools and files, which put "who is answering me" next
+ * to "which MCP servers are up". Routines then made the mismatch obvious: a
+ * schedule is not a capability, it is a member of the squad that happens to be
+ * asleep.
+ *
+ * Sections within a group are labelled but not numbered — they are parallel
+ * registers, not a sequence.
  */
 export function Sidebar() {
+  const squadOpen = useUiStore((s) => s.squadOpen);
+  const toggleSquad = useUiStore((s) => s.toggleSquad);
   const customizationOpen = useUiStore((s) => s.customizationOpen);
   const toggleCustomization = useUiStore((s) => s.toggleCustomization);
 
   return (
     <nav
-      aria-label="Sessions and customization"
+      aria-label="Sessions, squad and customization"
       className="flex w-72 shrink-0 flex-col gap-5 overflow-y-auto border-r border-rule bg-panel px-3 py-4"
     >
       <SessionList />
+      <CollapsibleGroup title="Squad" open={squadOpen} onToggle={toggleSquad}>
+        <AgentPicker />
+        <TeamSection />
+        <RoutinesSection />
+      </CollapsibleGroup>
       <CollapsibleGroup
         title="Customization"
         open={customizationOpen}
         onToggle={toggleCustomization}
       >
-        <AgentPicker />
         <ToolStatus />
-        <RoutinesSection />
         <MemoryTab />
         <FilesTab />
       </CollapsibleGroup>

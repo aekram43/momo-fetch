@@ -22,6 +22,8 @@ export interface Preferences {
   detailOpen: boolean;
   soundEnabled: boolean;
   theme: ThemeChoice;
+  /** The "Squad" group in the left rail — agents, team, routines. */
+  squadOpen: boolean;
   /** The "Customization" group in the left rail. */
   customizationOpen: boolean;
 }
@@ -36,9 +38,10 @@ export const defaultPreferences: Preferences = {
   // want light has told us too; making them say it twice is the wrong default
   // even for an app whose home key is dark.
   theme: "auto",
-  // Expanded by default. Collapsed would hide agents, tools, memory and files
-  // behind a control nobody has been given a reason to click yet — a group is
-  // for tidying away what you already know is there.
+  // Both expanded by default. Collapsed would hide every register behind a
+  // control nobody has been given a reason to click yet — a group is for
+  // tidying away what you already know is there.
+  squadOpen: true,
   customizationOpen: true,
 };
 

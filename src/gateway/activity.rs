@@ -26,14 +26,18 @@ pub async fn v2_activity(State(state): State<GatewayState>) -> Response {
     // A project with no team and no routines is the common case, and it must
     // answer with empty lists rather than an error — the panel renders "nothing
     // running", which is a real answer.
-    let team = match TeamService::new(project) {
+    let (team, team_configs) = match TeamService::new(project) {
         Ok(mut service) => {
             // Refresh liveness first: a worker whose pane died is the single
             // most useful thing this endpoint can tell anyone.
             service.status();
-            Some(crate::cli::team_cmd::team_payload(&service))
+            // The configs come too, so an idle rail can say *what could run*
+            // rather than only that nothing is. Starting one is still a
+            // command — see the note on the Squad panel.
+            let configs = service.list_team_configs().unwrap_or_default();
+            (Some(crate::cli::team_cmd::team_payload(&service)), configs)
         }
-        Err(_) => None,
+        Err(_) => (None, Vec::new()),
     };
 
     let (runs, routines_armed) = match RoutineService::new(project) {
@@ -70,6 +74,7 @@ pub async fn v2_activity(State(state): State<GatewayState>) -> Response {
         StatusCode::OK,
         Json(json!({
             "team": team,
+            "team_configs": team_configs,
             "runs": runs,
             "counts": {
                 "workers_running": workers_running,

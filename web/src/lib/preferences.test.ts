@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { PREFERENCES_KEY, defaultPreferences } from "./preferences";
+import { PREFERENCES_KEY, defaultPreferences, loadPreferences } from "./preferences";
 
 describe("preferences", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   /**
    * The theme is applied before first paint by an inline script in
    * `layout.tsx`, which cannot import from this module — it has to run before
@@ -22,5 +26,26 @@ describe("preferences", () => {
     // stored — otherwise a first launch disagrees with the store.
     expect(layout).toContain(`|| '${defaultPreferences.theme}'`);
     expect(layout).toContain(`: '${defaultPreferences.theme}'`);
+  });
+
+  /**
+   * A blob written by an older build is missing every key added since. Reading
+   * it must fill those in rather than leave them `undefined` — an undefined
+   * `squadOpen` renders the group collapsed, so someone who used the app
+   * yesterday would open it today to a rail with half its contents gone.
+   */
+  it("an older stored blob gains the keys added since", () => {
+    // These tests run in node, not jsdom — a two-method `localStorage` is all
+    // `loadPreferences` touches, and it beats pulling in a DOM for one read.
+    const stored = JSON.stringify({ theme: "light", sidebarOpen: false });
+    vi.stubGlobal("window", {
+      localStorage: { getItem: (k: string) => (k === PREFERENCES_KEY ? stored : null) },
+    });
+
+    const prefs = loadPreferences();
+    expect(prefs.theme).toBe("light");
+    expect(prefs.sidebarOpen).toBe(false);
+    expect(prefs.squadOpen).toBe(defaultPreferences.squadOpen);
+    expect(prefs.customizationOpen).toBe(defaultPreferences.customizationOpen);
   });
 });

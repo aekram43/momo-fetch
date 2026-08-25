@@ -805,7 +805,8 @@ gateway running.
 ### Surfacing it: `/v2/activity`
 
 `gateway/activity.rs` answers "what is working in the background" for the UI's
-right panel — team workers and routine runs in one document. It refreshes worker
+right panel and its Squad rail — team workers, routine runs, and the team
+configs that exist but are not running, in one document. It refreshes worker
 liveness and reconciles finished runs on the way through, so it reports the
 present rather than the last tick's memory of it, and it renders through
 `team_cmd::team_payload` and `routine::view::run_payload` so it cannot disagree

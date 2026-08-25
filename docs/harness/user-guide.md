@@ -1148,9 +1148,10 @@ without the worker having said anything. See [When a worker
 dies](#when-a-worker-dies). For progress *during* a run, read the tmux windows
 or the `worker-<name>.log` files.
 
-In the web and desktop UIs you do not have to ask: the right panel's **Running
-elsewhere** section polls the same liveness check every ten seconds, so a worker
-that dies in a detached pane surfaces there on its own (§18).
+In the web and desktop UIs you do not have to ask. The left rail's **Squad →
+Team** section shows the roster and each worker's state, and the right panel's
+**Running elsewhere** shows what is in flight; both poll the same liveness check
+every ten seconds, so a worker that dies in a detached pane surfaces on its own.
 
 When the branches are ready, merge them yourself:
 
@@ -2591,7 +2592,7 @@ A routine is three things — a **task template**, a **trigger**, and an
 
 ### Creating one
 
-From the UI: open the left rail's **Customization → Routines → manage**, then
+From the UI: open the left rail's **Squad → Routines → manage**, then
 **+ New routine**.
 
 From the shell (which is also how the agent in a session creates one, through
