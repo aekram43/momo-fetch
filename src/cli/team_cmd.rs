@@ -336,6 +336,8 @@ fn list(service: &mut TeamService) -> Outcome {
                         "name": w.name,
                         "agent": w.agent,
                         "worktree": w.worktree.unwrap_or(false),
+                        "permission": w.permission.clone()
+                            .unwrap_or_else(|| crate::team::DEFAULT_WORKER_PERMISSION.to_string()),
                     })).collect::<Vec<_>>(),
                 }),
                 // A config that will not parse still belongs in the listing —
@@ -393,6 +395,7 @@ fn team_payload(state: Option<&TeamState>) -> Value {
         "workers": workers.iter().map(|w| json!({
             "name": w.name,
             "agent": w.agent,
+            "permission": w.permission,
             "pane_id": w.pane_id,
             "worktree_path": if w.use_worktree { Some(w.work_dir.display().to_string()) } else { None },
             "work_dir": w.work_dir.display().to_string(),

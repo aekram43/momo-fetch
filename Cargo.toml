@@ -17,6 +17,10 @@ adk-model = { version = "0.7.0", features = [
 ] }
 adk-tool = { version = "0.7", features = ["http-transport"] }
 adk-session = { version = "0.7.0", features = ["sqlite"] }
+# Pinned to the same 0.8 line adk-session 0.7 depends on (0.8.6 in Cargo.lock).
+# Two semver-incompatible sqlx versions would mean two distinct `SqlitePool`
+# types, and `SqliteSessionService::from_pool` would stop accepting ours.
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 schemars = "0.8"
 
 # Async runtime

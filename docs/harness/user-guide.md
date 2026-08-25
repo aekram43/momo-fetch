@@ -771,6 +771,7 @@ workers:
     task: "Research the auth architecture and find best practices"
     agent: researcher
     worktree: true
+    permission: auto        # optional — this is the default
   - name: coder
     task: "Implement the new auth flow with JWT + refresh tokens"
     agent: coder
@@ -936,6 +937,8 @@ need a second round trip to learn the pane ids. Notes worth having:
   `last_message_ts`), not the raw millis stored in `team.json`.
 - **`worktree_path` is null when the worker has no worktree**; `work_dir` always
   says where it actually runs.
+- **`permission` is the mode the worker was launched with** — see [Worker
+  permissions](#worker-permissions).
 - **`unread_by_recipient` lists every worker plus `lead`,** so a zero is a real
   zero rather than an absent key.
 
@@ -991,13 +994,34 @@ worktree in a non-repo disables worktrees for the whole team, and `/team merge`
 then skips those workers entirely — it only merges workers whose `use_worktree`
 is set.
 
+### Worker permissions
+
+Each worker takes a `permission` of `strict`, `auto` or `yolo`. **It defaults to
+`auto`, not to `strict` like the REPL does**, and that difference is deliberate:
+
+> A worker is a one-shot run in a detached pane with nobody watching it. Under
+> `strict`, adk asks for confirmation on the first mutating tool
+> (`shell_exec`, `file_write`, `file_edit`, `mem_write`, `mem_extract`) and the
+> pane sits at *"Tool confirmation required for 'shell_exec'"* until you kill
+> it — there is no one there to answer.
+
+What keeps `auto` honest is that the destructive check never lived in the
+confirmation policy: `shell_exec` runs it itself and refuses to execute a
+match (`rm -rf /`, `git push --force`, `git reset --hard`, `DROP TABLE`,
+`mkfs`, …), returning `needs_approval` instead. That holds in any mode except
+`yolo`, which is why a worker should not be given `yolo` without a reason.
+
+The mode is passed to the worker explicitly as `--permission`, so it does not
+depend on the project's `settings.json` — a team behaves the same in a repo
+configured `strict` and one configured `yolo`.
+
 ### What a worker actually is
 
 A separate `momo-fetch` process, one per worker, each in its own tmux **window**
 named after the worker:
 
 ```
-cd <work_dir> && momo-fetch [-a <agent>] -p '<task>' 2>&1 | tee .harness/worker-<name>.log
+cd <work_dir> && momo-fetch [-a <agent>] --permission <mode> -p '<task>' 2>&1 | tee .harness/worker-<name>.log
 ```
 
 - `<work_dir>` is the worktree when `worktree: true` in a git repo, otherwise the

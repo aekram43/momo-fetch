@@ -78,6 +78,11 @@ pub struct WorkerDef {
     /// Agent personality to load for this worker (from .harness/agents/<name>.md).
     #[serde(default)]
     pub agent: Option<String>,
+    /// Permission mode the worker runs under: `strict`, `auto` or `yolo`.
+    /// Defaults to [`DEFAULT_WORKER_PERMISSION`] — see the constant for why it
+    /// is not `strict`.
+    #[serde(default)]
+    pub permission: Option<String>,
 }
 
 /// A message in the mailbox queue.
@@ -129,6 +134,9 @@ pub struct WorkerState {
     /// Agent personality the worker was launched with, if any.
     #[serde(default)]
     pub agent: Option<String>,
+    /// Permission mode the worker was launched with.
+    #[serde(default = "default_worker_permission")]
+    pub permission: String,
     pub branch: String,
     pub use_worktree: bool,
     pub status: WorkerStatus,
@@ -575,6 +583,23 @@ impl WorktreeManager {
 /// Extensions accepted for `.harness/teams/<name>.*`, in lookup order.
 pub const TEAM_CONFIG_EXTENSIONS: [&str; 3] = ["json", "yml", "yaml"];
 
+/// Permission mode a worker runs under when its config does not say.
+///
+/// **Not `strict`.** A worker is a headless one-shot in a detached tmux pane
+/// with nobody watching it: under `strict` adk asks for confirmation on the
+/// first mutating tool and the pane sits at "Tool confirmation required"
+/// forever, because there is no one there to answer. `auto` lets the
+/// non-destructive work through while `shell_exec`'s own destructive-pattern
+/// check still refuses `rm -rf /`, `git push --force` and friends — a guard
+/// that lives in the tool, not in the confirmation policy, so it holds no
+/// matter what the pane is running. And **not `yolo`**, which would remove
+/// that check too.
+pub const DEFAULT_WORKER_PERMISSION: &str = "auto";
+
+fn default_worker_permission() -> String {
+    DEFAULT_WORKER_PERMISSION.to_string()
+}
+
 /// Central service for managing agent teams.
 pub struct TeamService {
     /// Path to the project directory.
@@ -698,6 +723,7 @@ impl TeamService {
                 branch: w.branch.clone(),
                 use_worktree: w.worktree,
                 agent: w.agent.clone(),
+                permission: w.permission.clone(),
             })
             .collect()
     }
@@ -756,6 +782,15 @@ impl TeamService {
             ));
         }
 
+        // Resolved before a tmux session or a worktree exists: a typo in one
+        // worker's `permission` should not leave half a team behind. Parsing
+        // through `PermissionMode` also means only the three canonical words
+        // can ever reach the shell command below.
+        let permissions = workers
+            .iter()
+            .map(|w| resolve_worker_permission(&w.name, w.permission.as_deref()))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
         let team_id = format!(
             "team-{}",
             chrono::Local::now().format("%Y%m%d-%H%M%S")
@@ -779,7 +814,7 @@ impl TeamService {
         let mut worker_states = HashMap::new();
         let mut worker_names = Vec::new();
 
-        for worker_def in workers {
+        for (worker_def, permission) in workers.into_iter().zip(permissions) {
             let branch = worker_def
                 .branch
                 .clone()
@@ -822,21 +857,13 @@ impl TeamService {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "momo-fetch".into());
 
-                let work_dir_str = work_dir.display().to_string();
-
-                // Build command with optional --agent flag
-                let agent_flag = match &worker_def.agent {
-                    Some(agent_name) => format!(" -a '{}'", agent_name.replace('\'', "'\\''")),
-                    None => String::new(),
-                };
-
-                let cmd = format!(
-                    "cd {} && {}{} -p '{}' 2>&1 | tee .harness/worker-{}.log",
-                    work_dir_str,
-                    binary_path,
-                    agent_flag,
-                    worker_def.task.replace('\'', "'\\''"),
-                    worker_def.name,
+                let cmd = build_worker_command(
+                    &binary_path,
+                    &work_dir,
+                    worker_def.agent.as_deref(),
+                    permission,
+                    &worker_def.task,
+                    &worker_def.name,
                 );
 
                 if let Err(e) = TmuxManager::send_keys(pid, &cmd) {
@@ -853,6 +880,7 @@ impl TeamService {
                     name: worker_def.name.clone(),
                     task: worker_def.task,
                     agent: worker_def.agent.clone(),
+                    permission: permission.to_string(),
                     branch,
                     use_worktree,
                     status: WorkerStatus::Starting,
@@ -1167,9 +1195,61 @@ pub struct TeamWorkerConfig {
     /// Whether to use a git worktree.
     #[serde(default)]
     pub worktree: Option<bool>,
+    /// Permission mode for this worker: `strict`, `auto` or `yolo`.
+    /// Omitted means [`DEFAULT_WORKER_PERMISSION`].
+    #[serde(default)]
+    pub permission: Option<String>,
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────
+
+/// The shell line a worker's tmux window runs.
+///
+/// `--permission` is never omitted. Left off, the worker takes the project's
+/// `settings.json` or, failing that, `strict` — and a strict worker in a
+/// detached pane stops at its first mutating tool waiting for an answer that
+/// cannot arrive.
+fn build_worker_command(
+    binary_path: &str,
+    work_dir: &Path,
+    agent: Option<&str>,
+    permission: crate::sandbox::PermissionMode,
+    task: &str,
+    worker_name: &str,
+) -> String {
+    let agent_flag = match agent {
+        Some(name) => format!(" -a '{}'", shell_quote(name)),
+        None => String::new(),
+    };
+
+    format!(
+        "cd {} && {}{} --permission {} -p '{}' 2>&1 | tee .harness/worker-{}.log",
+        work_dir.display(),
+        binary_path,
+        agent_flag,
+        permission,
+        shell_quote(task),
+        worker_name,
+    )
+}
+
+/// Escape a value for a single-quoted shell string.
+fn shell_quote(value: &str) -> String {
+    value.replace('\'', "'\\''")
+}
+
+/// Resolve a worker's configured permission mode, defaulting to
+/// [`DEFAULT_WORKER_PERMISSION`] and rejecting anything that is not one of the
+/// three known modes.
+fn resolve_worker_permission(
+    worker: &str,
+    configured: Option<&str>,
+) -> anyhow::Result<crate::sandbox::PermissionMode> {
+    let raw = configured.unwrap_or(DEFAULT_WORKER_PERMISSION);
+    raw.parse::<crate::sandbox::PermissionMode>().map_err(|e| {
+        anyhow::anyhow!("Worker '{worker}': {e}")
+    })
+}
 
 /// Sanitize a name for use as a git branch name.
 fn sanitize_branch_name(name: &str) -> String {
@@ -1218,6 +1298,91 @@ mod tests {
         assert_eq!(sanitize_branch_name("my worker"), "my-worker");
         assert_eq!(sanitize_branch_name("fix: auth #123"), "fix--auth--123");
         assert_eq!(sanitize_branch_name("---leading"), "leading");
+    }
+
+    #[test]
+    fn test_worker_permission_defaults_to_auto_not_strict() {
+        use crate::sandbox::PermissionMode;
+
+        // The whole point: a worker with nothing configured must not come up
+        // strict, because a strict headless pane deadlocks on its first
+        // mutating tool.
+        assert_eq!(
+            resolve_worker_permission("w", None).unwrap(),
+            PermissionMode::Auto
+        );
+        assert_eq!(DEFAULT_WORKER_PERMISSION, "auto");
+
+        assert_eq!(
+            resolve_worker_permission("w", Some("yolo")).unwrap(),
+            PermissionMode::Yolo
+        );
+        assert_eq!(
+            resolve_worker_permission("w", Some("strict")).unwrap(),
+            PermissionMode::Strict
+        );
+
+        let err = resolve_worker_permission("analyst", Some("relaxed"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("analyst"), "{err}");
+        assert!(err.contains("relaxed"), "{err}");
+    }
+
+    #[test]
+    fn test_worker_command_always_carries_a_permission_flag() {
+        use crate::sandbox::PermissionMode;
+
+        let cmd = build_worker_command(
+            "/usr/local/bin/momo-fetch",
+            Path::new("/repo"),
+            Some("yolo-validator"),
+            PermissionMode::Auto,
+            "Backtest the strategy",
+            "validator",
+        );
+
+        assert!(cmd.contains("--permission auto"), "{cmd}");
+        assert!(cmd.contains("-a 'yolo-validator'"), "{cmd}");
+        assert!(cmd.starts_with("cd /repo && /usr/local/bin/momo-fetch"), "{cmd}");
+        assert!(cmd.ends_with("| tee .harness/worker-validator.log"), "{cmd}");
+
+        // No agent, and a task carrying a quote that must not break out of the
+        // single-quoted argument.
+        let cmd = build_worker_command(
+            "momo-fetch",
+            Path::new("/repo"),
+            None,
+            PermissionMode::Strict,
+            "don't stop",
+            "solo",
+        );
+        assert!(!cmd.contains(" -a "), "{cmd}");
+        assert!(cmd.contains("--permission strict"), "{cmd}");
+        assert!(cmd.contains(r"-p 'don'\''t stop'"), "{cmd}");
+    }
+
+    #[test]
+    fn test_config_to_workers_carries_permission() {
+        let config: TeamConfig = serde_json::from_str(
+            r#"{
+              "workers": [
+                {"name": "a", "task": "t", "permission": "yolo"},
+                {"name": "b", "task": "t"}
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let workers = TeamService::config_to_workers(&config);
+        assert_eq!(workers[0].permission.as_deref(), Some("yolo"));
+        assert_eq!(workers[1].permission, None);
+
+        // Unset means the default, resolved at start time.
+        assert_eq!(
+            resolve_worker_permission(&workers[1].name, workers[1].permission.as_deref()).unwrap(),
+            crate::sandbox::PermissionMode::Auto
+        );
     }
 
     #[test]
@@ -1521,6 +1686,7 @@ mod tests {
         assert!(state.name.is_none());
         assert!(state.workers["w1"].agent.is_none());
         assert!(state.workers["w1"].last_message_ts.is_none());
+        assert_eq!(state.workers["w1"].permission, DEFAULT_WORKER_PERMISSION);
     }
 
     #[test]
@@ -1532,6 +1698,7 @@ mod tests {
                 name: "worker-1".into(),
                 task: "Fix lint".into(),
                 agent: Some("reviewer".into()),
+                permission: "auto".into(),
                 branch: "team/worker-1".into(),
                 use_worktree: true,
                 status: WorkerStatus::Running,
@@ -1603,6 +1770,7 @@ mod tests {
                 branch: None,
                 use_worktree: Some(false),
                 agent: None,
+                permission: None,
             })
             .collect();
 

@@ -174,6 +174,19 @@ impl Harness {
         // Initialize cost tracker
         let cost_tracker = CostTracker::new(config_dir.join("cost.json"));
 
+        // A headless run has nobody to answer a tool confirmation, so `auto`
+        // brings its approvals with it. Interactive runs start empty and fill
+        // this in as the user approves things.
+        let approved_tools: std::collections::HashSet<String> = if config.headless {
+            sandbox
+                .headless_auto_approvals()
+                .iter()
+                .map(|t| (*t).to_string())
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+
         // Build Runner with Agent (use agent-specific prompt if agent selected)
         let runner = Self::build_runner(
             &provider_mgr,
@@ -185,7 +198,7 @@ impl Harness {
             &mcp_service,
             &skill_service,
             agent_def.as_ref(),
-            &std::collections::HashSet::new(),
+            &approved_tools,
             &status_channel,
         )?;
 
@@ -215,7 +228,7 @@ impl Harness {
             team_service,
             agent_registry,
             cost_tracker,
-            approved_tools: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            approved_tools: Arc::new(Mutex::new(approved_tools)),
             runner,
             current_session_id,
             config,

@@ -857,7 +857,13 @@ impl Command {
 
                     // Interactive mode
                     println!("Define worker agents (one per line, empty line to finish):");
-                    println!("  Format: <name> <task> [--agent <personality>] [--branch <name>] [--worktree]");
+                    println!(
+                        "  Format: <name> <task> [--agent <personality>] [--branch <name>] [--worktree] [--permission <mode>]"
+                    );
+                    println!(
+                        "  Permission defaults to '{}' — a headless worker cannot answer a confirmation prompt.",
+                        crate::team::DEFAULT_WORKER_PERMISSION
+                    );
                     println!();
 
                     let mut workers = Vec::new();
@@ -885,20 +891,28 @@ impl Command {
                         let mut branch = None;
                         let mut use_worktree = false;
                         let mut agent = None;
+                        let mut permission = None;
 
                         let rest_parts: Vec<&str> = rest.split("--").collect();
                         let task = rest_parts[0].trim().to_string();
 
+                        // `--name value` and `--name=value` are the same flag.
+                        let flag_value = |flag: &str, key: &str| -> Option<String> {
+                            flag.strip_prefix(key)
+                                .and_then(|rest| {
+                                    rest.strip_prefix(' ').or_else(|| rest.strip_prefix('='))
+                                })
+                                .map(|v| v.trim().to_string())
+                        };
+
                         for flag_part in rest_parts.iter().skip(1) {
                             let flag = flag_part.trim();
-                            if flag.starts_with("branch ") {
-                                branch = Some(flag[7..].trim().to_string());
-                            } else if flag.starts_with("branch=") {
-                                branch = Some(flag[7..].trim().to_string());
-                            } else if flag.starts_with("agent ") {
-                                agent = Some(flag[6..].trim().to_string());
-                            } else if flag.starts_with("agent=") {
-                                agent = Some(flag[6..].trim().to_string());
+                            if let Some(v) = flag_value(flag, "branch") {
+                                branch = Some(v);
+                            } else if let Some(v) = flag_value(flag, "agent") {
+                                agent = Some(v);
+                            } else if let Some(v) = flag_value(flag, "permission") {
+                                permission = Some(v);
                             } else if flag == "worktree" {
                                 use_worktree = true;
                             }
@@ -910,6 +924,7 @@ impl Command {
                             branch,
                             use_worktree: if use_worktree { Some(true) } else { None },
                             agent,
+                            permission,
                         });
                     }
                     workers

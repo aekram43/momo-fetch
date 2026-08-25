@@ -25,6 +25,11 @@ pub struct HarnessConfig {
     pub agent_name: Option<String>,
     /// Per-model context window overrides from settings.json.
     pub context_window_overrides: HashMap<String, u64>,
+    /// This run has no one at a keyboard: `momo-fetch -p …`, which is also how
+    /// every team worker is launched. A tool confirmation raised here can
+    /// never be answered, so `auto` pre-approves its mutating tools up front —
+    /// see `FilesystemSandbox::headless_auto_approvals`.
+    pub headless: bool,
 }
 
 /// Settings file schema (both global and project-level).
@@ -195,6 +200,7 @@ impl HarnessConfig {
                 .or(global_settings.memory)
                 .unwrap_or_default(),
             agent_name: args.agent.clone(),
+            headless: args.prompt.is_some(),
             context_window_overrides: project_settings
                 .context_window
                 .or(global_settings.context_window)

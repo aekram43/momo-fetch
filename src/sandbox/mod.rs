@@ -280,6 +280,30 @@ impl FilesystemSandbox {
         }
     }
 
+    /// Tools a headless run is allowed to approve on its own.
+    ///
+    /// `auto` means "auto-approve non-destructive operations", but adk has no
+    /// notion of destructive: [`Self::to_tool_confirmation_policy`] hands it
+    /// every mutating tool and expects the caller to answer. With a person at
+    /// the REPL that works. In `momo-fetch -p …` — every team worker — nobody
+    /// answers, and the run stops at the first `shell_exec` with "Tool
+    /// confirmation required" until the pane is killed.
+    ///
+    /// Pre-approving these puts `auto` back where its own documentation says
+    /// it is. What makes that safe is that the destructive check never lived
+    /// in the confirmation policy: `shell_exec` runs
+    /// [`Self::check_destructive`] itself and refuses to execute a match,
+    /// whatever the policy said.
+    ///
+    /// `strict` returns nothing on purpose — a headless strict run is meant to
+    /// stop. `yolo` never raises a confirmation to begin with.
+    pub fn headless_auto_approvals(&self) -> &'static [&'static str] {
+        match self.permission_mode {
+            PermissionMode::Auto => MUTATING_TOOLS,
+            PermissionMode::Strict | PermissionMode::Yolo => &[],
+        }
+    }
+
     /// Convert our permission mode into adk-rust's `ToolConfirmationPolicy`.
     ///
     /// This is used when building the LlmAgent to configure HITL behavior.
@@ -565,6 +589,27 @@ mod tests {
         assert_eq!("yolo".parse::<PermissionMode>().unwrap(), PermissionMode::Yolo);
         assert_eq!("STRICT".parse::<PermissionMode>().unwrap(), PermissionMode::Strict);
         assert!("unknown".parse::<PermissionMode>().is_err());
+    }
+
+    #[test]
+    fn test_headless_auto_approvals() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Auto: every tool adk would stop on is pre-approved, so a one-shot
+        // run gets through. The destructive guard inside shell_exec is what
+        // still holds — see `test_check_destructive_*`.
+        let auto = make_sandbox(&tmp, PermissionMode::Auto);
+        assert_eq!(auto.headless_auto_approvals(), MUTATING_TOOLS);
+        assert!(auto.headless_auto_approvals().contains(&"shell_exec"));
+
+        // Strict headless is meant to stop, and yolo never asks in the first
+        // place — neither has anything to pre-approve.
+        assert!(make_sandbox(&tmp, PermissionMode::Strict)
+            .headless_auto_approvals()
+            .is_empty());
+        assert!(make_sandbox(&tmp, PermissionMode::Yolo)
+            .headless_auto_approvals()
+            .is_empty());
     }
 
     #[test]

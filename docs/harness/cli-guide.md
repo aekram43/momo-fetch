@@ -394,6 +394,12 @@ worktrees are disabled for the whole team with a warning.
 falling back to `git branch -D` when the branch is unmerged. Merge, or branch a
 copy, before stopping.
 
+**Workers run as `auto` by default, not `strict`.** Set `permission` per worker
+in the config (`strict` / `auto` / `yolo`) — but a `strict` worker deadlocks at
+its first mutating tool, since a detached pane has nobody to answer the
+confirmation prompt. `shell_exec`'s destructive-command check still applies in
+`auto`. See the [user guide](user-guide.md#worker-permissions).
+
 **`/team status` is not a process check.** A worker's state changes only when a
 message arrives in `<project>/.harness/mailbox` addressed to `lead`, and nothing
 in a worker's default run posts one — so workers can sit at `starting` while

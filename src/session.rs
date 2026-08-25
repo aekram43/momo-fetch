@@ -6,6 +6,19 @@ use adk_session::{
     CreateRequest, DeleteRequest, Event, GetRequest, ListRequest, Session, SessionService,
     SqliteSessionService,
 };
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+
+/// How long a writer waits for the lock before reporting failure. Long enough
+/// to cover a team of workers landing on the same turn boundary, short enough
+/// that a genuinely stuck database still surfaces as an error.
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long to wait for a free connection from the pool.
+const ACQUIRE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A single process only ever runs one turn at a time; the concurrency that
+/// matters here is between processes, not inside one.
+const MAX_CONNECTIONS: u32 = 5;
 
 const APP_NAME: &str = "momo-fetch";
 const DEFAULT_USER: &str = "default-user";
@@ -52,16 +65,43 @@ impl SessionManager {
     ///
     /// The database file is created if it doesn't exist. Migrations are run
     /// automatically to ensure the schema is up-to-date.
+    ///
+    /// The pool is built here rather than through
+    /// `SqliteSessionService::new`, which calls `SqlitePool::connect` with
+    /// defaults: rollback journal and **no busy timeout**. One database is
+    /// shared by every momo-fetch process on the machine, and a team starts
+    /// three at once — under the default settings the second writer to arrive
+    /// does not wait, it fails instantly with `database is locked (code: 5)`,
+    /// which killed a worker mid-turn before it had said anything. WAL lets
+    /// readers run while one writer holds the lock, and the busy timeout makes
+    /// writers queue for it instead of giving up.
     pub async fn new(db_path: &Path) -> anyhow::Result<Self> {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
-        let service = SqliteSessionService::new(&db_url).await?;
+        let options = SqliteConnectOptions::new()
+            .filename(db_path)
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            // Applied per connection, so it has to live on the options rather
+            // than be issued once after connecting.
+            .busy_timeout(BUSY_TIMEOUT)
+            // `SqliteSessionService::new` issued this as a PRAGMA; `from_pool`
+            // documents it as the caller's job.
+            .foreign_keys(true);
 
-        // Run migrations (idempotent — safe on both fresh and existing DBs)
+        let pool = SqlitePoolOptions::new()
+            .max_connections(MAX_CONNECTIONS)
+            .acquire_timeout(ACQUIRE_TIMEOUT)
+            .connect_with(options)
+            .await?;
+
+        let service = SqliteSessionService::from_pool(pool);
+
+        // Run migrations (idempotent — safe on both fresh and existing DBs).
+        // Concurrent starts serialize on the busy timeout above.
         service.migrate().await?;
 
         Ok(Self {
