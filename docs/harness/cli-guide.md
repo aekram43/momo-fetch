@@ -28,10 +28,13 @@ One-shot mode prints the agent's response to stdout and tool calls to stderr. Ex
 ```
 momo-fetch [OPTIONS]            # REPL, or one prompt with -p
 momo-fetch team <ACTION>        # Headless team control, JSON on stdout
+momo-fetch routine <ACTION>     # Scheduled work, JSON on stdout
 ```
 
-`team` is the only subcommand; with none given, every flag below behaves exactly
-as it always has. See [Agent Teams](#agent-teams).
+With no subcommand every flag below behaves exactly as it always has. Both
+subcommands print one JSON document on stdout and keep narration on stderr, so
+the agent in a session can drive them through `shell_exec`. See
+[Agent Teams](#agent-teams) and [Routines](#routines).
 
 ### CLI Flags
 
@@ -450,6 +453,63 @@ validator
 
 Same destructive stop as `/team stop` — merge before stopping. Full reference in
 the [user guide §12](user-guide.md#driving-a-team-from-the-shell).
+
+### Routines
+
+Recurring work: a task template, a trigger, and somebody to hand it to. There is
+no slash command — routines are managed from `momo-fetch routine` and from the
+UI's **Customization → Routines** panel, because a schedule outlives the session
+that created it.
+
+| Command | Description |
+|---------|-------------|
+| `momo-fetch routine list` | Every routine, with when each is next due |
+| `momo-fetch routine show <id\|name>` | One routine, its counters and its recent runs |
+| `momo-fetch routine add [flags]` | Create one — needs a name, a title, a description and a trigger |
+| `momo-fetch routine update <id\|name> [flags]` | Change it; unset flags are left alone |
+| `momo-fetch routine rm <id\|name>` | Delete it. Run history is kept |
+| `momo-fetch routine enable\|disable <id\|name>` | Arm or disarm without deleting |
+| `momo-fetch routine run <id\|name>` | Fire now — exits **2** if a run is already going |
+| `momo-fetch routine tick` | Advance the schedule one step (what the gateway does on a timer) |
+| `momo-fetch routine runs [<id\|name>] [--limit N]` | Recent firings, newest first |
+| `momo-fetch routine assignees` | Who this project can hand work to right now |
+
+Every action takes `--project <dir>`. Exit codes: `0` success, `1` error, `2` a
+run is already in progress.
+
+Flags for `add` / `update`:
+
+```
+--name <TEXT>            What the routine is called
+--assignee <WHO>         lead | agent:<name> | worker:<name>   (default: lead)
+--cron <EXPR>            Five fields: min hour dom month dow
+--timezone <TZ>          IANA zone the expression is read in   (default: UTC)
+--catch-up <MODE>        skip | run_once                       (default: skip)
+--every <INTERVAL>       Heartbeat instead of cron: 30s, 5m, 2h
+--manual                 Never fires on its own
+--concurrency <MODE>     queue | skip | parallel                (default: queue)
+--title <TEXT>           Title of the task each firing creates
+--priority <LEVEL>       low | medium | high | urgent           (default: medium)
+--description <TEXT>     The prompt the assignee receives
+--permission <MODE>      strict | auto | yolo                   (default: auto)
+--enabled | --disabled   Create it armed or not                 (default: armed)
+--json <PATH|->          Read the routine from JSON; flags win over it
+```
+
+```bash
+$ momo-fetch routine add --name "Team heartbeat" --assignee lead --every 5m \
+    --title "Check the team" \
+    --description "Run 'momo-fetch team status'. Restart anything crashed."
+Created 'Team heartbeat' (rt-f086ca7a), assigned to lead. Next due: 2026-08-25T14:50:38Z.
+
+$ momo-fetch routine list | jq -r '.routines[] | "\(.name)\t\(.trigger_summary)\t\(.next_due)"'
+Team heartbeat	every 5m	2026-08-25T14:50:38Z
+```
+
+`--json -` reads a whole routine from stdin, which is the shape to use when the
+agent is composing one rather than filling in flags.
+
+Full reference in the [user guide §18](user-guide.md#18-routines--heartbeats).
 
 ### Agent Personalities
 

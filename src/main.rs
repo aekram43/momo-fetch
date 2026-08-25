@@ -10,6 +10,7 @@ mod harness;
 mod mcp;
 mod memory;
 mod providers;
+mod routine;
 mod sandbox;
 mod session;
 mod skill;

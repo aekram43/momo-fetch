@@ -25,6 +25,8 @@ multi-provider LLM support, skill system, and sub-agent orchestration.
 main.rs
   └─> cli/mod.rs (clap arg parsing)
         ├─> oneshot.rs    (momo-fetch -p "prompt")
+        ├─> team_cmd.rs   (momo-fetch team ...)
+        ├─> routine_cmd.rs (momo-fetch routine ... — scheduled work)
         └─> repl.rs       (interactive REPL, default)
               └─> harness.rs     (central orchestrator)
                     ├─> providers.rs    (LLM provider management)
@@ -81,10 +83,11 @@ Build artifacts: `target/debug/momo-fetch` / `target/release/momo-fetch`
 | `src/sandbox/` | Filesystem isolation, .agentignore, permission modes |
 | `src/skill/` | Skill discovery and execution |
 | `src/team/` | Multi-agent coordination, mailbox, worktrees, worker modes + liveness |
+| `src/routine/` | Scheduled work: cron/heartbeat triggers, detached runs, run history |
 | `src/mcp/` | MCP server management (stdio + HTTP) |
 | `docs/` | PRD, SRS, SDS, user guides, code guidelines |
 | `memory-vault/` | EverMemOS structured memory store |
-| `.harness/` | Runtime settings, MCP config, agents, teams, commands, skills |
+| `.harness/` | Runtime settings, MCP config, agents, teams, routines, commands, skills |
 | `patches/rmcp-1.6.0/` | Patched rmcp (200 OK no Content-Type fix) |
 
 ---

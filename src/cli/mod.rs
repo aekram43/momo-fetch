@@ -3,6 +3,7 @@ mod commands;
 pub mod oneshot;
 mod repl;
 pub mod status;
+pub mod routine_cmd;
 pub mod team_cmd;
 mod team_worker;
 
@@ -17,8 +18,9 @@ use clap::Parser;
     about = "MOMO Fetch — AI coding companion",
     long_about = "MOMO Fetch — AI coding companion.\n\n\
         With no subcommand it starts the REPL (or runs one prompt with -p). \
-        The `team` subcommand controls agent teams headlessly, printing JSON \
-        on stdout so an agent can drive them through shell_exec."
+        The `team` and `routine` subcommands control agent teams and scheduled \
+        work headlessly, printing JSON on stdout so an agent can drive them \
+        through shell_exec."
 )]
 pub struct CliArgs {
     /// Headless subcommand. Omit it for the REPL / one-shot behaviour.
@@ -109,6 +111,18 @@ pub enum Command {
         #[command(subcommand)]
         action: team_cmd::TeamAction,
     },
+
+    /// Create and drive scheduled routines without entering the REPL (JSON on stdout)
+    ///
+    /// A routine is a task template plus a trigger plus an assignee: the lead,
+    /// a named agent, or a standby team worker. `routine tick` is the scheduler
+    /// step the gateway runs on a timer.
+    ///
+    /// Exit codes: 0 success, 1 error, 2 a run is already in progress.
+    Routine {
+        #[command(subcommand)]
+        action: routine_cmd::RoutineAction,
+    },
 }
 
 /// Main CLI entry point.
@@ -118,8 +132,11 @@ pub async fn run(args: CliArgs) -> anyhow::Result<()> {
 
     // Headless subcommands run before the harness is built: they touch only
     // `.harness/` on disk, and they must not need a provider or an API key.
-    if let Some(Command::Team { action }) = &args.command {
-        let code = team_cmd::run(action, args.project.as_deref());
+    if let Some(command) = &args.command {
+        let code = match command {
+            Command::Team { action } => team_cmd::run(action, args.project.as_deref()),
+            Command::Routine { action } => routine_cmd::run(action, args.project.as_deref()),
+        };
         // stdout is the contract here — flush before the exit skips Drop.
         use std::io::Write;
         let _ = std::io::stdout().flush();
@@ -507,6 +524,82 @@ mod tests {
         assert!(matches!(
             args.command,
             Some(Command::Team { action: team_cmd::TeamAction::Start { .. } })
+        ));
+    }
+
+    #[test]
+    fn routine_subcommand_parses_with_its_own_project_flag() {
+        let args = parse(&["routine", "list", "--project", "/repo"]);
+        let Some(Command::Routine { action }) = &args.command else {
+            panic!("expected a routine command");
+        };
+        match action {
+            routine_cmd::RoutineAction::List { scope } => {
+                assert_eq!(scope.project.as_deref(), Some("/repo"));
+            }
+            other => panic!("expected list, got {other:?}"),
+        }
+        assert!(args.project.is_none());
+    }
+
+    #[test]
+    fn routine_add_carries_every_field_flag() {
+        let args = parse(&[
+            "routine", "add",
+            "--name", "Nightly digest",
+            "--assignee", "agent:planner",
+            "--cron", "0 3 * * *",
+            "--timezone", "Asia/Bangkok",
+            "--catch-up", "run_once",
+            "--concurrency", "skip",
+            "--title", "Summarise the day",
+            "--priority", "high",
+            "--description", "Write it up.",
+            "--permission", "auto",
+        ]);
+        let Some(Command::Routine {
+            action: routine_cmd::RoutineAction::Add { spec, .. },
+        }) = &args.command
+        else {
+            panic!("expected routine add");
+        };
+        assert_eq!(spec.name.as_deref(), Some("Nightly digest"));
+        assert_eq!(spec.assignee.as_deref(), Some("agent:planner"));
+        assert_eq!(spec.cron.as_deref(), Some("0 3 * * *"));
+        assert_eq!(spec.timezone.as_deref(), Some("Asia/Bangkok"));
+        assert_eq!(spec.catch_up.as_deref(), Some("run_once"));
+        assert_eq!(spec.priority.as_deref(), Some("high"));
+    }
+
+    /// The three triggers are mutually exclusive at the flag layer, so a
+    /// contradictory routine is refused before anything is written.
+    #[test]
+    fn routine_triggers_conflict() {
+        assert!(
+            CliArgs::try_parse_from([
+                "momo-fetch", "routine", "add", "--cron", "0 * * * *", "--every", "5m",
+            ])
+            .is_err()
+        );
+        assert!(
+            CliArgs::try_parse_from(["momo-fetch", "routine", "add", "--every", "5m", "--manual"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn routine_actions_that_need_a_name_demand_one() {
+        for action in ["show", "rm", "enable", "disable", "run"] {
+            assert!(
+                CliArgs::try_parse_from(["momo-fetch", "routine", action]).is_err(),
+                "`routine {action}` should require a routine"
+            );
+        }
+        // `runs` takes an optional one — every routine when it is left out.
+        let args = parse(&["routine", "runs"]);
+        assert!(matches!(
+            args.command,
+            Some(Command::Routine { action: routine_cmd::RoutineAction::Runs { .. } })
         ));
     }
 

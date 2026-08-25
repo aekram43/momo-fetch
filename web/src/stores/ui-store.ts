@@ -40,6 +40,15 @@ interface UiState {
   /** The Customization group in the left rail (F28 view state). */
   customizationOpen: boolean;
   /**
+   * The routines dialog, and which routine it should land on.
+   *
+   * A modal like settings, and for the same reason — but it carries a focus
+   * id so the sidebar rows can deep-link to one routine instead of dropping
+   * the user on an empty pane they then have to search.
+   */
+  routinesOpen: boolean;
+  routinesFocusId: string | null;
+  /**
    * The settings dialog.
    *
    * Configuration is a modal rather than a panel because it is a place you go,
@@ -63,6 +72,8 @@ interface UiState {
   toggleSidebar: () => void;
   toggleDetail: () => void;
   toggleCustomization: () => void;
+  openRoutines: (focusId?: string | null) => void;
+  closeRoutines: () => void;
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
   openDrawer: (which: MobileDrawer) => void;
@@ -100,6 +111,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   // covering the chat on load.
   mobileDrawer: null,
   // Never open on load: a dialog the user did not ask for is in the way.
+  routinesOpen: false,
+  routinesFocusId: null,
   settingsOpen: false,
   settingsTab: "models",
   serverStateNonce: 0,
@@ -119,6 +132,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   // Opening with a tab is how the deep links work — "add a key" from the model
   // panel should land on API keys, not on whatever was open last time.
+  openRoutines: (focusId = null) => set({ routinesOpen: true, routinesFocusId: focusId }),
+  // The focus id is cleared on close so the next plain open starts neutral
+  // rather than on whatever was last clicked.
+  closeRoutines: () => set({ routinesOpen: false, routinesFocusId: null }),
   openSettings: (tab) =>
     set((s) => ({ settingsOpen: true, settingsTab: tab ?? s.settingsTab })),
   closeSettings: () => set({ settingsOpen: false }),

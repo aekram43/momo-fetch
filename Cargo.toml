@@ -41,6 +41,10 @@ serde_yaml = "0.9"
 pulldown-cmark = "0.13"
 regex = "1"
 chrono = { version = "0.4", features = ["serde"] }
+# IANA timezones, for routine cron schedules. A schedule stored as UTC drifts by
+# an hour twice a year for everyone who does not live there, so the zone is part
+# of the routine and the next occurrence is computed in it.
+chrono-tz = { version = "0.10", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # Filesystem

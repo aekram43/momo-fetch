@@ -348,3 +348,107 @@ export interface CostSummary {
   total_tokens: number;
   request_count: number;
 }
+
+// ─── Routines (src/routine/) ───────────────────────────────────
+
+export type RoutineAssignee =
+  | { kind: "lead" }
+  | { kind: "agent"; name: string }
+  | { kind: "worker"; name: string };
+
+export type CatchUp = "skip" | "run_once";
+export type Concurrency = "queue" | "skip" | "parallel";
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+
+export type RoutineTrigger =
+  | { type: "cron"; expression: string; timezone: string; catch_up: CatchUp }
+  | { type: "every"; seconds: number }
+  | { type: "manual" };
+
+export interface RoutineTask {
+  title: string;
+  priority: TaskPriority;
+  description: string;
+}
+
+export type RunState =
+  | "running"
+  | "delivered"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface RoutineRun {
+  id: string;
+  routine_id: string;
+  routine_name: string;
+  assignee: string;
+  status: RunState;
+  reason: string | null;
+  scheduled_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  pid: number | null;
+  exit_code: number | null;
+  log_path: string | null;
+  source: string;
+}
+
+/**
+ * A routine as the gateway reports it: the definition plus the schedule state
+ * that lives outside it (`next_due`, counters, what is in flight).
+ */
+export interface Routine {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** `lead`, `agent:<name>` or `worker:<name>` — the form's select value. */
+  assignee: string;
+  assignee_detail: RoutineAssignee;
+  trigger: RoutineTrigger;
+  trigger_summary: string;
+  concurrency: Concurrency;
+  task: RoutineTask;
+  permission: PermissionMode;
+  created_at: string | null;
+  updated_at: string | null;
+  next_due: string | null;
+  last_fired_at: string | null;
+  last_run_at: string | null;
+  queued: number;
+  fired: number;
+  skipped: number;
+  active_runs: number;
+  last_run: RoutineRun | null;
+  /** Only on the single-routine read. */
+  runs?: RoutineRun[];
+}
+
+/** Body of create/update. Every field optional so a toggle can send just one. */
+export interface RoutineUpsert {
+  name?: string;
+  enabled?: boolean;
+  assignee?: RoutineAssignee;
+  trigger?: RoutineTrigger;
+  concurrency?: Concurrency;
+  task?: RoutineTask;
+  permission?: PermissionMode;
+}
+
+export interface AssigneeOption {
+  value: string;
+  kind: "lead" | "agent" | "worker";
+  label: string;
+  description?: string | null;
+  status?: string;
+  available: boolean;
+}
+
+export interface TickReport {
+  status: string;
+  now: string | null;
+  fired: RoutineRun[];
+  finished: RoutineRun[];
+  queued: { routine_id: string; scheduled_at: string | null }[];
+  skipped: { routine_id: string; reason: string }[];
+}

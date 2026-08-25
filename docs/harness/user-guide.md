@@ -21,11 +21,12 @@ Everything you need to know to use MOMO Fetch effectively.
 10. [Secrets & Security](#10-secrets--security)
 11. [Cost Tracking](#11-cost-tracking)
 12. [Agent Teams](#12-agent-teams)
-17. [Gateway & Cloudflare Tunnel](#17-gateway--cloudflare-tunnel)
 13. [Configuration Reference](#13-configuration-reference)
 14. [Custom Slash Commands](#14-custom-slash-commands)
 15. [Tips & Best Practices](#15-tips--best-practices)
 16. [FAQ](#16-faq)
+17. [Gateway & Cloudflare Tunnel](#17-gateway--cloudflare-tunnel)
+18. [Routines & Heartbeats](#18-routines--heartbeats)
 
 ---
 
@@ -1183,6 +1184,8 @@ Location: `<project>/.harness/`
 | `agents/` | Agent personality files (`.md` and `.yml`) |
 | `commands/` | Custom slash command files (`.md`) |
 | `teams/` | Team config files (`.json`, `.yml`, `.yaml`) |
+| `routines/` | Routine definitions, schedule state, and run logs (§18) |
+| `gateway.json` | Gateway port, auth, CORS, and the routine tick interval |
 
 ### Context Files (auto-discovered)
 
@@ -2560,3 +2563,173 @@ console.log(response.choices[0].message.content);
 | `cloudflared: command not found` | Install via `brew install cloudflared` or download from GitHub releases |
 | CORS errors from browser | Add your origin to `cors_origins` in `gateway.json` |
 | Slow first response | The harness initializes MCP servers and memory vault on startup — wait for ready message |
+
+---
+
+## 18. Routines & Heartbeats
+
+A team answers *who is working on this right now*. A routine answers *what
+should happen again, without anyone remembering to ask*: the nightly digest, the
+hourly team health check, the Monday-morning backlog sweep.
+
+A routine is three things — a **task template**, a **trigger**, and an
+**assignee**.
+
+### Creating one
+
+From the UI: open the left rail's **Customization → Routines → manage**, then
+**+ New routine**.
+
+From the shell (which is also how the agent in a session creates one, through
+`shell_exec`):
+
+```bash
+momo-fetch routine add \
+  --name "Nightly digest" \
+  --assignee lead \
+  --cron "0 3 * * *" --timezone Asia/Bangkok \
+  --title "Summarise the day" \
+  --priority high \
+  --description "Read today's transcripts and write a digest into notes/."
+```
+
+Every `routine` command prints one JSON document on stdout and keeps human
+narration on stderr, so it can be parsed without stripping anything out.
+
+### Who does the work
+
+| Assignee | What happens when it fires |
+|----------|----------------------------|
+| `lead` | A fresh headless `momo-fetch -p` process runs the task as the default agent |
+| `agent:<name>` | The same, as the specialist from `.harness/agents/<name>.md` |
+| `worker:<name>` | The task is posted to a **standby** team worker's inbox |
+
+The first two run in their **own process**, beside whatever session you are in.
+That is deliberate: the harness holds one session, one runner and one provider,
+and a routine firing into that shared object would interleave with what you are
+typing. Each run gets its own log and exit code under
+`.harness/routines/runs/`.
+
+A worker assignee is different — delivery *is* the whole transaction. The run is
+recorded as `delivered` and the worker owns the outcome from there; nothing can
+see whether it succeeded, so nothing claims to. Only standby workers appear as
+assignees: a one-shot worker has already exited by the time anything could post
+to it.
+
+### Triggers
+
+**Cron** — five fields, `min hour dom month dow`, read in an IANA timezone:
+
+```bash
+momo-fetch routine add --name "Weekday standup" --assignee agent:planner \
+  --cron "0 9 * * 1-5" --timezone Asia/Bangkok \
+  --title "Post the standup" --description "Summarise yesterday's commits."
+```
+
+Standard crontab semantics, including the one people trip over: when **both**
+day-of-month and day-of-week are restricted they are OR'd — `0 0 1 * mon` is
+"the 1st *or* any Monday".
+
+The timezone is stored with the routine, not converted away. "09:00 daily"
+means nine in the morning where you are, in summer and in winter both. A
+schedule whose wall-clock time does not exist on a spring-forward day is skipped
+to the next day rather than invented.
+
+**Heartbeat** — a fixed interval since the last fire:
+
+```bash
+momo-fetch routine add --name "Team heartbeat" --assignee lead --every 5m \
+  --title "Check the team" \
+  --description "Run 'momo-fetch team status'. Restart anything crashed and say what you did."
+```
+
+Minimum 30 seconds. An interval that elapsed while the machine was down is due
+the moment it comes back — a heartbeat has no "the moment passed" reading.
+
+**Manual** — `--manual`. Never fires on its own; `routine run` and the UI's
+**Run now** are the only way in. Useful for a task you want saved and named
+before you want it scheduled.
+
+### Missed windows and overlapping runs
+
+**Catch-up** (cron only) decides what a window that passed while nothing was
+running means:
+
+- `skip` (default) — the window is gone; wait for the next one. Right for
+  anything whose value is tied to *when* it runs. A window is only "missed" once
+  it is more than two minutes stale, which is comfortably past any tick.
+- `run_once` — run once, late, then resume the schedule.
+
+**Concurrency** decides what happens when a routine comes due while its previous
+run is still going:
+
+- `queue` (default) — hold the window and fire it when the lane clears, oldest
+  first. At most 20 held; past that the oldest is dropped, because a stale
+  window is worth less than the one that just came due.
+- `skip` — drop the window.
+- `parallel` — fire anyway, alongside.
+
+### Watching them
+
+```bash
+momo-fetch routine list             # every routine, with when each is next due
+momo-fetch routine show "Nightly digest"
+momo-fetch routine runs --limit 20  # recent firings, newest first
+momo-fetch routine run "Nightly digest"    # fire now, outside the schedule
+momo-fetch routine disable "Team heartbeat"
+```
+
+The UI shows the same thing: each routine's next window, its counters, and its
+recent runs with exit codes and log paths. A schedule you cannot see the
+outcomes of is a schedule that can fail every night for a week and look healthy
+from its definition.
+
+### Who advances the schedule
+
+The gateway ticks the scheduler every 30 seconds while it is running — which
+covers both the desktop app and `momo-fetch --gateway`. Tune or turn it off in
+`.harness/gateway.json`:
+
+```json
+{
+  "routines": { "enabled": true, "tick_seconds": 30 }
+}
+```
+
+Without a gateway, `momo-fetch routine tick` does exactly the same step. Put it
+in system cron if you want routines to fire on a machine where nothing is
+holding the gateway open:
+
+```cron
+* * * * * cd /path/to/project && momo-fetch routine tick >/dev/null 2>&1
+```
+
+A cron expression is only as precise as the tick that notices it: at the default
+30 s, a `0 3 * * *` job starts somewhere in the first half-minute after 03:00.
+
+### Permissions
+
+A scheduled run defaults to `--permission auto`, and for the same reason team
+workers do: nobody is at the keyboard, and a `strict` run in a detached process
+stops at its first mutating tool and waits for a confirmation that will never
+come. Destructive shell commands are still refused.
+
+`yolo` is offered and is almost always the wrong choice here — it removes that
+last guard from a process nobody is watching.
+
+### Where it lives on disk
+
+```
+.harness/routines/
+├── rt-<id>.json          one routine definition
+├── state.json            schedule bookkeeping (anchors, queues, counters)
+├── runs.json             the last 200 firings
+└── runs/
+    ├── run-<id>.sh       the script that run executed
+    ├── run-<id>.log      its output
+    └── run-<id>.exit     its exit code
+```
+
+The definitions are plain JSON and safe to hand-write or check in; everything
+optional has a default. The run files are the debugging trail — when a routine
+reports `failed`, the log next to it says why.

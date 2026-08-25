@@ -165,6 +165,30 @@ POST /v2/settings/permission  body:{mode}  # Set "strict", "auto", or "yolo"
 DELETE /v2/settings/approved-tools     # Revoke all sticky approvals
 ```
 
+### Routines
+
+```
+GET    /v2/routines               # Every routine + schedule state
+POST   /v2/routines               # Create one (201; 400 with invalid_routine)
+GET    /v2/routines/assignees     # lead + agents + standby workers, right now
+POST   /v2/routines/tick          # Advance the schedule now
+GET    /v2/routines/{id}          # One routine, with its last 20 runs
+PATCH  /v2/routines/{id}          # Partial — unset fields are left alone
+DELETE /v2/routines/{id}
+POST   /v2/routines/{id}/run      # Fire now (409 `run_in_progress`)
+GET    /v2/routines/{id}/runs?limit=20
+```
+
+These are the only `/v2` endpoints that **never take the harness lock** — they
+read `.harness/routines/` and spawn detached processes, so they keep answering
+while a turn is streaming, and a routine firing cannot interleave with it. The
+gateway also ticks the schedule itself every `routines.tick_seconds` (default
+30, configurable in `.harness/gateway.json`).
+
+`PATCH` being partial is what makes the enable toggle and the full form the same
+request. Toggling `enabled` back on re-anchors the schedule on now, so a routine
+that was off for a week does not come back and replay every window it missed.
+
 ### MCP Servers
 
 ```

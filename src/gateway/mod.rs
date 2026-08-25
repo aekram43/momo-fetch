@@ -2,6 +2,7 @@ mod auth;
 mod files;
 mod handlers;
 mod models;
+mod routines;
 mod turn;
 mod types;
 mod v2_handlers;
@@ -47,6 +48,41 @@ pub struct GatewayConfig {
     /// output are not co-located.
     #[serde(default = "default_ui_dir")]
     pub ui_dir: String,
+    /// The routine scheduler (§ `crate::routine`).
+    #[serde(default)]
+    pub routines: RoutinesConfig,
+}
+
+/// When and whether the gateway advances the routine schedule.
+///
+/// On by default: a routine the user created and then watched not fire is
+/// indistinguishable from a broken one. Nothing fires unless a routine exists,
+/// so the default costs a directory read every `tick_seconds`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutinesConfig {
+    #[serde(default = "default_routines_enabled")]
+    pub enabled: bool,
+    /// How often the scheduler looks. Also the resolution of every schedule —
+    /// a cron minute is only as precise as the tick that notices it.
+    #[serde(default = "default_tick_seconds")]
+    pub tick_seconds: u64,
+}
+
+fn default_routines_enabled() -> bool {
+    true
+}
+
+fn default_tick_seconds() -> u64 {
+    30
+}
+
+impl Default for RoutinesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_routines_enabled(),
+            tick_seconds: default_tick_seconds(),
+        }
+    }
 }
 
 fn default_port() -> u16 {
@@ -82,6 +118,7 @@ impl Default for GatewayConfig {
             auth: AuthConfig::default(),
             approval_timeout_secs: default_approval_timeout(),
             ui_dir: default_ui_dir(),
+            routines: RoutinesConfig::default(),
         }
     }
 }
@@ -119,6 +156,12 @@ pub struct GatewayState {
     pub rate_limiter: Arc<auth::RateLimiter>,
     /// Admits one turn at a time and brokers tool approvals.
     pub turns: turn::TurnRegistry,
+    /// The project root, captured at startup.
+    ///
+    /// Not read back off the harness: `/v2/routines` and the scheduler must
+    /// keep working while a turn holds the harness lock, and asking the harness
+    /// where the project is would put them behind exactly that lock.
+    pub project_path: Arc<std::path::PathBuf>,
 }
 
 /// Runtime overrides for where the gateway listens, from CLI flags.
@@ -140,6 +183,59 @@ pub struct BindOverrides {
     /// A flag rather than a wildcard, and never written to the user's config:
     /// the shell knows exactly which origin it needs and grants only that.
     pub allow_origins: Vec<String>,
+}
+
+/// Advance the routine schedule on a timer, for as long as the gateway runs.
+///
+/// Three things this deliberately does *not* do:
+///
+/// - **Hold any harness state.** The service is opened fresh each tick from
+///   `.harness/routines/`, so a routine added by the CLI (or by the agent
+///   through `shell_exec`) is picked up without a restart, and a turn holding
+///   the harness lock never delays a tick.
+/// - **Run on the async runtime.** A tick reads a directory, writes JSON and
+///   spawns processes; `spawn_blocking` keeps that off the reactor that is
+///   streaming somebody's turn.
+/// - **Stop on error.** A failed tick is logged and the next one still happens.
+///   A scheduler that gives up the first time a file is unreadable is worse
+///   than no scheduler, because it looks like one.
+fn spawn_routine_scheduler(project_path: std::path::PathBuf, tick_seconds: u64) {
+    // Below a few seconds this is a busy loop against the filesystem, and no
+    // cron expression is finer than a minute anyway.
+    let period = std::time::Duration::from_secs(tick_seconds.max(5));
+
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(period);
+        // A tick missed because the previous one ran long must not be repaid as
+        // a burst of catch-up ticks — each would fire the same schedule again.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // The first tick fires immediately; anything due while the gateway was
+        // down is settled by the routine's own catch-up rule, not by this.
+        loop {
+            ticker.tick().await;
+            let project = project_path.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                let mut service = crate::routine::RoutineService::new(&project)?;
+                service.tick(crate::routine::now_millis())
+            })
+            .await;
+
+            match outcome {
+                Ok(Ok(report)) if !report.is_quiet() => {
+                    tracing::info!(
+                        fired = report.fired.len(),
+                        finished = report.finished.len(),
+                        queued = report.queued.len(),
+                        skipped = report.skipped.len(),
+                        "routine tick"
+                    );
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::warn!("routine tick failed: {e}"),
+                Err(e) => tracing::warn!("routine tick panicked: {e}"),
+            }
+        }
+    });
 }
 
 /// Load gateway config from `.harness/gateway.json`.
@@ -200,7 +296,12 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
         config: gateway_config.clone(),
         rate_limiter,
         turns: turn::TurnRegistry::new(),
+        project_path: Arc::new(project_path.clone()),
     };
+
+    if gateway_config.routines.enabled {
+        spawn_routine_scheduler(project_path.clone(), gateway_config.routines.tick_seconds);
+    }
 
     // `*` plus no auth is remote code execution from any page the user visits.
     //
@@ -292,6 +393,21 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
         // gateway tasks don't all contend on this file, and so the frontend can
         // build against real HTTP. Each returns 501 in the standard error
         // shape. Swap the handler, not the route. See spec §12.3.
+        .route(
+            "/v2/routines",
+            get(routines::v2_routines).post(routines::v2_routines_create),
+        )
+        // Static before the parameter: `assignees` and `tick` are not ids.
+        .route("/v2/routines/assignees", get(routines::v2_routine_assignees))
+        .route("/v2/routines/tick", post(routines::v2_routines_tick))
+        .route(
+            "/v2/routines/{id}",
+            get(routines::v2_routine_get)
+                .patch(routines::v2_routine_update)
+                .delete(routines::v2_routine_delete),
+        )
+        .route("/v2/routines/{id}/run", post(routines::v2_routine_run))
+        .route("/v2/routines/{id}/runs", get(routines::v2_routine_runs))
         .route("/v2/mcp/servers", get(v2_handlers::v2_mcp_servers))
         .route("/v2/memory/search", get(v2_handlers::v2_memory_search))
         .route("/v2/memory/stats", get(v2_handlers::v2_memory_stats))
@@ -416,6 +532,9 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
     println!("     POST /v2/agents/switch|default       — Switch agent");
     println!("     GET  /v2/providers                   — List providers + models");
     println!("     POST /v2/switch-model|switch-provider — Switch model/provider");
+    println!("     GET  /v2/routines                    — Scheduled routines");
+    println!("     POST /v2/routines                    — Create a routine");
+    println!("     POST /v2/routines/:id/run            — Fire a routine now");
     println!("     GET  /health                         — Health check (no auth)");
 
     axum::serve(listener, app).await?;

@@ -50,7 +50,7 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 
 ## 2. `src/` — the harness
 
-18 modules. Four of them are 80% of the code.
+19 modules. Four of them are 80% of the code.
 
 ### The big four
 
@@ -58,8 +58,8 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 |---|---:|---:|---|
 | **`memory/`** | 4,618 | 7 | `vault.rs` (the largest file in the repo), `sidecar.rs`, `retrieval.rs`, `parser.rs`, `lifecycle.rs`, `types.rs` |
 | **`tools/`** | 4,489 | 8 | `file` · `shell` · `search` · `web` · `kms` · `memory` · `task` (sub-agent spawn) |
-| **`gateway/`** | 3,874 | 9 | `mod` (router) · `v2_handlers` · `handlers` (v1) · `files` (sandboxed reads) · `models` (provider catalogue) · `turn` (one-turn-at-a-time guard) · `auth` · `types`/`v2_types` |
-| **`cli/`** | 4,509 | 8 | `repl` · `commands` (slash commands) · `oneshot` · `team_cmd` (headless `momo-fetch team …`) · `team_worker` (standby worker loop) · `status` · `banner` · `mod` (arg parsing) |
+| **`gateway/`** | 4,219 | 10 | `mod` (router + the routine tick loop) · `v2_handlers` · `handlers` (v1) · `files` (sandboxed reads) · `models` (provider catalogue) · `routines` (`/v2/routines`) · `turn` (one-turn-at-a-time guard) · `auth` · `types`/`v2_types` |
+| **`cli/`** | 5,416 | 9 | `repl` · `commands` (slash commands) · `oneshot` · `team_cmd` (headless `momo-fetch team …`) · `routine_cmd` (headless `momo-fetch routine …`) · `team_worker` (standby worker loop) · `status` · `banner` · `mod` (arg parsing) |
 
 ### The core
 
@@ -79,6 +79,7 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 | Module | Lines | Role |
 |---|---:|---|
 | `team/` | 2,404 | Multi-agent teams: mailbox, tmux panes, worktrees, worker liveness |
+| `routine/` | 2,451 | Scheduled work: `cron` (five-field parser) · `exec` (detached run + exit file) · `view` (JSON shapes) · `mod` (store + the pure `decide`) |
 | `agent/` | 844 | Agent personalities + `orchestrator` (sub-agent spawn/message) |
 | `mcp/` | 777 | MCP servers, stdio + HTTP, merged into one toolset |
 | `sandbox/` | 672 | Path resolution and destructive-command detection |
@@ -106,6 +107,7 @@ graph TD
     providers[providers]
     config[config]
     team[team]
+    routine[routine]
     mcp[mcp]
     sandbox[sandbox]
     session[session]
@@ -121,11 +123,13 @@ graph TD
     cli --> memory
     cli --> config
     cli --> team
+    cli --> routine
     cli --> sandbox
     cli --> cw
 
     gateway --> harness
     gateway --> artifacts
+    gateway --> routine
     gateway --> config
     gateway --> memory
     gateway --> sandbox
@@ -155,6 +159,9 @@ graph TD
     agent --> sandbox
     agent --> team
 
+    routine --> team
+    routine --> agent
+
     context --> agent
     context --> memory
     memory --> config
@@ -182,9 +189,9 @@ modules to change in isolation. `transcript` reaches only `session`, and only
 in its tests.
 
 **Most depended on:** `sandbox` (5) · `memory` (5) · `config` (5) ·
-`providers` (3) · `team` (3).
+`team` (4) · `providers` (3).
 
-`harness` reaches 15 of the other 17 modules. It is the assembly point, and it
+`harness` reaches 15 of the other 18 modules. It is the assembly point, and it
 is the reason nothing in this crate is really isolated from anything else.
 
 ---
@@ -209,7 +216,7 @@ move — no logic changes, no behaviour changes.
 
 ## 5. `web/` and `desktop/`
 
-### `web/src` — 50 files, 6.0k lines
+### `web/src` — 57 files, 7.2k lines
 
 Next.js **static export** (`output: 'export'`). No JavaScript server exists at
 any point; the gateway serves the built files.
@@ -220,9 +227,10 @@ any point; the gateway serves the built files.
 | `components/layout/` (4) | `app-shell`, `header`, `sidebar`, `standing-permissions` |
 | `components/settings/` (6) | `settings-dialog` + `model-panel`, `model-picker`, `api-keys-panel`, `permissions-panel`, `appearance-panel` |
 | `components/detail/` (3) | `detail-panel`, `files-tab`, `memory-tab` |
+| `components/routines/` (5) | `routines-dialog` (list + form + detail), `routine-form`, `routine-detail`, `routines-section` (the rail row), `form-controls` |
 | `components/sidebar/` (3) | `session-list`, `agent-picker`, `tool-status` |
 | `components/shared/` (6) | `panel-section`, `collapsible-group`, `toaster`, `wordmark`, `skeleton`, `turn-rail` |
-| `lib/` | `api-client` · `sse-parser` (hand-rolled) · `desktop` · `preferences` · `recent-models` · `highlight` · `sounds` · `types` |
+| `lib/` | `api-client` · `sse-parser` (hand-rolled) · `desktop` · `preferences` · `recent-models` · `relative-time` · `highlight` · `sounds` · `types` |
 | `stores/` | zustand: `chat-store`, `ui-store`, `toast-store` |
 | `hooks/` | `use-chat-stream`, `use-gateway-resource`, `use-shortcuts`, `use-turn-cues`, `use-desktop-{boot,menu}` |
 

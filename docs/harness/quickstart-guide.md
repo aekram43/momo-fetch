@@ -322,6 +322,33 @@ momo-fetch team stop
 `git worktree remove --force` and worker branches are deleted. Merge first. Full
 detail in the [user guide §12](user-guide.md#12-agent-teams).
 
+### Scheduling Work (Routines)
+
+A routine hands a task to the agent — or to a standby team worker — on a
+schedule, without anyone at the keyboard.
+
+```bash
+# Every weekday at 09:00, in your own timezone
+momo-fetch routine add --name "Morning standup" --assignee lead \
+  --cron "0 9 * * 1-5" --timezone Asia/Bangkok \
+  --title "Post the standup" \
+  --description "Summarise yesterday's commits in three lines."
+
+# A heartbeat that keeps an eye on the running team
+momo-fetch routine add --name "Team heartbeat" --assignee lead --every 5m \
+  --title "Check the team" \
+  --description "Run 'momo-fetch team status'. Restart anything crashed."
+
+momo-fetch routine list       # what is armed, and when each is next due
+momo-fetch routine run "Morning standup"   # fire one now
+```
+
+The schedule advances while the gateway (or the desktop app) is running. Without
+one, put `momo-fetch routine tick` in system cron. The same routines are
+editable in the UI under **Customization → Routines**.
+
+See [user guide §18](user-guide.md#18-routines--heartbeats).
+
 ## 6. Memory Vault (Optional)
 
 MOMO Fetch automatically builds a persistent memory vault in `<project>/memory-vault/`. It learns from every conversation turn and recalls relevant context in future sessions.

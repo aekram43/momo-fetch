@@ -8,6 +8,7 @@
 import type {
   Agent,
   ApprovalRequest,
+  AssigneeOption,
   CostSummary,
   FileContent,
   FileTree,
@@ -19,9 +20,13 @@ import type {
   PermissionMode,
   Provider,
   ProviderModels,
+  Routine,
+  RoutineRun,
+  RoutineUpsert,
   SessionInfo,
   SessionMessages,
   Settings,
+  TickReport,
   V2ChatRequest,
 } from "./types";
 
@@ -300,3 +305,48 @@ export const getSessionMessages = (id: string) =>
 export const getHealth = () => request<Health>("/health");
 
 export const getCost = () => request<CostSummary>("/v1/cost");
+
+// ─── Routines ──────────────────────────────────────────────────
+
+export const listRoutines = () =>
+  request<{ routines: Routine[]; count: number }>("/v2/routines");
+
+export const getRoutine = (id: string) =>
+  request<Routine>(`/v2/routines/${encodeURIComponent(id)}`);
+
+export const createRoutine = (body: RoutineUpsert) =>
+  post<Routine>("/v2/routines", body);
+
+/** Partial: unset fields are left as they are. */
+export const updateRoutine = (id: string, body: RoutineUpsert) =>
+  request<Routine>(`/v2/routines/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+export const deleteRoutine = (id: string) =>
+  request<{ deleted: boolean; id: string }>(
+    `/v2/routines/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+
+/**
+ * Fire a routine outside its schedule.
+ *
+ * Throws `ApiError` with code `run_in_progress` (409) when one is already
+ * going and the routine is not set to `parallel`.
+ */
+export const runRoutine = (id: string) =>
+  post<RoutineRun>(`/v2/routines/${encodeURIComponent(id)}/run`);
+
+export const getRoutineRuns = (id: string, limit = 20) =>
+  request<{ runs: RoutineRun[]; count: number }>(
+    `/v2/routines/${encodeURIComponent(id)}/runs?limit=${limit}`,
+  );
+
+export const getAssignees = () =>
+  request<{ assignees: AssigneeOption[] }>("/v2/routines/assignees");
+
+/** Advance the schedule now rather than waiting for the gateway's timer. */
+export const tickRoutines = () => post<TickReport>("/v2/routines/tick");

@@ -9,6 +9,7 @@ import { DetailPanel } from "@/components/detail/detail-panel";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { StandingPermissions } from "@/components/layout/standing-permissions";
+import { RoutinesDialog } from "@/components/routines/routines-dialog";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { Toaster } from "@/components/shared/toaster";
 import { TurnRail } from "@/components/shared/turn-rail";
@@ -122,6 +123,7 @@ export function AppShell() {
           viewport must never be able to strand a turn (spec §6). */}
       <ApprovalDialog />
       <SettingsDialog />
+      <RoutinesDialog />
       <DeepLinkPrompt />
       <Toaster />
     </div>

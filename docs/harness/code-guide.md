@@ -15,6 +15,7 @@ cli/mod.rs (clap arg parsing)
   +---> oneshot.rs    (momo-fetch -p "prompt")
   +---> repl.rs       (interactive REPL, default)
   +---> team_cmd.rs   (momo-fetch team ... — headless team control, JSON out)
+  +---> routine_cmd.rs (momo-fetch routine ... — scheduled work, JSON out)
   +---> team_worker.rs (momo-fetch --team-worker <name> — standby worker loop)
           |
           v
@@ -33,6 +34,10 @@ cli/mod.rs (clap arg parsing)
           +---> cost.rs         (token cost tracking)
           +---> tools/          (agent tool implementations)
 ```
+
+`routine/` sits deliberately outside that tree: it reads `.harness/routines/`
+and spawns fresh `momo-fetch` processes, and touches the harness at no point.
+That is what lets a routine fire while a turn is running.
 
 **Key principle:** `harness.rs` owns everything. The CLI layer calls Harness methods. Tools use thread-local context to access the sandbox and vault.
 
@@ -55,6 +60,11 @@ cli/mod.rs (clap arg parsing)
 5. Branches:
    - `-p "prompt"` → `oneshot::run()` — single prompt, stdout/stderr output, exit
    - No `-p` → `repl::run()` — interactive REPL loop
+
+`team` and `routine` subcommands short-circuit **before** step 2: they touch
+only `.harness/` on disk and must not need a provider or an API key. Both flush
+stdout and `std::process::exit(code)` themselves, because stdout is their
+contract and `exit` skips `Drop`.
 
 ### Step 3: Harness Initialization (`src/harness.rs` — `Harness::build()`)
 
@@ -697,7 +707,104 @@ in a fresh pane and returns a team that had been written off as `completed` to
 
 ---
 
-## 16. Agent Personalities (`src/agent/`)
+## 16. Routines (`src/routine/`)
+
+Recurring work: a task template, a trigger, and an assignee. Five files, and the
+split between them is the design.
+
+### `mod.rs` — the store, and one pure function
+
+`decide(routine, runtime, now_ms, active) -> (Decision, RoutineRuntime)` holds
+**every** scheduling rule: catch-up, concurrency, queue depth, the anchor. It
+takes no clock, no filesystem and no process, and returns the runtime it
+implies — the caller persists that only if it acted on the decision. That is why
+the scheduler is covered by ordinary unit tests on a machine with no tmux, no
+API key and no wall-clock dependency.
+
+`RoutineService` is the store around it: `.harness/routines/<id>.json` per
+definition, `state.json` for the anchors and queues, `runs.json` for the last
+`MAX_RUN_HISTORY` firings. Definitions and schedule state are separate files on
+purpose — editing a routine in the UI must not rewrite its history, and a
+hand-edited definition must not be able to corrupt the schedule. Writes go
+through temp-file-then-rename, because the gateway ticks while the UI reads.
+
+A definition that will not parse is **skipped with a warning**, not fatal. One
+bad file must not take every other routine down with it.
+
+### `cron.rs` — five fields, in a zone
+
+`min hour dom month dow`, bitmask per field, and `next_after` skips by the
+largest unit that cannot match rather than walking minutes. Two rules that are
+easy to get wrong:
+
+- **`dom` and `dow` are OR'd when both are restricted** — `0 0 1 * mon` is "the
+  1st *or* any Monday". That is what crontab does.
+- **The next occurrence is computed in the routine's own IANA zone, then mapped
+  back to UTC.** A spring-forward gap returns no instant, so the search moves to
+  the next match rather than inventing one; an autumn ambiguity takes the first
+  pass through the repeated hour.
+
+Search is bounded at five years: `0 0 30 2 *` matches nothing, ever.
+
+### `exec.rs` — how a run actually starts
+
+The same exit-code contract team workers use, for the same reason: a pid that is
+gone tells you the process left, not whether it meant to.
+
+```sh
+# .harness/routines/runs/<run_id>.sh
+cd '<project>' || exit 127
+'<binary>' [-a '<agent>'] --permission auto -p '<prompt>'
+echo $? > '<run_id>.exit'
+```
+
+The script is written to a file and `sh` is handed its **path**, so nothing
+about the prompt is ever nested in a second layer of shell quoting. It is then
+launched as `nohup sh '<script>' > '<log>' 2>&1 & echo $! > '<pid>'`: the
+immediate `sh` exits at once and is reaped, and the run is orphaned with its pid
+recorded. A gateway ticking every 30 s must never accumulate unreaped children.
+
+`--permission` defaults to `auto` (`DEFAULT_ROUTINE_PERMISSION`), never
+`strict`: nobody is at the keyboard of a detached run.
+
+### Dispatch has two shapes
+
+| Assignee | What happens | Terminal state |
+|---|---|---|
+| `worker:<name>` | `TeamService::send_to_worker` — a mailbox message | `delivered` |
+| `lead` / `agent:<name>` | `exec::spawn` — its own process | `running` → `succeeded`/`failed` |
+
+`delivered` is not a euphemism for success: once a message is in a standby
+worker's inbox, nothing here can observe the outcome, so nothing claims to. It
+goes through `TeamService` rather than writing the file directly, because "is
+this worker standby, and does it exist" is decided there and two answers to that
+question would eventually disagree.
+
+### `view.rs` — one set of JSON shapes
+
+`momo-fetch routine …` and `/v2/routines` both render through it, so the CLI an
+agent drives through `shell_exec` and the panel a human clicks in cannot
+describe the same routine differently.
+
+### Who ticks
+
+`gateway::spawn_routine_scheduler` runs `RoutineService::tick` every
+`routines.tick_seconds` (default 30). Three properties it deliberately has:
+
+- The service is **reopened each tick**, so a routine created by the CLI is
+  picked up without a restart, and no harness state is held.
+- The tick runs under `spawn_blocking` — it reads directories, writes JSON and
+  spawns processes, none of which belongs on the reactor streaming a turn.
+- A failed tick is logged and the next one still happens. A scheduler that gives
+  up the first time a file is unreadable is worse than none, because it looks
+  like one.
+
+`momo-fetch routine tick` is the same step from the shell, for machines with no
+gateway running.
+
+---
+
+## 17. Agent Personalities (`src/agent/`)
 
 ### Agent Module Structure
 
@@ -749,7 +856,7 @@ Thread-local `OrchestratorContext` (same pattern as `TaskContext`) provides acce
 - Optional git worktrees for isolation
 ---
 
-## 17. Configuration (`src/config/mod.rs`)
+## 18. Configuration (`src/config/mod.rs`)
 
 ### Settings Hierarchy
 
@@ -775,7 +882,7 @@ pub struct HarnessConfig {
 
 ---
 
-## 18. Key Conventions
+## 19. Key Conventions
 
 ### Error Handling
 
@@ -808,7 +915,7 @@ tokio::fs::rename(&tmp, &path).await?;
   clear_sandbox();
   ```
 - Session tests use `InMemorySessionService`
-- Total: 280 tests across all modules
+- Total: 454 tests across all modules
 
 ### UTF-8 Safe String Truncation
 
