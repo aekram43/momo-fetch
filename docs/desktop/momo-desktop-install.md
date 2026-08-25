@@ -188,8 +188,8 @@ Three regions, and each answers one question.
 
 | Where | Question it answers |
 |-------|--------------------|
-| **Left panel** | What does this agent have to work with? Sessions, plus a collapsible **Customization** group over agents, tools, memory and files. |
-| **Right panel** | What is it doing *right now*? The current turn's tool calls, and the files this turn wrote. |
+| **Left panel** | Who is working, and with what? Sessions, then two collapsible groups: **Squad** (the agent, the team, the routines) and **Customization** (tools, memory, files). |
+| **Right panel** | What is it doing? The current turn's tool calls, the files this turn wrote, and anything **running elsewhere** — team workers and scheduled runs. |
 | **Settings** (⚙ / `Cmd+,`) | How is it set up? Models, API keys, permissions, appearance. |
 
 **Models** — a provider dropdown, then a model list for that provider. The model

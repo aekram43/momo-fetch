@@ -4,8 +4,11 @@
 > **Codebase map:** [`docs/project-landscape.md`](../project-landscape.md) — modules, dependency graph, cycles.
 > **Spec:** [`docs/spec/momo-worker.md`](./momo-worker.md) — read §0 (Code Audit) first; it is the load-bearing part.
 > **Dispatch:** spec **§12** is the work plan (packages, model routing, waves). §9 below is now just a pointer into it.
-> **Last updated:** 2026-08-06 · branch `dev` (0.9.1)
-> **Build state:** rust **308 passed** · web **31 passed** · desktop **8 passed**, tsc + eslint clean
+> **Last updated:** 2026-08-25 · branch `dev` (1.1.1)
+> **Build state:** rust **465 passed** · web **41 passed** · desktop **32 passed**, tsc + eslint clean
+> **Scope note:** everything below is the MOMO WORK wave (G/F/T tasks), which
+> closed at 100%. Work that landed after it is listed directly under "Status at
+> a glance" and documented in the guides, not here.
 
 ---
 
@@ -13,6 +16,20 @@
 
 > **Keep this block current. It is the first thing anyone reads.**
 > Update it at the end of every work package, together with §0 below.
+
+### Landed after this wave
+
+Not G/F/T tasks — features added once the wave closed. The guides are the
+reference; these lines exist so nobody reads the 100% below and concludes the
+product stopped there.
+
+| What | Where it lives | Guide |
+|---|---|---|
+| Headless team control (`momo-fetch team …`) | `src/cli/team_cmd.rs` | [user guide §12](../harness/user-guide.md#12-agent-teams) |
+| Standby workers, worker liveness, per-worker restart | `src/team/mod.rs` | [user guide §12](../harness/user-guide.md#12-agent-teams) |
+| **Routines** — cron/heartbeat schedules, detached runs, run history | `src/routine/`, `src/cli/routine_cmd.rs`, `src/gateway/routines.rs` | [user guide §18](../harness/user-guide.md#18-routines--heartbeats) |
+| `/v2/activity` + the right panel's "Running elsewhere" | `src/gateway/activity.rs`, `web/src/components/detail/activity-section.tsx` | [gateway API](../web/gateway-api-guide.md) |
+| Left rail split into **Squad** and **Customization** | `web/src/components/layout/sidebar.tsx` | [web user guide](../web/user-guide.md#squad-collapsible-group) |
 
 **Truth pass (MCP `PATH` · reply persistence · artifacts diff) · dev · 2026-08-19 · rust 335 · desktop 23 · web 31 · all clean · 🎉 ครบทุกอย่าง**
 
@@ -118,6 +135,12 @@ Shows nothing at zero grants in a non-yolo mode. A permanent "0" is noise, and
 the badge's job is to be the thing that appears when something is standing.
 
 ### ✅ Settings dialog + Customization group · 2026-08-06
+
+> **Superseded in part (2026-08-25).** The left rail is now *two* groups —
+> **Squad** (agent, team, routines) and **Customization** (tools, memory,
+> files). The three-homes reasoning below still holds; what changed is that
+> "what does this agent have to work with" turned out to be two questions once
+> routines existed. See the [web user guide](../web/user-guide.md#squad-collapsible-group).
 
 **Three homes, three questions.** Left rail: *what does this agent have to work
 with* — sessions, plus one collapsible **Customization** group over agents,

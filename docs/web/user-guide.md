@@ -8,9 +8,9 @@ The interface is built around **three always-visible panels**:
 
 | Panel | Shows |
 |-------|-------|
-| **Left** (sidebar) | Sessions, agents, tools, memory, files |
+| **Left** (sidebar) | Sessions · **Squad**: agent, team, routines · **Customization**: tools, memory, files |
 | **Center** (chat) | The conversation and output in real time |
-| **Right** (detail) | What the agent is doing this turn (tool calls, written files) |
+| **Right** (detail) | What the agent is doing: this turn (tool calls, written files) and what is running elsewhere |
 
 Below `lg` (desktop width), panels collapse to drawers overlaying the chat. Below `xl`, the detail panel is hidden by default.
 

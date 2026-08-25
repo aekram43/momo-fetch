@@ -881,6 +881,12 @@ Note the two things v1 got wrong and this diagram makes explicit: the stream **e
   └──────────────┴──────────────────────────────────┘
 ```
 
+> **Superseded in part (2026-08-25).** The left rail is now two groups: **Squad**
+> (agent, team, routines — who does the work) and **Customization** (tools,
+> memory, files — what they work with). The reasoning below is unchanged; the
+> split happened because routines made "what does this agent have to work with"
+> read as two questions. See the [web user guide](../web/user-guide.md#squad-collapsible-group).
+
 **Three homes, three questions.** The left rail answers *what does this agent
 have to work with* — sessions, plus one collapsible **Customization** group over
 agents, tools, memory and files. The right panel answers *what is it doing right

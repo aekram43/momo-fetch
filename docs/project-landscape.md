@@ -58,7 +58,7 @@ serves whatever static directory `ui_dir` points at. The arrows only run one way
 |---|---:|---:|---|
 | **`memory/`** | 4,618 | 7 | `vault.rs` (the largest file in the repo), `sidecar.rs`, `retrieval.rs`, `parser.rs`, `lifecycle.rs`, `types.rs` |
 | **`tools/`** | 4,489 | 8 | `file` · `shell` · `search` · `web` · `kms` · `memory` · `task` (sub-agent spawn) |
-| **`gateway/`** | 4,616 | 11 | `mod` (router + the routine tick loop) · `v2_handlers` · `handlers` (v1) · `files` (sandboxed reads) · `models` (provider catalogue) · `routines` (`/v2/routines`) · `activity` (`/v2/activity`) · `turn` (one-turn-at-a-time guard) · `auth` · `types`/`v2_types` |
+| **`gateway/`** | 4,621 | 11 | `mod` (router + the routine tick loop) · `v2_handlers` · `handlers` (v1) · `files` (sandboxed reads) · `models` (provider catalogue) · `routines` (`/v2/routines`) · `activity` (`/v2/activity`) · `turn` (one-turn-at-a-time guard) · `auth` · `types`/`v2_types` |
 | **`cli/`** | 5,814 | 9 | `repl` · `commands` (slash commands, incl. `/routine`) · `oneshot` · `team_cmd` (headless `momo-fetch team …`) · `routine_cmd` (headless `momo-fetch routine …`) · `team_worker` (standby worker loop) · `status` · `banner` · `mod` (arg parsing) |
 
 ### The core
@@ -216,7 +216,7 @@ move — no logic changes, no behaviour changes.
 
 ## 5. `web/` and `desktop/`
 
-### `web/src` — 59 files, 7.6k lines
+### `web/src` — 57 files, 7.9k lines
 
 Next.js **static export** (`output: 'export'`). No JavaScript server exists at
 any point; the gateway serves the built files.
