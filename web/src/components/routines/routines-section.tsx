@@ -13,9 +13,23 @@ import { useUiStore } from "@/stores/ui-store";
  * *do* to a routine is one click away in the dialog. Putting run and delete
  * buttons in a 288px rail would mean hitting them by accident.
  */
+
+/**
+ * Polled, because almost nothing about a routine changes because of this tab.
+ *
+ * It used to fetch once on mount and then only when something in the UI
+ * mutated gateway state. That missed the two ways routines actually change: the
+ * **agent** creates and edits them through `shell_exec` — which this tab never
+ * hears about — and the scheduler fires runs on the gateway's own timer, moving
+ * `next_due`, `active_runs` and `last_run` with it. So a routine the agent had
+ * just scheduled sat behind "Nothing scheduled" here while the right panel,
+ * which does poll, already said `1 armed`. Ten seconds, matching that panel.
+ */
+const POLL_MS = 10_000;
+
 export function RoutinesSection() {
   const openRoutines = useUiStore((s) => s.openRoutines);
-  const { data, error } = useGatewayResource(listRoutines, []);
+  const { data, error } = useGatewayResource(listRoutines, [], POLL_MS);
   const routines = data?.routines ?? [];
 
   return (

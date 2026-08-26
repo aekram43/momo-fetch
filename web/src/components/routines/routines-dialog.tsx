@@ -40,6 +40,9 @@ export function RoutinesDialog() {
   return <RoutinesDialogBody />;
 }
 
+/** Matches the rail and the right panel. See `routines-section.tsx`. */
+const POLL_MS = 10_000;
+
 function RoutinesDialogBody() {
   const close = useUiStore((s) => s.closeRoutines);
   const focusId = useUiStore((s) => s.routinesFocusId);
@@ -52,11 +55,18 @@ function RoutinesDialogBody() {
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const list = useGatewayResource(listRoutines, []);
-  const assignees = useGatewayResource(getAssignees, []);
+  // Polled for the same reason the rail is: the agent writes routines through
+  // `shell_exec` and the scheduler fires them on its own timer, neither of which
+  // this tab is told about. Safe while editing — `RoutineForm` seeds its draft
+  // once, keyed by routine id, so a refreshed `detail` cannot overwrite what
+  // someone is typing. `assignees` moves too: starting a team adds its standby
+  // workers to the list.
+  const list = useGatewayResource(listRoutines, [], POLL_MS);
+  const assignees = useGatewayResource(getAssignees, [], POLL_MS);
   const detail = useGatewayResource<Routine | null>(
     () => (selectedId ? getRoutine(selectedId) : Promise.resolve(null)),
     [selectedId],
+    POLL_MS,
   );
 
   const dialogRef = useRef<HTMLDivElement>(null);

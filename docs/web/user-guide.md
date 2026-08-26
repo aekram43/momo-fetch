@@ -101,6 +101,11 @@ its name, and when it is next due (`in 4h`, `manual`, `off`).
 Click a row to open the **Routines dialog** on that routine; **manage** opens the
 dialog with nothing selected.
 
+Refreshed every 10 seconds, here and in the dialog. Almost nothing about a
+routine changes because of this tab: the agent creates and edits them through
+`shell_exec`, and the scheduler fires them on the gateway's own timer — so one
+the agent just scheduled appears without a reload.
+
 Rows are a summary and a way in, not a control surface — everything you can *do*
 to a routine lives in the dialog. Run and delete buttons in a 288px rail would be
 hit by accident.
@@ -342,7 +347,7 @@ message is shown if it still refuses.
 - **Composition** — You type, hit Enter, message posts to `/v2/chat/stream` and streams back via SSE
 - **Real-time updates** — Tool calls, approvals, usage arrive as SSE events
 - **Server state always wins** — Active session, model, permissions come from `/health` and event streams, not cached locally
-- **Polling** — Header polls `/health` and `/v1/cost` every 10 seconds; the right panel polls `/v2/activity` on the same cadence for work outside this turn; changes in one tab appear in all others
+- **Polling** — Header polls `/health` and `/v1/cost` every 10 seconds; the right panel polls `/v2/activity` and the Routines rail and dialog poll `/v2/routines` on the same cadence, for work this tab does not cause; changes in one tab appear in all others
 
 One global session is held by the gateway (spec §2.3). Switching sessions in one tab affects all tabs.
 
