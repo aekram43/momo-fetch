@@ -6,6 +6,7 @@ import type {
   ContextUsageEvent,
   RoleEvent,
   SessionMessage,
+  ToolCallProgressEvent,
   ToolCallResultEvent,
   ToolCallStartEvent,
   UsageEvent,
@@ -21,6 +22,14 @@ export interface ToolCall {
   status: ToolCallStatus;
   preview: string | null;
   truncated: boolean;
+  /**
+   * What a still-running call is doing, from `tool_call_progress`. Null until
+   * the gateway sends one — which it only does for calls that outlast a quiet
+   * window, so short calls never carry it.
+   */
+  detail: string | null;
+  /** Seconds the call has been running, as of the last progress event. */
+  elapsedSecs: number | null;
 }
 
 export interface Message {
@@ -54,6 +63,7 @@ interface ChatState {
   onRole: (e: RoleEvent) => void;
   onText: (chunk: string) => void;
   onToolStart: (e: ToolCallStartEvent) => void;
+  onToolProgress: (e: ToolCallProgressEvent) => void;
   onToolResult: (e: ToolCallResultEvent) => void;
   onApprovalRequired: (e: ApprovalRequiredEvent) => void;
   onApprovalResolved: (approved: boolean) => void;
@@ -140,7 +150,33 @@ export const useChatStore = create<ChatState>((set) => ({
           status: "running",
           preview: null,
           truncated: false,
+          detail: null,
+          elapsedSecs: null,
         });
+      }),
+    })),
+
+  /**
+   * Keep a long call's card honest about what it is doing.
+   *
+   * Matched on id, falling back to the last running call of the same name: the
+   * gateway omits the id for providers that don't give one, and a card that
+   * silently ignored those events would be the same spinner as before.
+   */
+  onToolProgress: (e) =>
+    set((s) => ({
+      messages: withAssistant(s.messages, (m) => {
+        const idx = e.id
+          ? m.toolCalls.findIndex((c) => c.id === e.id)
+          : m.toolCalls.findLastIndex(
+              (c) => c.name === e.name && c.status === "running",
+            );
+        if (idx === -1) return;
+        m.toolCalls[idx] = {
+          ...m.toolCalls[idx],
+          detail: e.detail,
+          elapsedSecs: e.elapsed_secs,
+        };
       }),
     })),
 
@@ -161,6 +197,8 @@ export const useChatStore = create<ChatState>((set) => ({
             status: e.status === "error" ? "error" : "done",
             preview: e.output_preview,
             truncated: e.truncated,
+            detail: null,
+            elapsedSecs: null,
           });
         }
       }),
@@ -256,6 +294,9 @@ export const useChatStore = create<ChatState>((set) => ({
                 : ("done" as const),
             preview: t.result_preview,
             truncated: t.truncated,
+            // Progress is a live signal only; history has outcomes, not spinners.
+            detail: null,
+            elapsedSecs: null,
           })),
         })),
     }),

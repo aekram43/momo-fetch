@@ -51,6 +51,9 @@ export function useChatStream() {
             case "tool_call_start":
               s.onToolStart(ev.data);
               break;
+            case "tool_call_progress":
+              s.onToolProgress(ev.data);
+              break;
             case "tool_call_result":
               s.onToolResult(ev.data);
               break;

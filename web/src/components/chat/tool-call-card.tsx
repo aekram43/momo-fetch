@@ -36,7 +36,17 @@ export function ToolCallCard({ call }: { call: ToolCall }) {
         {/* Tool name is machine speech. */}
         <code className="font-mono text-xs text-ink">{call.name}</code>
         <span className={`font-mono text-[10px] ${s.text}`}>{s.label}</span>
-        <span className="ml-auto font-mono text-[10px] text-faint">
+        {/* Progress, when the call has one. A `task(...)` sub-agent works for
+            minutes inside a single call and says nothing on the model's stream
+            — without this line the card is a spinner, and a spinner reads the
+            same whether the work is going fine or the process is wedged. */}
+        {call.status === "running" && call.elapsedSecs !== null && (
+          <span className="min-w-0 truncate font-mono text-[10px] text-faint">
+            {call.detail ? `${call.detail} · ` : ""}
+            {formatElapsed(call.elapsedSecs)}
+          </span>
+        )}
+        <span className="ml-auto shrink-0 font-mono text-[10px] text-faint">
           {open ? "−" : "+"}
         </span>
       </button>
@@ -73,6 +83,13 @@ export function ToolCallCard({ call }: { call: ToolCall }) {
       )}
     </div>
   );
+}
+
+/** "4m 10s" rather than "250s" — the unit someone waiting actually thinks in. */
+function formatElapsed(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  const [m, rest] = [Math.floor(secs / 60), secs % 60];
+  return rest === 0 ? `${m}m` : `${m}m ${rest}s`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

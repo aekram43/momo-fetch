@@ -3,8 +3,10 @@
 //! Provides a `Task` tool that delegates subtasks to isolated sub-agents
 //! using adk-rust's `SequentialAgent` and `ParallelAgent`.
 
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use adk_rust::agent::{LlmAgentBuilder, ParallelAgent, SequentialAgent};
 use adk_rust::prelude::{Agent, Content, EventStream, Part};
@@ -60,6 +62,146 @@ fn with_status(f: impl FnOnce(&crate::cli::status::StatusSender)) {
             f(sender);
         }
     }
+}
+
+// ─── Live view of running sub-agents ──────────────────────────────
+//
+// The status channel above is a *log*: one consumer drains it, each event is
+// seen once, and whoever wasn't listening at the time learns nothing. That is
+// the wrong shape for the question "what is this `task(...)` call doing right
+// now" — which the gateway asks on a timer, from another task entirely, long
+// after the events went past.
+//
+// So progress is also kept as state. One entry per in-flight run, updated in
+// place, readable by anyone at any moment. The two are not redundant: the REPL
+// wants the log, a status line wants the snapshot.
+
+static ACTIVE_RUNS: Mutex<BTreeMap<u64, RunState>> = Mutex::new(BTreeMap::new());
+static NEXT_RUN_ID: AtomicU64 = AtomicU64::new(1);
+
+struct RunState {
+    description: String,
+    depth: u32,
+    started: Instant,
+    /// Name of the sub-agent currently emitting — which subtask of the run.
+    stage: Option<String>,
+    tool_calls: usize,
+    last_tool: Option<String>,
+}
+
+/// A snapshot of one sub-agent run in flight.
+#[derive(Debug, Clone)]
+pub struct SubAgentRun {
+    pub description: String,
+    pub depth: u32,
+    pub stage: Option<String>,
+    pub tool_calls: usize,
+    pub last_tool: Option<String>,
+    pub elapsed_secs: u64,
+}
+
+impl SubAgentRun {
+    /// One line saying what the run is *doing*, not that it exists.
+    ///
+    /// "still working" is what a hung process says too. The tool-call count is
+    /// the part that separates the two, so it is always present — a number that
+    /// moves between two readings is the whole signal.
+    pub fn label(&self) -> String {
+        let mut label = String::new();
+        // A sub-agent that spawned its own is a different situation from a
+        // top-level one taking a while, and the two lines otherwise read alike.
+        if self.depth > 1 {
+            label.push_str(&format!("L{} ", self.depth));
+        }
+        label.push_str(&truncate_chars(&self.description, 60));
+        if let Some(stage) = &self.stage {
+            label.push_str(" · ");
+            label.push_str(stage);
+        }
+        if let Some(tool) = &self.last_tool {
+            label.push_str(" · ");
+            label.push_str(tool);
+        }
+        label.push_str(&format!(
+            " · {} tool call{}",
+            self.tool_calls,
+            if self.tool_calls == 1 { "" } else { "s" }
+        ));
+        label
+    }
+}
+
+/// Every sub-agent run in flight right now, oldest first.
+///
+/// Empty when no `task(...)` call is running, which is the common case.
+pub fn active_sub_agents() -> Vec<SubAgentRun> {
+    let Ok(runs) = ACTIVE_RUNS.lock() else {
+        return Vec::new();
+    };
+    runs.values()
+        .map(|run| SubAgentRun {
+            description: run.description.clone(),
+            depth: run.depth,
+            stage: run.stage.clone(),
+            tool_calls: run.tool_calls,
+            last_tool: run.last_tool.clone(),
+            elapsed_secs: run.started.elapsed().as_secs(),
+        })
+        .collect()
+}
+
+/// Registration handle for one run.
+///
+/// **Deregistration is `Drop`, not a call at the end of the loop.** A run that
+/// blows its `timeout_secs` is cancelled by dropping the future mid-await, so
+/// any cleanup written after the loop would simply never execute and the run
+/// would be listed as active forever.
+struct RunHandle(u64);
+
+impl RunHandle {
+    fn start(description: &str, depth: u32) -> Self {
+        let id = NEXT_RUN_ID.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut runs) = ACTIVE_RUNS.lock() {
+            runs.insert(
+                id,
+                RunState {
+                    description: description.to_string(),
+                    depth,
+                    started: Instant::now(),
+                    stage: None,
+                    tool_calls: 0,
+                    last_tool: None,
+                },
+            );
+        }
+        Self(id)
+    }
+
+    fn update(&self, f: impl FnOnce(&mut RunState)) {
+        if let Ok(mut runs) = ACTIVE_RUNS.lock() {
+            if let Some(run) = runs.get_mut(&self.0) {
+                f(run);
+            }
+        }
+    }
+}
+
+impl Drop for RunHandle {
+    fn drop(&mut self) {
+        if let Ok(mut runs) = ACTIVE_RUNS.lock() {
+            runs.remove(&self.0);
+        }
+    }
+}
+
+/// Cut to `max` characters — characters, not bytes, so a Thai description does
+/// not panic on a split codepoint.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(max.saturating_sub(1)).collect();
+    format!("{head}…")
 }
 
 /// Maximum recursion depth for sub-agents.
@@ -264,7 +406,8 @@ pub async fn task(args: TaskArgs) -> Result<Value, AdkError> {
             .await
             .map_err(|e| AdkError::tool(format!("sub-agent execution failed: {e}")))?;
 
-        let response = collect_final_response(stream, &args.description).await;
+        let response =
+            collect_final_response(stream, &args.description, child_depth).await;
 
         response
     })
@@ -327,22 +470,40 @@ fn build_sub_agent(
 async fn collect_final_response(
     mut stream: EventStream,
     task_description: &str,
+    depth: u32,
 ) -> Result<Value, AdkError> {
     let mut tool_call_count: usize = 0;
     let mut text_parts: Vec<String> = Vec::new();
 
     // Emit status events for sub-agent progress
     with_status(|s| s.started("task", &format!("running: {task_description}")));
+    let handle = RunHandle::start(task_description, depth);
 
     while let Some(event_result) = stream.next().await {
         match event_result {
             Ok(event) => {
+                // Which subtask is speaking. A sequential run walks through
+                // several sub-agents inside this one tool call, and "which one"
+                // is the difference between progress and a stuck first step.
+                if !event.author.is_empty() {
+                    let author = event.author.clone();
+                    handle.update(|run| {
+                        if run.stage.as_deref() != Some(author.as_str()) {
+                            run.stage = Some(author);
+                        }
+                    });
+                }
+
                 if let Some(content) = event.content() {
                     for part in &content.parts {
                         match part {
                             Part::FunctionCall { name, .. } => {
                                 tool_call_count += 1;
                                 tracing::debug!("sub-agent tool call: {name}");
+                                handle.update(|run| {
+                                    run.tool_calls = tool_call_count;
+                                    run.last_tool = Some(name.clone());
+                                });
                                 with_status(|s| {
                                     s.progress(
                                         "task",
@@ -549,5 +710,55 @@ mod tests {
         let ctx = get_task_context().unwrap();
         assert_eq!(ctx.depth, 2);
         clear_task_context();
+    }
+
+    /// The registry is process-global, so these run under one test to keep the
+    /// "nothing else is running" assertions true.
+    #[test]
+    fn active_sub_agents_tracks_a_run_and_forgets_it() {
+        assert!(active_sub_agents().is_empty());
+
+        {
+            let handle = RunHandle::start("run E2E on testnet", 1);
+            handle.update(|run| {
+                run.stage = Some("subtask-2-place-order".into());
+                run.tool_calls = 12;
+                run.last_tool = Some("shell_exec".into());
+            });
+
+            let runs = active_sub_agents();
+            assert_eq!(runs.len(), 1);
+            assert_eq!(
+                runs[0].label(),
+                "run E2E on testnet · subtask-2-place-order · shell_exec · 12 tool calls"
+            );
+        }
+
+        // Dropped, not "completed": a run cancelled by its own timeout never
+        // reaches the end of the loop, and must still leave the registry clean.
+        assert!(active_sub_agents().is_empty());
+    }
+
+    #[test]
+    fn label_says_one_tool_call_and_marks_nesting() {
+        let run = SubAgentRun {
+            description: "check positions".into(),
+            depth: 2,
+            stage: None,
+            tool_calls: 1,
+            last_tool: None,
+            elapsed_secs: 30,
+        };
+        assert_eq!(run.label(), "L2 check positions · 1 tool call");
+    }
+
+    #[test]
+    fn truncate_chars_cuts_on_characters_not_bytes() {
+        // Byte slicing would panic here; every one of these is 3 bytes.
+        let thai = "ทดสอบระบบเทรดบนเทสต์เน็ตให้ครบทุกขั้นตอนตั้งแต่ต้นจนจบให้เรียบร้อยที่สุด";
+        let cut = truncate_chars(thai, 10);
+        assert_eq!(cut.chars().count(), 10);
+        assert!(cut.ends_with('…'));
+        assert_eq!(truncate_chars("short", 10), "short");
     }
 }

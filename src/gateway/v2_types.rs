@@ -65,6 +65,7 @@ pub enum V2StreamEvent {
     Role(RolePayload),
     Text(TextPayload),
     ToolCallStart(ToolCallStartPayload),
+    ToolCallProgress(ToolCallProgressPayload),
     ToolCallResult(ToolCallResultPayload),
     ApprovalRequired(ApprovalRequiredPayload),
     ApprovalResolved(ApprovalResolvedPayload),
@@ -82,6 +83,7 @@ impl V2StreamEvent {
             Self::Role(_) => "role",
             Self::Text(_) => "text",
             Self::ToolCallStart(_) => "tool_call_start",
+            Self::ToolCallProgress(_) => "tool_call_progress",
             Self::ToolCallResult(_) => "tool_call_result",
             Self::ApprovalRequired(_) => "approval_required",
             Self::ApprovalResolved(_) => "approval_resolved",
@@ -123,6 +125,23 @@ pub struct ToolCallStartPayload {
     pub id: Option<String>,
     pub name: String,
     pub args: serde_json::Value,
+}
+
+/// A tool call is still running.
+///
+/// Emitted on a timer while a call is in flight, never as part of the model's
+/// own stream. A tool is a black box to that stream — `task(...)` runs a whole
+/// sub-agent inside one call and emits nothing until it returns — so without
+/// this the UI shows a spinner and no way to tell work from a hang.
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolCallProgressPayload {
+    pub id: Option<String>,
+    pub name: String,
+    /// What the call is doing, when the tool can say. Sub-agent runs report
+    /// their current subtask, last tool and tool-call count; everything else
+    /// has only the elapsed time.
+    pub detail: Option<String>,
+    pub elapsed_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

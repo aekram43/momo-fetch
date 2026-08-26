@@ -56,6 +56,22 @@ export interface ToolCallStartEvent {
   args: unknown;
 }
 
+/**
+ * A tool call is still running.
+ *
+ * Emitted on a timer by the gateway, not by the model — a tool is a black box
+ * to the model's stream, and `task(...)` runs a whole sub-agent inside one call
+ * without emitting anything until it returns. `detail` is present when the tool
+ * can say what it is doing; sub-agent runs report their subtask, last tool and
+ * tool-call count.
+ */
+export interface ToolCallProgressEvent {
+  id: string;
+  name: string;
+  detail: string | null;
+  elapsed_secs: number;
+}
+
 export interface ToolCallResultEvent {
   id: string;
   name: string;
@@ -133,6 +149,7 @@ export type StreamEvent =
   | { type: "role"; data: RoleEvent }
   | { type: "text"; data: TextEvent }
   | { type: "tool_call_start"; data: ToolCallStartEvent }
+  | { type: "tool_call_progress"; data: ToolCallProgressEvent }
   | { type: "tool_call_result"; data: ToolCallResultEvent }
   | { type: "approval_required"; data: ApprovalRequiredEvent }
   | { type: "approval_resolved"; data: ApprovalResolvedEvent }
@@ -148,6 +165,7 @@ export const sseEventNames = [
   "role",
   "text",
   "tool_call_start",
+  "tool_call_progress",
   "tool_call_result",
   "approval_required",
   "approval_resolved",

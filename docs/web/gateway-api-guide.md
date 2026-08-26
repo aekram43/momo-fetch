@@ -113,6 +113,7 @@ The parser joins multi-line data with newlines (per the SSE spec) and yields typ
 | **role** | session_id, model, provider, agent, turn_id | Once per turn, first |
 | **text** | content (string chunk) | Streaming, as tokens arrive |
 | **tool_call_start** | id, name, args | Once per tool call, before execution |
+| **tool_call_progress** | id, name, detail?, elapsed_secs | Every 15s while a call is still running. `detail` is present for `task` — the sub-agent's subtask, last tool and tool-call count |
 | **tool_call_result** | id, name, status ("done" or "error"), output_preview, truncated | Once per tool call, after result |
 | **approval_required** | turn_id, call_id, name, args, destructive, category, sticky, expires_at | When a tool needs approval |
 | **approval_resolved** | call_id, approved, reason ("user", "timeout", "disconnect") | After approval decision |
@@ -122,6 +123,8 @@ The parser joins multi-line data with newlines (per the SSE spec) and yields typ
 | **error** | code, message, details? | On error, may end turn |
 | **done** | turn_id, stop_reason ("complete", "error", "interrupted") | At turn end, always last |
 | **unknown** | name (event type), raw (data string) | Forward compat: unknown types are surfaced |
+
+**Silence policy.** A turn is abandoned with an `error` event after 240s of provider silence — but that budget is only spent while **no tool call is in flight**. A tool is a black box to the model's stream (`task(...)` runs a whole sub-agent inside one call and emits nothing until it returns), so a running call is reported with `tool_call_progress` and waited on indefinitely. The tool's own timeout bounds its work; `/v2/chat/interrupt` is the way out.
 
 Types are defined in `web/src/lib/types.ts` and must mirror `src/gateway/v2_types.rs` in the Rust harness. Type drift (new events added to gateway but not frontend) fails silently unless the frontend surfaces unknown events — which it does.
 

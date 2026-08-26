@@ -1,6 +1,6 @@
 //! Handlers for the `/v2` API — the rich surface consumed by the web UI.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use adk_rust::futures::StreamExt;
 use adk_rust::{EventStream, Part};
@@ -25,10 +25,17 @@ use crate::harness::Harness;
 const OUTPUT_PREVIEW_LIMIT: usize = 2048;
 /// Buffer between the turn task and the SSE writer.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
-/// How long to wait for the next event from the provider before giving up.
-const STREAM_EVENT_TIMEOUT_SECS: u64 = 120;
-/// Consecutive provider timeouts tolerated before the turn is abandoned.
-const MAX_CONSECUTIVE_TIMEOUTS: u32 = 2;
+/// How often a quiet stream wakes up to look around.
+///
+/// Not a deadline — just the resolution at which "nothing has arrived" becomes
+/// a decision: report a running tool, or notice a provider that is gone.
+const STREAM_TICK_SECS: u64 = 5;
+/// Silence tolerated **with nothing running** before the turn is abandoned.
+///
+/// Only ever measured while no tool call is in flight. See `consume_leg`.
+const PROVIDER_SILENCE_SECS: u64 = 240;
+/// Gap between `tool_call_progress` events for a call that is still running.
+const PROGRESS_EVERY_SECS: u64 = 15;
 
 // ── Guards ─────────────────────────────────────────────────────────────────
 
@@ -400,14 +407,66 @@ struct LegOutcome {
     client_gone: bool,
 }
 
+/// What to do about a stream that has gone quiet.
+#[derive(Debug, PartialEq, Eq)]
+enum Quiet {
+    /// Keep waiting, say nothing.
+    Wait,
+    /// Emit `tool_call_progress` for every call still in flight.
+    Report,
+    /// The provider is gone. Interrupt and end the leg with an error.
+    Abandon,
+}
+
+/// The rule that used to be wrong, in one place, with no `Harness` in the way.
+///
+/// `has_in_flight` is the whole difference: silence with a tool running is that
+/// tool working, and no amount of it means the provider died.
+fn quiet_action(has_in_flight: bool, silence: Duration, since_progress: Duration) -> Quiet {
+    if has_in_flight {
+        return if since_progress.as_secs() >= PROGRESS_EVERY_SECS {
+            Quiet::Report
+        } else {
+            Quiet::Wait
+        };
+    }
+    if silence.as_secs() >= PROVIDER_SILENCE_SECS {
+        Quiet::Abandon
+    } else {
+        Quiet::Wait
+    }
+}
+
+/// A tool call this leg has started and not yet seen a response for.
+struct InFlight {
+    id: Option<String>,
+    name: String,
+    started: Instant,
+}
+
 /// Drain one event stream, translating adk events into V2 SSE events.
+///
+/// **A quiet stream is not a failure.** This used to abandon the turn after two
+/// silent 120s windows, which was wrong in the one case that matters most: a
+/// tool call is a black box to this stream, and `task(...)` runs an entire
+/// sub-agent — minutes of real work, its own `timeout_secs` — inside a single
+/// call that emits nothing here until it returns. The watchdog fired at 240s,
+/// called `interrupt()`, and killed a sub-agent that was working perfectly, with
+/// "No response from the provider" as the explanation. The REPL was fixed for
+/// this; the gateway was not, so the web UI was the last place it could happen.
+///
+/// So silence is only fatal when *nothing is running*. While a call is in
+/// flight, the wait is reported as progress instead and the turn keeps going —
+/// the tool's own timeout bounds its work, and the stop button is the way out.
 async fn consume_leg(
     harness: &Harness,
     stream: &mut EventStream,
     tx: &mpsc::Sender<V2StreamEvent>,
 ) -> LegOutcome {
     let mut outcome = LegOutcome::default();
-    let mut consecutive_timeouts = 0u32;
+    let mut in_flight: Vec<InFlight> = Vec::new();
+    let mut last_event = Instant::now();
+    let mut last_progress = Instant::now();
 
     macro_rules! send {
         ($event:expr) => {
@@ -419,26 +478,41 @@ async fn consume_leg(
     }
 
     loop {
-        let next = tokio::time::timeout(
-            Duration::from_secs(STREAM_EVENT_TIMEOUT_SECS),
-            stream.next(),
-        )
-        .await;
+        let next =
+            tokio::time::timeout(Duration::from_secs(STREAM_TICK_SECS), stream.next()).await;
 
         let event = match next {
             Err(_) => {
-                consecutive_timeouts += 1;
-                if consecutive_timeouts >= MAX_CONSECUTIVE_TIMEOUTS {
-                    harness.interrupt();
-                    outcome.error = Some(format!(
-                        "No response from {} ({}) after {}s.",
-                        harness.provider_mgr().current_provider(),
-                        harness.provider_mgr().current_model_name(),
-                        STREAM_EVENT_TIMEOUT_SECS * MAX_CONSECUTIVE_TIMEOUTS as u64,
-                    ));
-                    return outcome;
+                let now = Instant::now();
+                match quiet_action(
+                    !in_flight.is_empty(),
+                    now.duration_since(last_event),
+                    now.duration_since(last_progress),
+                ) {
+                    Quiet::Wait => continue,
+                    Quiet::Report => {
+                        last_progress = now;
+                        for call in &in_flight {
+                            send!(V2StreamEvent::ToolCallProgress(ToolCallProgressPayload {
+                                id: call.id.clone(),
+                                name: call.name.clone(),
+                                detail: progress_detail(&call.name),
+                                elapsed_secs: now.duration_since(call.started).as_secs(),
+                            }));
+                        }
+                        continue;
+                    }
+                    Quiet::Abandon => {
+                        harness.interrupt();
+                        outcome.error = Some(format!(
+                            "No response from {} ({}) after {}s.",
+                            harness.provider_mgr().current_provider(),
+                            harness.provider_mgr().current_model_name(),
+                            PROVIDER_SILENCE_SECS,
+                        ));
+                        return outcome;
+                    }
                 }
-                continue;
             }
             Ok(None) => return outcome,
             Ok(Some(Err(e))) => {
@@ -446,7 +520,7 @@ async fn consume_leg(
                 return outcome;
             }
             Ok(Some(Ok(event))) => {
-                consecutive_timeouts = 0;
+                last_event = Instant::now();
                 event
             }
         };
@@ -481,6 +555,15 @@ async fn consume_leg(
                         }));
                     }
                     Part::FunctionCall { name, args, id, .. } => {
+                        in_flight.push(InFlight {
+                            id: id.clone(),
+                            name: name.clone(),
+                            started: Instant::now(),
+                        });
+                        // Give the call its full quiet window before the first
+                        // progress line, rather than one left over from the
+                        // call before it.
+                        last_progress = Instant::now();
                         send!(V2StreamEvent::ToolCallStart(ToolCallStartPayload {
                             id: id.clone(),
                             name: name.clone(),
@@ -491,6 +574,15 @@ async fn consume_leg(
                         function_response,
                         id,
                     } => {
+                        // Match on id where there is one; adk omits it for some
+                        // providers, and then the name is all we have.
+                        let done = in_flight.iter().position(|c| match (&c.id, id) {
+                            (Some(a), Some(b)) => a == b,
+                            _ => c.name == function_response.name,
+                        });
+                        if let Some(idx) = done {
+                            in_flight.remove(idx);
+                        }
                         let (preview, truncated) = preview_of(&function_response.response);
                         let status = if is_error_response(&function_response.response) {
                             "error"
@@ -524,6 +616,27 @@ async fn consume_leg(
             return outcome;
         }
     }
+}
+
+/// What to say about a call that is still running.
+///
+/// Only `task` can answer: it keeps a live snapshot of every sub-agent run, and
+/// the tool-call count in there is what separates work from a hang. Every other
+/// tool is opaque from here — the elapsed time on the event is the whole story.
+fn progress_detail(tool_name: &str) -> Option<String> {
+    if tool_name != "task" {
+        return None;
+    }
+    let runs = crate::tools::task::active_sub_agents();
+    if runs.is_empty() {
+        return None;
+    }
+    Some(
+        runs.iter()
+            .map(|r| r.label())
+            .collect::<Vec<_>>()
+            .join(" / "),
+    )
 }
 
 /// Ask the sandbox whether a pending call looks destructive, for display.
@@ -1248,6 +1361,52 @@ mod tests {
         assert!(preview.len() <= OUTPUT_PREVIEW_LIMIT);
         // Would have panicked on a bad slice; this asserts we cut cleanly.
         assert!(preview.chars().all(|c| c == 'é'));
+    }
+
+    #[test]
+    fn progress_detail_is_only_offered_when_a_tool_can_answer() {
+        // shell_exec is opaque from here; the event still carries elapsed time.
+        assert_eq!(progress_detail("shell_exec"), None);
+        // And `task` says nothing when no sub-agent is actually running, rather
+        // than inventing a line for a call that has not started one.
+        assert_eq!(progress_detail("task"), None);
+    }
+
+    /// The regression this whole path exists for: a `task(...)` sub-agent given
+    /// `timeout_secs=600` used to be killed at 240s by the watchdog, and told
+    /// the user its provider had stopped responding.
+    #[test]
+    fn a_running_tool_is_never_read_as_a_dead_provider() {
+        let ten_minutes = Duration::from_secs(600);
+        assert_eq!(
+            quiet_action(true, ten_minutes, Duration::from_secs(0)),
+            Quiet::Wait
+        );
+        assert_eq!(
+            quiet_action(true, ten_minutes, Duration::from_secs(PROGRESS_EVERY_SECS)),
+            Quiet::Report
+        );
+    }
+
+    #[test]
+    fn a_silent_provider_with_nothing_running_still_ends_the_turn() {
+        assert_eq!(
+            quiet_action(
+                false,
+                Duration::from_secs(PROVIDER_SILENCE_SECS),
+                Duration::from_secs(0)
+            ),
+            Quiet::Abandon
+        );
+        // One tick short of the budget is still just a slow model.
+        assert_eq!(
+            quiet_action(
+                false,
+                Duration::from_secs(PROVIDER_SILENCE_SECS - STREAM_TICK_SECS),
+                Duration::from_secs(0)
+            ),
+            Quiet::Wait
+        );
     }
 
     #[test]

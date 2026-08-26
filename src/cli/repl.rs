@@ -796,10 +796,20 @@ async fn consume_stream(
                 // one control, held by the person watching, rather than a
                 // guess made on their behalf.
                 let what = if in_tool_call {
-                    format!(
-                        "{} is still working",
-                        current_tool_label.as_deref().unwrap_or("a tool"),
-                    )
+                    let tool = current_tool_label.as_deref().unwrap_or("a tool");
+                    // "still working" is also what a hung process says. When a
+                    // sub-agent is behind the call it can do better: name the
+                    // subtask and the tool-call count, which move between two
+                    // of these lines if anything is actually happening.
+                    let runs = crate::tools::task::active_sub_agents();
+                    match runs.first() {
+                        Some(run) => format!(
+                            "{tool} — {} ({} in)",
+                            run.label(),
+                            fmt_duration(run.elapsed_secs),
+                        ),
+                        None => format!("{tool} is still working"),
+                    }
                 } else {
                     format!(
                         "still generating on {}",
