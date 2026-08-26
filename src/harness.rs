@@ -90,7 +90,12 @@ impl Harness {
 
         let current_session_id = if current_session_id.is_empty() {
             let session = session_mgr.create_session(None).await?;
-            session.id().to_string()
+            let id = session.id().to_string();
+            // Stamped at creation, not at the first turn: a worker that dies
+            // before it says anything still has to be identifiable in the list.
+            // A resumed session keeps whatever stamp it was born with.
+            session_mgr.set_origin(&id, &config.origin).await;
+            id
         } else {
             // Verify the session exists
             session_mgr.get_session(&current_session_id).await?;
@@ -597,6 +602,16 @@ impl Harness {
             .clone();
 
         self.config.agent_name = Some(name.to_string());
+        // Sessions started from here on are specialist sessions. A process that
+        // is already something narrower — a team worker, a routine run — keeps
+        // its origin: switching agent inside one of those does not turn it into
+        // a chat that picked a specialist.
+        if matches!(
+            self.config.origin,
+            crate::session::SessionOrigin::Chat | crate::session::SessionOrigin::Agent(_)
+        ) {
+            self.config.origin = crate::session::SessionOrigin::Agent(name.to_string());
+        }
         self.rebuild_runner_with_agent(Some(&agent_def))?;
 
         // Set orchestrator context if the new agent has orchestration capability
@@ -631,6 +646,9 @@ impl Harness {
     /// Rebuilds the runner with the default system prompt.
     pub fn clear_agent(&mut self) -> anyhow::Result<()> {
         self.config.agent_name = None;
+        if matches!(self.config.origin, crate::session::SessionOrigin::Agent(_)) {
+            self.config.origin = crate::session::SessionOrigin::Chat;
+        }
         self.rebuild_runner_with_agent(None)?;
         crate::agent::orchestrator::clear_orchestrator_context();
         Ok(())
@@ -785,6 +803,9 @@ impl Harness {
     pub async fn new_session(&mut self) -> anyhow::Result<String> {
         let session = self.session_mgr.create_session(None).await?;
         self.current_session_id = session.id().to_string();
+        self.session_mgr
+            .set_origin(&self.current_session_id, &self.config.origin)
+            .await;
         self.cost_tracker
             .set_session_context(
                 &self.current_session_id,

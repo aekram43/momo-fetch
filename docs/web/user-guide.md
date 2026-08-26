@@ -40,6 +40,11 @@ The left panel scrolls vertically and contains:
 Each row shows:
 - First 8 characters of the session ID (full ID in title)
 - Event count (number of messages), or nothing if unknown
+- A mark for sessions that did not begin as a chat: **◆** started as a named
+  agent, **▣** a team worker, **◷** a routine run. Every momo-fetch process
+  writes into one sessions table, so this list holds workers and scheduled runs
+  beside your conversations — hover for which one it was. No mark means someone
+  typed it.
 
 Controls:
 - **"+ new"** button — Create a new session
@@ -69,12 +74,19 @@ a worker count in the header, and a row per worker with a state dot, the name,
 messages are queued for it. `N waiting for you` appears when the lead has unread
 mail.
 
-When no team is running, it lists the configs in `.harness/teams/` and the
-command that starts one.
+When no team is running, it lists the configs in `.harness/teams/`, each with a
+**start** button on hover. Each worker gets its own tmux pane, and a worktree
+when the config asks for one.
 
-Read-only, deliberately. Starting a team needs a config name and stopping one
-removes worktrees and deletes branches — neither belongs behind a single click
-in a 288px rail.
+While one is running the section offers **stop team**, which asks first — that
+click removes every worktree and deletes each worker branch, so merge anything
+you want to keep before confirming. A worker whose pane died shows **restart**
+next to its row; a healthy worker does not, because restarting one would kill
+work in progress.
+
+If a note appears under the section — *"tmux not found — the team will be
+recorded but no worker process starts"* — read it. It is the difference between
+a team and a row in a file.
 
 Not the same question as the right panel's **Running elsewhere**: that is what
 is in flight this minute across teams *and* routines. This is who is on the

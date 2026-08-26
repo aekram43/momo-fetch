@@ -34,6 +34,12 @@ pub struct HarnessConfig {
     /// never be answered, so `auto` pre-approves its mutating tools up front —
     /// see `FilesystemSandbox::headless_auto_approvals`.
     pub headless: bool,
+    /// What started this process, stamped onto any session it creates.
+    ///
+    /// Derived from the flags rather than passed around: `--team-worker` is a
+    /// worker, `--origin` is whatever spawned it (routines use this), `-a` is a
+    /// specialist. Everything else is a person in a chat.
+    pub origin: crate::session::SessionOrigin,
 }
 
 /// Settings file schema (both global and project-level).
@@ -151,6 +157,26 @@ impl HarnessConfig {
     /// 2. Project-level `.harness/settings.json`
     /// 3. Global `~/.config/momo-fetch/settings.json`
     /// 4. Defaults (lowest)
+    /// Which of the four ways this process was started.
+    ///
+    /// Order matters: a team worker is launched with `-a <agent>` too, and a
+    /// routine assigned to a specialist likewise. The narrower fact wins, or
+    /// every worker and every scheduled run would be filed as "a specialist
+    /// someone started", which is the thing this is meant to tell apart.
+    fn origin_from_args(args: &CliArgs) -> crate::session::SessionOrigin {
+        use crate::session::SessionOrigin;
+        if let Some(worker) = &args.team_worker {
+            return SessionOrigin::Worker(worker.clone());
+        }
+        if let Some(raw) = &args.origin {
+            return SessionOrigin::parse(raw);
+        }
+        match &args.agent {
+            Some(agent) => SessionOrigin::Agent(agent.clone()),
+            None => SessionOrigin::Chat,
+        }
+    }
+
     pub fn from_cli_args(args: &CliArgs) -> anyhow::Result<Self> {
         let project_path = match &args.project {
             Some(p) => PathBuf::from(p),
@@ -205,6 +231,7 @@ impl HarnessConfig {
                 .unwrap_or_default(),
             agent_name: args.agent.clone(),
             headless: args.prompt.is_some(),
+            origin: Self::origin_from_args(args),
             mailbox_path: match &args.mailbox {
                 Some(dir) => PathBuf::from(dir),
                 None => project_path.join(".harness").join("mailbox"),

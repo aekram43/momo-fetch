@@ -9,6 +9,9 @@ pub struct ContextBuilder {
     soul_md_content: Vec<(PathBuf, String)>,
     agents_md_content: Vec<(PathBuf, String)>,
     kms_toc: Option<String>,
+    /// How to hand work to a team or a routine, and what this project has of
+    /// each. See [`ContextBuilder::delegation_brief`].
+    delegation: String,
 }
 
 impl ContextBuilder {
@@ -70,6 +73,7 @@ impl ContextBuilder {
             soul_md_content,
             agents_md_content,
             kms_toc,
+            delegation: Self::delegation_brief(project_path),
         })
     }
 
@@ -86,6 +90,8 @@ impl ContextBuilder {
              to code you didn't change."
                 .into(),
         );
+
+        parts.push(self.delegation.clone());
 
         // SOUL.md (agent personality/identity — highest behavioral priority)
         for (path, content) in &self.soul_md_content {
@@ -111,6 +117,112 @@ impl ContextBuilder {
         }
 
         parts.join("\n\n")
+    }
+
+
+    /// What this project can hand work to, and how.
+    ///
+    /// **Why this is in the system prompt at all.** Teams and routines are
+    /// driven by `momo-fetch team …` / `momo-fetch routine …`, which print JSON
+    /// on stdout precisely so an agent can drive them through `shell_exec` —
+    /// but nothing ever told the agent they existed. Asked to "start the
+    /// squad", it reached for `task(...)`, the only delegation it knew about,
+    /// and reported the squad as started. Both front-ends had the commands; the
+    /// model was the one left out.
+    ///
+    /// The names are read once, here, so the agent knows what exists without
+    /// spending a tool call to find out. They go stale the moment someone adds
+    /// a config, which is why the text says `list` is the live answer.
+    fn delegation_brief(project_path: &Path) -> String {
+        let harness = project_path.join(".harness");
+        let teams = Self::config_names(&harness.join("teams"), &["json", "yml", "yaml"]);
+        let routines = Self::routine_names(&harness.join("routines"));
+
+        let mut brief = String::from(
+            "\n--- Work outside this turn ---\n\
+             This project can run work that outlives your turn. Drive it with `shell_exec`; \
+             each command prints one JSON document on stdout.\n\
+             \n\
+             \x20 momo-fetch team list                 configs, and which one is active\n\
+             \x20 momo-fetch team start <name>         start one — a tmux pane per worker\n\
+             \x20 momo-fetch team status               workers, their state, mailbox backlog\n\
+             \x20 momo-fetch team send <worker> <text> message a standby worker\n\
+             \x20 momo-fetch team stop                 DESTRUCTIVE: removes worktrees, deletes branches\n\
+             \x20 momo-fetch routine list|show|add|run|enable|disable\n",
+        );
+
+        brief.push_str(&format!(
+            "\nTeams defined here: {}\nRoutines defined here: {}\n\
+             (Read when this session started — `list` is the live answer.)\n",
+            Self::name_list(&teams, "none — configs live in .harness/teams/"),
+            Self::name_list(&routines, "none"),
+        ));
+
+        brief.push_str(
+            "\nA team is not the `task` tool. `task(...)` runs sub-agents inside this turn \
+             and is over when the turn is; a team is separate processes that keep working \
+             after it. If you are asked to start a squad, a team or a worker, run the command \
+             — do not substitute `task`, and do not report a team as started unless one of \
+             these commands said so.\n",
+        );
+
+        brief
+    }
+
+    /// At most twelve names — enough to recognise what exists, not enough for a
+    /// project with a hundred configs to crowd out the rest of the prompt.
+    fn name_list(names: &[String], empty: &str) -> String {
+        if names.is_empty() {
+            return empty.to_string();
+        }
+        let shown: Vec<&str> = names.iter().take(12).map(String::as_str).collect();
+        let mut out = shown.join(", ");
+        if names.len() > shown.len() {
+            out.push_str(&format!(", … ({} more)", names.len() - shown.len()));
+        }
+        out
+    }
+
+    /// File stems in `dir` with one of `extensions` — the name `team start`
+    /// takes.
+    fn config_names(dir: &Path, extensions: &[&str]) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .flatten()
+            .filter_map(|e| {
+                let path = e.path();
+                let ext = path.extension()?.to_str()?;
+                extensions.contains(&ext).then(|| {
+                    path.file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(str::to_string)
+                })?
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// A routine is addressed by its `name`, not by the id its file is called,
+    /// so the file stem would be the wrong thing to show.
+    fn routine_names(dir: &Path) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+            .filter_map(|e| {
+                let raw = std::fs::read_to_string(e.path()).ok()?;
+                let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+                value.get("name")?.as_str().map(str::to_string)
+            })
+            .collect();
+        names.sort();
+        names
     }
 
     /// Get the loaded context files (for logging).
@@ -146,6 +258,8 @@ impl ContextBuilder {
              to code you didn't change.",
             agent_def.name, desc
         ));
+
+        parts.push(self.delegation.clone());
 
         // SOUL.md (agent personality/identity)
         for (path, content) in &self.soul_md_content {
@@ -225,6 +339,40 @@ impl ContextBuilder {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn the_delegation_brief_names_what_the_project_has() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harness = tmp.path().join(".harness");
+        fs::create_dir_all(harness.join("teams")).unwrap();
+        fs::create_dir_all(harness.join("routines")).unwrap();
+        fs::write(harness.join("teams/yolo-trade-squad.json"), "{}").unwrap();
+        fs::write(harness.join("teams/notes.txt"), "not a config").unwrap();
+        // Addressed by `name`, filed under its id — the file stem is the wrong
+        // thing to put in front of the agent.
+        fs::write(
+            harness.join("routines/rt-abc123.json"),
+            r#"{"id":"rt-abc123","name":"Nightly digest"}"#,
+        )
+        .unwrap();
+
+        let brief = ContextBuilder::delegation_brief(tmp.path());
+        assert!(brief.contains("yolo-trade-squad"), "{brief}");
+        assert!(brief.contains("Nightly digest"), "{brief}");
+        assert!(!brief.contains("notes"), "{brief}");
+        assert!(!brief.contains("rt-abc123"), "{brief}");
+        assert!(brief.contains("momo-fetch team start"), "{brief}");
+        // The substitution that started all this.
+        assert!(brief.contains("do not substitute `task`"), "{brief}");
+    }
+
+    #[test]
+    fn a_project_with_no_teams_says_so_rather_than_listing_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let brief = ContextBuilder::delegation_brief(tmp.path());
+        assert!(brief.contains(".harness/teams/"), "{brief}");
+        assert!(brief.contains("Routines defined here: none"), "{brief}");
+    }
 
     #[test]
     fn test_discovers_agents_md_in_project_root() {

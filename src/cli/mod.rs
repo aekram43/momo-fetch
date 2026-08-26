@@ -70,6 +70,14 @@ pub struct CliArgs {
     #[arg(long = "team-worker", value_name = "NAME")]
     pub team_worker: Option<String>,
 
+    /// What started this process, stamped onto the session it creates:
+    /// `agent:<name>`, `worker:<name>` or `routine:<name>`.
+    ///
+    /// Set by the routine scheduler when it spawns a run. A person starting a
+    /// chat leaves it alone — an unstamped session *is* a chat.
+    #[arg(long = "origin", value_name = "LABEL")]
+    pub origin: Option<String>,
+
     /// Mailbox directory, overriding `<project>/.harness/mailbox`.
     ///
     /// A worker in a git worktree has its own `.harness/`, so without this it

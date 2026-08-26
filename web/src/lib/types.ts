@@ -346,6 +346,16 @@ export interface SessionInfo {
    * `GET /v2/sessions/{id}/messages` has the real number.
    */
   event_count: number | null;
+  /**
+   * What started this session: `"agent:<name>"`, `"worker:<name>"`,
+   * `"routine:<name>"` — or `null` for a chat somebody typed.
+   *
+   * Every momo-fetch process on the machine writes into one sessions table, so
+   * this list holds workers and scheduled runs beside the conversations. `null`
+   * is both "a chat" and "a session older than origins", which is the same
+   * thing as far as the reader is concerned.
+   */
+  origin: string | null;
 }
 
 export interface Health {
@@ -499,6 +509,22 @@ export interface TeamSummary {
   mailbox: { unread_by_recipient: Record<string, number> };
   started_at: string | null;
   project_path: string | null;
+}
+
+/**
+ * What `POST /v2/team/start|stop|restart` answers with.
+ *
+ * The shape is whatever the CLI prints for that action — a team payload for
+ * start, `{status, team_id, killed_sessions}` for stop — so this stays loose on
+ * purpose. `notes` is the narration the CLI puts on stderr and the one part the
+ * UI must never drop: "tmux not found — the team will be recorded but no worker
+ * process starts" is the difference between a team and a row in a file.
+ */
+export interface TeamActionResult {
+  status?: string;
+  team_id?: string | null;
+  notes?: string[];
+  [key: string]: unknown;
 }
 
 /**

@@ -375,20 +375,29 @@ Two system prompt methods:
 
 ### Default mode system prompt assembly order:
 1. Base instruction ("You are MOMO Fetch...")
-2. **SOUL.md** — `"--- Soul from {path} ---\n{content}"`
-3. AGENTS.md / CLAUDE.md — `"--- Context from {path} ---\n{content}"`
-4. KMS TOC
-5. Skill context (injected by Harness)
-6. Memory system context (injected by Memory Sidecar)
-
-### Agent-specific system prompt assembly order:
-1. Agent identity ("You are MOMO Fetch operating as **{name}** — {description}...")
-2. **SOUL.md** — `"--- Soul from {path} ---\n{content}"`
-3. **Agent personality** — `"--- Agent Personality: {name} ---\n{content}"`
+2. **Work outside this turn** — `delegation_brief()`: the `momo-fetch team …` /
+   `routine …` commands, the configs and routine names this project has, and the
+   line that `task(...)` is not a team
+3. **SOUL.md** — `"--- Soul from {path} ---\n{content}"`
 4. AGENTS.md / CLAUDE.md — `"--- Context from {path} ---\n{content}"`
 5. KMS TOC
 6. Skill context (injected by Harness)
 7. Memory system context (injected by Memory Sidecar)
+
+### Agent-specific system prompt assembly order:
+1. Agent identity ("You are MOMO Fetch operating as **{name}** — {description}...")
+2. **Work outside this turn** — as above
+3. **SOUL.md** — `"--- Soul from {path} ---\n{content}"`
+4. **Agent personality** — `"--- Agent Personality: {name} ---\n{content}"`
+5. AGENTS.md / CLAUDE.md — `"--- Context from {path} ---\n{content}"`
+6. KMS TOC
+7. Skill context (injected by Harness)
+8. Memory system context (injected by Memory Sidecar)
+
+The names in the brief are read when the session starts, so a config added
+afterwards is not in it — the text says `list` is the live answer, and the agent
+runs it. Adding the brief cost every turn a few hundred tokens and bought the
+one thing the agent could not do before: know that teams and routines exist.
 
 ---
 
@@ -424,6 +433,25 @@ concurrent agents still lost one. The wrapper retries the whole call up to
 `RETRY_ATTEMPTS` times with jittered backoff; the failed transaction is already
 rolled back when the error surfaces, so the retry starts clean. `is_locked()`
 decides what is retryable — anything else surfaces on the first attempt.
+### Origin: what started a session
+
+One consequence of that shared database: the session list holds team workers and
+scheduled runs beside the conversations, and they were indistinguishable — a
+column of hex ids that all looked like chats nobody remembered having.
+
+`SessionOrigin` (`Chat` | `Agent` | `Worker` | `Routine`) is stamped into session
+state under `momo.origin` **at creation**, not at the first turn — a worker that
+dies before it says anything still has to be identifiable. `Chat` writes
+nothing, so an ordinary chat and a session older than origins look alike, which
+is correct. It comes from the flags, narrowest first: `--team-worker` beats
+`--origin` (set by the routine spawner) beats `-a`, because a worker is launched
+with `-a` too and would otherwise be filed as "a specialist someone started".
+`switch_agent` updates it for later sessions unless the process is already
+something narrower.
+
+`/v1/sessions` returns it; the sidebar marks each kind with its own glyph
+(`web/src/lib/session-origin.ts`), never colour alone.
+
 - Each REPL session gets a UUID; events are auto-saved by adk-runner
 - `/sessions` lists past sessions, `/resume <id>` restores one
 - `/clear` deletes current session and creates a fresh one
@@ -704,6 +732,17 @@ Headless (`src/cli/team_cmd.rs`, JSON on stdout, exit `0`/`1`/`2`):
 instead of queueing a message nothing will read; `restart` relaunches one worker
 in a fresh pane and returns a team that had been written off as `completed` to
 `running`. There is no headless `merge` — merging has conflicts to resolve.
+
+Gateway (`src/gateway/team.rs`): `POST /v2/team/start|stop|restart` call the
+*same* functions in `team_cmd` and translate the exit code into a status — `2`
+into 409, a missing config into 404, anything else into 400. Three front-ends,
+one implementation; a second one would disagree the first time either changed.
+
+The agent reaches these the way the CLI intends — `shell_exec` — and knows they
+exist because `ContextBuilder::delegation_brief` puts them in the system prompt
+along with the names in `.harness/teams/` and `.harness/routines/`. Before that,
+asked to start a squad it reached for `task(...)`, the only delegation it had
+been told about, and reported the squad as started.
 
 ---
 

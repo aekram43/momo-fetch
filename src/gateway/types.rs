@@ -108,6 +108,9 @@ pub struct SessionInfo {
     /// every session showed before titles existed.
     pub title: Option<String>,
     pub event_count: Option<usize>,
+    /// What started the session: `"agent:<name>"`, `"worker:<name>"`,
+    /// `"routine:<name>"`, or `null` for a chat somebody typed.
+    pub origin: Option<String>,
 }
 
 /// Model info.

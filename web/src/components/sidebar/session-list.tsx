@@ -9,6 +9,7 @@ import {
   listSessions,
   renameSession,
 } from "@/lib/api-client";
+import { ORIGIN_MARKS, originKind, originLabel } from "@/lib/session-origin";
 import type { SessionInfo } from "@/lib/types";
 import { SkeletonRows } from "@/components/shared/skeleton";
 import { useChatStore } from "@/stores/chat-store";
@@ -187,9 +188,12 @@ export function SessionList() {
                     }`}
                     // The id is what the gateway and the logs call it, so it
                     // stays reachable even once there is a name.
-                    title={s.title ? `${s.title}\n${s.id}` : s.id}
+                    title={[s.title, s.id, originLabel(s.origin)]
+                      .filter(Boolean)
+                      .join("\n")}
                   >
                     {active && <span aria-hidden>▸ </span>}
+                    <OriginMark origin={s.origin} />
                     {/* An untitled session shows its id — the same thing it
                         showed before titles existed. Never invent a name. */}
                     {s.title ?? s.id.slice(0, 8)}
@@ -229,5 +233,21 @@ export function SessionList() {
         One session is active across every tab.
       </p>
     </section>
+  );
+}
+
+/**
+ * What started a session, when it wasn't a person typing.
+ *
+ * The glyph carries it, not the colour — see `session-origin.ts` for why, and
+ * for the mapping. The full origin is in the row's tooltip.
+ */
+function OriginMark({ origin }: { origin: string | null }) {
+  const mark = ORIGIN_MARKS[originKind(origin)];
+  if (!mark) return null;
+  return (
+    <span className={`mr-1 font-mono ${mark.color}`} aria-hidden>
+      {mark.glyph}
+    </span>
   );
 }

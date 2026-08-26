@@ -21,6 +21,9 @@ pub struct SpawnRequest<'a> {
     pub binary: &'a Path,
     /// `-a <name>` for a specialist assignee; `None` runs the default agent.
     pub agent: Option<&'a str>,
+    /// The routine this run belongs to, so the session it creates is filed as
+    /// scheduled work rather than as somebody's chat.
+    pub routine_name: &'a str,
     pub permission: &'a str,
     pub prompt: &'a str,
     /// Where the script, log and exit file go.
@@ -87,16 +90,18 @@ fn build_script(req: &SpawnRequest<'_>, exit_path: &Path) -> String {
         Some(name) => format!(" -a '{}'", shell_quote(name)),
         None => String::new(),
     };
+    let origin_flag = format!(" --origin 'routine:{}'", shell_quote(req.routine_name));
     format!(
         "#!/bin/sh\n\
          # momo-fetch routine run {run_id} — safe to delete.\n\
          cd '{project}' || exit 127\n\
-         '{binary}'{agent_flag} --permission {permission} -p '{prompt}'\n\
+         '{binary}'{agent_flag}{origin_flag} --permission {permission} -p '{prompt}'\n\
          echo $? > '{exit}'\n",
         run_id = req.run_id,
         project = shell_quote(&req.project_path.display().to_string()),
         binary = shell_quote(&req.binary.display().to_string()),
         agent_flag = agent_flag,
+        origin_flag = origin_flag,
         permission = req.permission,
         prompt = shell_quote(req.prompt),
         exit = shell_quote(&exit_path.display().to_string()),
@@ -164,6 +169,7 @@ mod tests {
             project_path: Path::new("/tmp/project"),
             binary: Path::new("/usr/local/bin/momo-fetch"),
             agent,
+            routine_name: "Nightly digest",
             permission: "auto",
             prompt,
             run_dir,
@@ -180,6 +186,22 @@ mod tests {
         assert!(script.contains("echo $? > '/tmp/runs/run-abc.exit'"), "{script}");
         // No agent flag when the assignee is the default agent.
         assert!(!script.contains(" -a "), "{script}");
+    }
+
+    #[test]
+    fn the_run_says_which_routine_it_is_so_its_session_is_not_a_mystery_chat() {
+        let dir = Path::new("/tmp/runs");
+        let script = build_script(&req(dir, "do the thing", None), &exit_path(dir, "run-abc"));
+        assert!(script.contains("--origin 'routine:Nightly digest'"), "{script}");
+    }
+
+    #[test]
+    fn a_routine_name_with_a_quote_cannot_break_out_of_the_command() {
+        let dir = Path::new("/tmp/runs");
+        let mut request = req(dir, "x", None);
+        request.routine_name = "Aek's sweep";
+        let script = build_script(&request, &exit_path(dir, "run-abc"));
+        assert!(script.contains(r"--origin 'routine:Aek'\''s sweep'"), "{script}");
     }
 
     #[test]
@@ -219,6 +241,7 @@ mod tests {
             project_path: tmp.path(),
             binary: Path::new("/bin/echo"),
             agent: None,
+            routine_name: "probe",
             permission: "auto",
             prompt: "hello",
             run_dir: &run_dir,

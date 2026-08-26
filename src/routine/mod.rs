@@ -999,6 +999,7 @@ impl RoutineService {
                     project_path: &self.project_path,
                     binary: &momo_binary(),
                     agent: assignee.agent_name(),
+                    routine_name: &routine.name,
                     permission: &routine.permission,
                     prompt: &prompt,
                     run_dir: &run_dir,

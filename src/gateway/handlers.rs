@@ -279,6 +279,7 @@ pub async fn list_sessions(
             created_at: s.updated_at.to_string(),
             title: s.title,
             event_count: s.event_count,
+            origin: s.origin,
         })
         .collect();
 

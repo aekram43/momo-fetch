@@ -115,10 +115,15 @@ impl TeamAction {
 
 /// What a `team` command produced: exactly one JSON document, whatever
 /// narration belongs on stderr, and the process exit code.
-struct Outcome {
-    code: i32,
-    stdout: Value,
-    stderr: Vec<String>,
+///
+/// The gateway's `/v2/team/*` handlers run these same actions and translate
+/// this into HTTP — `code` into a status, `stdout` into the body — so the CLI
+/// and the web UI cannot drift into two different ideas of what starting a team
+/// means. That is the whole reason the fields are visible outside this module.
+pub(crate) struct Outcome {
+    pub(crate) code: i32,
+    pub(crate) stdout: Value,
+    pub(crate) stderr: Vec<String>,
 }
 
 impl Outcome {
@@ -159,6 +164,18 @@ pub fn run(action: &TeamAction, fallback_project: Option<&str>) -> i32 {
     outcome.code
 }
 
+/// Open the team state for a project, reporting failure the way an action does.
+pub(crate) fn open_service(project: &std::path::Path) -> Result<TeamService, Outcome> {
+    TeamService::new(project).map_err(|e| {
+        Outcome::error(
+            EXIT_ERROR,
+            "state_error",
+            format!("Could not open team state in {}: {e}", project.display()),
+            json!({ "project_path": project.display().to_string() }),
+        )
+    })
+}
+
 fn execute(action: &TeamAction, fallback_project: Option<&str>) -> Outcome {
     let project = match resolve_project(action.scope().project.as_deref().or(fallback_project)) {
         Ok(p) => p,
@@ -167,16 +184,9 @@ fn execute(action: &TeamAction, fallback_project: Option<&str>) -> Outcome {
         }
     };
 
-    let mut service = match TeamService::new(&project) {
+    let mut service = match open_service(&project) {
         Ok(s) => s,
-        Err(e) => {
-            return Outcome::error(
-                EXIT_ERROR,
-                "state_error",
-                format!("Could not open team state in {}: {e}", project.display()),
-                json!({ "project_path": project.display().to_string() }),
-            );
-        }
+        Err(outcome) => return outcome,
     };
 
     match action {
@@ -212,7 +222,7 @@ fn resolve_project(project: Option<&str>) -> anyhow::Result<PathBuf> {
 // ─── Actions ───────────────────────────────────────────────────────
 
 /// Send a message to a standby worker.
-fn send(service: &mut TeamService, worker: &str, msg_type: &str, body: &str) -> Outcome {
+pub(crate) fn send(service: &mut TeamService, worker: &str, msg_type: &str, body: &str) -> Outcome {
     // Refresh first: telling a crashed worker to do something is worth an
     // error, not a message that will never be read.
     service.status();
@@ -234,7 +244,7 @@ fn send(service: &mut TeamService, worker: &str, msg_type: &str, body: &str) -> 
 }
 
 /// Relaunch one worker.
-fn restart(service: &mut TeamService, worker: &str) -> Outcome {
+pub(crate) fn restart(service: &mut TeamService, worker: &str) -> Outcome {
     if service.state().is_none() {
         return Outcome::error(
             EXIT_ERROR,
@@ -261,7 +271,7 @@ fn restart(service: &mut TeamService, worker: &str) -> Outcome {
     }
 }
 
-fn start(service: &mut TeamService, name: &str) -> Outcome {
+pub(crate) fn start(service: &mut TeamService, name: &str) -> Outcome {
     if let Some(state) = service.state() {
         return Outcome::error(
             EXIT_CONFLICT,
@@ -326,7 +336,7 @@ fn start(service: &mut TeamService, name: &str) -> Outcome {
     }
 }
 
-fn stop(service: &mut TeamService, force: bool) -> Outcome {
+pub(crate) fn stop(service: &mut TeamService, force: bool) -> Outcome {
     if force {
         return match service.stop_force() {
             Ok(report) => {
@@ -384,7 +394,7 @@ fn stop(service: &mut TeamService, force: bool) -> Outcome {
     }
 }
 
-fn status(service: &mut TeamService) -> Outcome {
+pub(crate) fn status(service: &mut TeamService) -> Outcome {
     // Drains the mailbox into worker state and reconciles it with the exit
     // codes and panes on disk, exactly as `/team status` does.
     service.status();

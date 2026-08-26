@@ -32,6 +32,13 @@ const TITLE_KEY: &str = "momo.title";
 /// silently overwrite a name someone chose.
 const TITLE_LOCKED_KEY: &str = "momo.title_locked";
 
+/// Session-state key recording what started the session.
+///
+/// Absent means a person typed into a chat, which is almost every session and
+/// needs no stamp. Anything else is written once, at creation, by the process
+/// that owns the session — see [`SessionOrigin`].
+const ORIGIN_KEY: &str = "momo.origin";
+
 /// Titles are a sidebar label, not a summary. Long enough to tell two
 /// conversations apart, short enough not to wrap in a 288px rail.
 const TITLE_MAX: usize = 60;
@@ -51,6 +58,55 @@ pub fn title_from_prompt(text: &str) -> Option<String> {
         out.push('…');
     }
     Some(out)
+}
+
+/// Who started a session.
+///
+/// Every momo-fetch process on the machine writes into one sessions table, so
+/// the sidebar has always been a single list holding four different kinds of
+/// thing: what someone typed, what a specialist agent was started as, what a
+/// team worker is doing in its tmux pane, and what a routine fired at 03:00.
+/// They were indistinguishable — a column of hex ids, all looking like chats
+/// nobody remembered having.
+///
+/// Rendered as `"<kind>:<name>"`, and parsed back the same way, so the wire
+/// format is one string and the UI can key colour off the prefix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionOrigin {
+    /// A person at a prompt. Never written — absence *is* this value.
+    Chat,
+    /// Started as a specialist: `momo-fetch -a <name>`.
+    Agent(String),
+    /// A team worker in its pane: `momo-fetch --team-worker <name>`.
+    Worker(String),
+    /// One firing of a scheduled routine.
+    Routine(String),
+}
+
+impl SessionOrigin {
+    /// Parse `"agent:reviewer"`. Anything unrecognised — including a plain
+    /// `"chat"` — is [`SessionOrigin::Chat`], because an origin we cannot read
+    /// must not be shown as some other origin we can.
+    pub fn parse(raw: &str) -> Self {
+        match raw.split_once(':') {
+            Some(("agent", name)) => Self::Agent(name.to_string()),
+            Some(("worker", name)) => Self::Worker(name.to_string()),
+            Some(("routine", name)) => Self::Routine(name.to_string()),
+            _ => Self::Chat,
+        }
+    }
+
+    /// The stored form. `None` for [`SessionOrigin::Chat`] — nothing is written
+    /// for the ordinary case, so old sessions and chat sessions look alike, as
+    /// they should.
+    pub fn to_state_value(&self) -> Option<String> {
+        match self {
+            Self::Chat => None,
+            Self::Agent(name) => Some(format!("agent:{name}")),
+            Self::Worker(name) => Some(format!("worker:{name}")),
+            Self::Routine(name) => Some(format!("routine:{name}")),
+        }
+    }
 }
 
 /// Wraps a session service, retrying the writes SQLite refuses outright.
@@ -282,6 +338,11 @@ impl SessionManager {
                 // Not `s.events().len()` — see the field docs. `list` does not
                 // load events, so that expression is always 0.
                 event_count: None,
+                // Same free ride as the title: already in the `state` column.
+                origin: s
+                    .state()
+                    .get(ORIGIN_KEY)
+                    .and_then(|v| v.as_str().map(str::to_string)),
             })
             .collect();
         // Most recently updated first
@@ -318,6 +379,26 @@ impl SessionManager {
         }
         self.service.append_event(session_id, event).await?;
         Ok(())
+    }
+
+    /// Stamp what started a session, once, at creation.
+    ///
+    /// Best-effort in the same way `auto_title` is: this is a label on a list.
+    /// A worker whose session could not be stamped should still do its work.
+    ///
+    /// Never called for [`SessionOrigin::Chat`] — see `to_state_value`.
+    pub async fn set_origin(&self, session_id: &str, origin: &SessionOrigin) {
+        let Some(value) = origin.to_state_value() else {
+            return;
+        };
+        let mut event = Event::new("momo-origin");
+        event
+            .actions
+            .state_delta
+            .insert(ORIGIN_KEY.to_string(), serde_json::json!(value));
+        if let Err(e) = self.service.append_event(session_id, event).await {
+            tracing::warn!("could not stamp session origin: {e}");
+        }
     }
 
     /// Set a title chosen by a person. Locks it against auto-titling.
@@ -385,14 +466,22 @@ pub struct SessionInfo {
     ///
     /// Use [`SessionManager::get_session`] when the real count matters.
     pub event_count: Option<usize>,
+    /// What started this session, as stored. `None` for an ordinary chat.
+    pub origin: Option<String>,
 }
 
 impl std::fmt::Display for SessionInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let time = self.updated_at.format("%Y-%m-%d %H:%M");
+        // A worker's session and a routine's run sit in this list beside the
+        // chats, and an id alone never said which was which.
+        let origin = match self.origin.as_deref() {
+            Some(o) => format!("  [{o}]"),
+            None => String::new(),
+        };
         match self.event_count {
-            Some(n) => write!(f, "{}  ({n} events, updated {time})", self.id),
-            None => write!(f, "{}  (updated {time})", self.id),
+            Some(n) => write!(f, "{}{origin}  ({n} events, updated {time})", self.id),
+            None => write!(f, "{}{origin}  (updated {time})", self.id),
         }
     }
 }
@@ -442,6 +531,45 @@ mod tests {
         assert!(!ids.contains(&"delete-me"));
     }
 
+    #[test]
+    fn origin_round_trips_through_its_stored_form() {
+        for origin in [
+            SessionOrigin::Agent("reviewer".into()),
+            SessionOrigin::Worker("validator".into()),
+            SessionOrigin::Routine("Nightly digest".into()),
+        ] {
+            let stored = origin.to_state_value().expect("not chat");
+            assert_eq!(SessionOrigin::parse(&stored), origin);
+        }
+        // Chat writes nothing, so an unstamped session and a chat are the same
+        // thing on the way back out.
+        assert_eq!(SessionOrigin::Chat.to_state_value(), None);
+    }
+
+    #[test]
+    fn an_unreadable_origin_is_a_chat_not_a_guess() {
+        assert_eq!(SessionOrigin::parse("routine"), SessionOrigin::Chat);
+        assert_eq!(SessionOrigin::parse("wat:thing"), SessionOrigin::Chat);
+        assert_eq!(SessionOrigin::parse(""), SessionOrigin::Chat);
+    }
+
+    #[tokio::test]
+    async fn a_stamped_session_reports_its_origin_in_the_list() {
+        let mgr = SessionManager::new_in_memory();
+        let stamped = mgr.create_session(None).await.unwrap();
+        let plain = mgr.create_session(None).await.unwrap();
+        mgr.set_origin(stamped.id(), &SessionOrigin::Worker("validator".into()))
+            .await;
+        // Writing nothing is the point: a chat must not be distinguishable from
+        // a session that predates origins.
+        mgr.set_origin(plain.id(), &SessionOrigin::Chat).await;
+
+        let listed = mgr.list_sessions().await.unwrap();
+        let find = |id: &str| listed.iter().find(|s| s.id == id).unwrap().origin.clone();
+        assert_eq!(find(stamped.id()), Some("worker:validator".to_string()));
+        assert_eq!(find(plain.id()), None);
+    }
+
     #[tokio::test]
     async fn test_session_info_display() {
         let info = SessionInfo {
@@ -449,6 +577,7 @@ mod tests {
             updated_at: chrono::Utc::now(),
             title: None,
             event_count: Some(5),
+            origin: None,
         };
         let display = format!("{info}");
         assert!(display.contains("abc-123"));
@@ -460,6 +589,7 @@ mod tests {
             updated_at: chrono::Utc::now(),
             title: None,
             event_count: None,
+            origin: None,
         };
         let display = format!("{unknown}");
         assert!(display.contains("abc-123"));

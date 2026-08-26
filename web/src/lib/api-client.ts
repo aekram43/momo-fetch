@@ -27,6 +27,7 @@ import type {
   SessionInfo,
   SessionMessages,
   Settings,
+  TeamActionResult,
   TickReport,
   V2ChatRequest,
 } from "./types";
@@ -353,6 +354,28 @@ export const getRoutineRuns = (id: string, limit = 20) =>
  * which is exactly when the right panel is being watched.
  */
 export const getActivity = () => request<Activity>("/v2/activity");
+
+// ─── Team ──────────────────────────────────────────────────────
+//
+// The same three actions `momo-fetch team …` performs, run by the gateway
+// against the same state. `getActivity` above is the read side.
+
+/** Start the named config from `.harness/teams/`. 409 when one is running. */
+export const startTeam = (name: string) =>
+  post<TeamActionResult>("/v2/team/start", { name });
+
+/**
+ * Stop the active team.
+ *
+ * **Destructive**: worktrees are removed and worker branches deleted. Confirm
+ * before calling. Idempotent — stopping nothing is a 200, not an error.
+ */
+export const stopTeam = (force = false) =>
+  post<TeamActionResult>("/v2/team/stop", { force });
+
+/** Relaunch one worker's pane after a crash. */
+export const restartWorker = (worker: string) =>
+  post<TeamActionResult>("/v2/team/restart", { worker });
 
 export const getAssignees = () =>
   request<{ assignees: AssigneeOption[] }>("/v2/routines/assignees");

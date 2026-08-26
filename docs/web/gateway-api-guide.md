@@ -184,9 +184,29 @@ GET  /v2/activity      # Team workers + routine runs in flight
 ```
 
 `team_configs` is what is defined in `.harness/teams/`, so an idle rail can say
-*what could run* rather than only that nothing is. Starting one is still a
-command — the UI does not offer it, because it needs a config name and its
-counterpart (`team stop`) removes worktrees and deletes branches.
+*what could run* rather than only that nothing is — and, since the write side
+below exists, run it.
+
+### Team
+
+```
+POST /v2/team/start    body:{name}      # Start a config from .harness/teams/
+POST /v2/team/stop     body:{force?}    # DESTRUCTIVE — see below
+POST /v2/team/restart  body:{worker}    # Relaunch one worker's pane
+```
+
+Each runs the same action `momo-fetch team …` runs, so the CLI, the agent
+driving it through `shell_exec`, and the UI cannot end up with different ideas
+of what starting a team means. Exit codes become statuses: a state conflict
+(`team_already_active`) is **409**, a missing config **404**, anything else
+**400** carrying the CLI's own error code. Success returns that action's JSON
+plus `notes` — the narration the CLI writes to stderr, such as *"tmux not found
+— the team will be recorded but no worker process starts"*. Do not drop it: a
+team with no processes behind it otherwise looks exactly like a team.
+
+`stop` removes every worktree with `git worktree remove --force` and deletes the
+worker branches. It is idempotent (stopping nothing is a 200), and the UI
+confirms before calling it.
 
 What the agent is doing *outside* this turn: workers in their tmux panes,
 routine runs in their own processes. It refreshes worker liveness and settles
@@ -249,6 +269,14 @@ POST /v1/sessions                      # Create a new session
 DELETE /v1/sessions/{id}               # Delete a session
 GET  /v2/sessions/{id}/messages        # Get session history (for F11)
 ```
+
+Each listed session carries an `origin`: `"agent:<name>"`, `"worker:<name>"`,
+`"routine:<name>"`, or `null` for a chat somebody typed. Every momo-fetch
+process on the machine writes into one sessions table, so this list holds team
+workers and scheduled runs beside the conversations; `null` covers both a chat
+and a session older than origins, which is the same answer as far as a reader is
+concerned. The sidebar marks each non-null kind with its own glyph — colour is
+never the only carrier.
 
 ### Status
 
