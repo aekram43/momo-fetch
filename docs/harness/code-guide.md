@@ -674,8 +674,8 @@ left implicit:
 ```sh
 cd '<work_dir>' && { '<binary>' [-a '<agent>'] [--team-worker '<name>'] \
     --permission <mode> --mailbox '<lead>/.harness/mailbox' -p '<task>'
-  echo $? > '<lead>/.harness/worker-<name>.exit'
-} 2>&1 | tee -a '<lead>/.harness/worker-<name>.log'
+  echo $? > '<lead>/.harness/workers/worker-<name>.exit'
+} 2>&1 | tee -a '<lead>/.harness/workers/worker-<name>.log'
 ```
 
 - **`--permission`** defaults to `DEFAULT_WORKER_PERMISSION` (`auto`), never
@@ -698,7 +698,7 @@ cd '<work_dir>' && { '<binary>' [-a '<agent>'] [--team-worker '<name>'] \
 `standby` adds `--team-worker <name>`, which routes the process into
 `cli/team_worker.rs`: it runs the opening task, then polls its inbox every 2s,
 runs a turn per message, replies to whoever asked, and touches
-`worker-<name>.heartbeat` each poll. It exits on a `shutdown` message.
+`workers/worker-<name>.heartbeat` each poll. It exits on a `shutdown` message.
 
 A standby worker reporting `completed` means *that task* is done, so
 `TeamService::status()` maps it back to `Running` rather than `Completed` — which
@@ -713,7 +713,7 @@ worker could not send:
 
 | Source | Result |
 |--------|--------|
-| `worker-<name>.exit` contains `0` | `Completed` |
+| `workers/worker-<name>.exit` contains `0` | `Completed` |
 | non-zero, and the worker never reported | `FailedToStart` (message names the log) |
 | non-zero, after it had reported | `Crashed` |
 | pane missing **while the session is alive** | `Crashed` |

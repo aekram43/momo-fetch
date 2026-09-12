@@ -910,6 +910,9 @@ impl TeamService {
             .as_millis() as u64;
 
         let harness_dir = self.project_path.join(".harness");
+        // The exit file is written by `echo $? > …` in the worker's shell line,
+        // which will not create the directory for it.
+        std::fs::create_dir_all(workers_dir(&harness_dir))?;
         let mailbox_path = harness_dir.join("mailbox");
         let mailbox = Mailbox::open(&mailbox_path)?;
         mailbox.clear()?;
@@ -1572,20 +1575,26 @@ fn build_worker_command(launch: &WorkerLaunch<'_>) -> String {
     )
 }
 
+/// Where a worker's runtime files live: three per worker, in their own
+/// directory rather than loose in `.harness/`.
+pub fn workers_dir(harness_dir: &Path) -> PathBuf {
+    harness_dir.join("workers")
+}
+
 /// Where a worker's process writes its exit code.
 pub fn worker_exit_path(harness_dir: &Path, worker_name: &str) -> PathBuf {
-    harness_dir.join(format!("worker-{worker_name}.exit"))
+    workers_dir(harness_dir).join(format!("worker-{worker_name}.exit"))
 }
 
 /// Where a worker's output is teed.
 pub fn worker_log_path(harness_dir: &Path, worker_name: &str) -> PathBuf {
-    harness_dir.join(format!("worker-{worker_name}.log"))
+    workers_dir(harness_dir).join(format!("worker-{worker_name}.log"))
 }
 
 /// Where a standby worker touches down each poll, so the lead can tell
 /// "thinking" from "wedged" without a message having been sent.
 pub fn worker_heartbeat_path(harness_dir: &Path, worker_name: &str) -> PathBuf {
-    harness_dir.join(format!("worker-{worker_name}.heartbeat"))
+    workers_dir(harness_dir).join(format!("worker-{worker_name}.heartbeat"))
 }
 
 /// Escape a value for a single-quoted shell string.
@@ -1790,8 +1799,8 @@ mod tests {
         assert!(cmd.contains("-a 'yolo-validator'"), "{cmd}");
         assert!(cmd.starts_with("cd '/repo' && { '/usr/local/bin/momo-fetch'"), "{cmd}");
         // Logs and exit codes land in the lead's .harness, not the worker's.
-        assert!(cmd.contains("echo $? > '/repo/.harness/worker-validator.exit'"), "{cmd}");
-        assert!(cmd.ends_with("| tee -a '/repo/.harness/worker-validator.log'"), "{cmd}");
+        assert!(cmd.contains("echo $? > '/repo/.harness/workers/worker-validator.exit'"), "{cmd}");
+        assert!(cmd.ends_with("| tee -a '/repo/.harness/workers/worker-validator.log'"), "{cmd}");
         // A one-shot stays a one-shot.
         assert!(!cmd.contains("--team-worker"), "{cmd}");
 
@@ -1849,6 +1858,7 @@ mod tests {
     fn test_observed_status_reads_the_exit_file() {
         let dir = tempfile::tempdir().unwrap();
         let harness_dir = dir.path();
+        std::fs::create_dir_all(workers_dir(harness_dir)).unwrap();
 
         let mut worker = WorkerState {
             name: "w".into(),

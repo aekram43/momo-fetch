@@ -416,9 +416,9 @@ confirmation prompt. `shell_exec`'s destructive-command check still applies in
 addressed to `lead`, and nothing in a default run posts one — so a worker can
 sit at `starting` while it is in fact working, and `/team merge` will refuse.
 What status *does* catch without being told is a worker that **ended**: the exit
-code in `.harness/worker-<name>.exit` and the pane are checked on every call, so
+code in `.harness/workers/worker-<name>.exit` and the pane are checked on every call, so
 `completed`, `crashed` and `failed_to_start` arrive on their own. For progress
-during a run, read the tmux windows or `.harness/worker-<name>.log`. Full
+during a run, read the tmux windows or `.harness/workers/worker-<name>.log`. Full
 explanation in the [user guide §12](user-guide.md#12-agent-teams).
 
 #### Headless: `momo-fetch team`
@@ -737,7 +737,7 @@ Project instructions and agent personality files auto-discovered and injected in
 | Agent personalities | `<project>/.harness/agents/` |
 | Custom commands | `<project>/.harness/commands/` |
 | Team configs | `<project>/.harness/teams/` (`.json`, `.yml`, `.yaml`) |
-| Worker logs / exit codes / heartbeats | `<project>/.harness/worker-<name>.{log,exit,heartbeat}` |
+| Worker logs / exit codes / heartbeats | `<project>/.harness/workers/worker-<name>.{log,exit,heartbeat}` |
 | Routine definitions | `<project>/.harness/routines/<id>.json` |
 | Routine schedule state / run log | `<project>/.harness/routines/{state,runs}.json` |
 | Routine run scripts / logs / exit codes | `<project>/.harness/routines/runs/<run-id>.{sh,log,exit}` |

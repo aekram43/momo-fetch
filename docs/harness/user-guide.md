@@ -1081,7 +1081,7 @@ second sat at `starting` forever and the team never finished.
 | `restarting` | A restart was issued; the replacement pane has not reported yet |
 
 The evidence is the exit code the worker's own shell writes to
-`.harness/worker-<name>.exit` when the process ends — the tmux window survives
+`.harness/workers/worker-<name>.exit` when the process ends — the tmux window survives
 either way, so nothing else can tell a finished worker from a dead one. A
 missing pane only counts as a crash while the team's tmux session is still up;
 if the whole session is gone, that says nothing about any individual worker.
@@ -1104,8 +1104,8 @@ named after the worker:
 ```sh
 cd <work_dir> && { momo-fetch [-a <agent>] [--team-worker <name>] \
     --permission <mode> --mailbox <lead>/.harness/mailbox -p '<task>'
-  echo $? > <lead>/.harness/worker-<name>.exit
-} 2>&1 | tee -a <lead>/.harness/worker-<name>.log
+  echo $? > <lead>/.harness/workers/worker-<name>.exit
+} 2>&1 | tee -a <lead>/.harness/workers/worker-<name>.log
 ```
 
 - `<work_dir>` is the worktree when `worktree: true` in a git repo, otherwise the
@@ -1146,7 +1146,7 @@ misses is a worker that **ended**: the exit code and the pane are checked on
 every status call, so `completed`, `crashed` and `failed_to_start` arrive
 without the worker having said anything. See [When a worker
 dies](#when-a-worker-dies). For progress *during* a run, read the tmux windows
-or the `worker-<name>.log` files.
+or the `.harness/workers/worker-<name>.log` files.
 
 In the web and desktop UIs you do not have to ask. The left rail's **Squad →
 Team** section shows the roster and each worker's state, and the right panel's

@@ -168,5 +168,9 @@ fn touch_heartbeat(path: &PathBuf) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
+    // A worker can reach this before the lead has made the directory.
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let _ = std::fs::write(path, now.to_string());
 }
