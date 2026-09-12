@@ -67,17 +67,25 @@ jobs:
       - name: Install the Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
-      # **`build:desktop`, not `build`.** The gateway serves the UI at `/ui`, so
-      # the default build bakes that into every asset URL; Tauri loads the same
-      # files from the bundle root, where a `/ui` prefix 404s every stylesheet
-      # and script and the window comes up blank. `shell: bash` because the
-      # script sets `MOMO_BASE_PATH=` inline, which is not a thing in pwsh.
+      # The gateway serves the UI at `/ui`, so the default build bakes that into
+      # every asset URL; Tauri loads the same files from the bundle root, where
+      # a `/ui` prefix 404s every stylesheet and script and the window comes up
+      # blank. `MOMO_BASE_PATH=none` is the desktop setting.
+      #
+      # Set here as a step env rather than by calling `npm run build:desktop`:
+      # **npm runs package scripts through `cmd` on Windows** no matter which
+      # shell the step uses, and cmd reads that script's `MOMO_BASE_PATH= next
+      # build` prefix as a command name — "'MOMO_BASE_PATH' is not recognized",
+      # which is exactly where the Windows leg failed. An env var needs no shell
+      # to agree with it.
       - name: Build the web UI
         working-directory: web
         shell: bash
+        env:
+          MOMO_BASE_PATH: none
         run: |
           npm ci
-          npm run build:desktop
+          npm run build
 
       - name: Build momo-fetch
         run: cargo build --release --target ${{ matrix.target }}

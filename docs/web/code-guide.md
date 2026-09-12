@@ -153,7 +153,7 @@ Sets `basePath: "/ui"`. The built `out/` directory is served by the gateway at `
 npm run build:desktop
 ```
 
-Sets `basePath: ""` (via `MOMO_BASE_PATH=` env var). The built `out/` directory is embedded and served by the Tauri shell at `/*`.
+Sets `basePath: ""` (via `MOMO_BASE_PATH=none`, a word rather than an empty string — npm runs package scripts through `cmd` on Windows, where an empty assignment is read as a command name and fails). The built `out/` directory is embedded and served by the Tauri shell at `/*`.
 
 Using the wrong build causes every asset to 404 — all CSS and JS URLs are absolute. The CSS files are generated without a server; there is no fallback route.
 
