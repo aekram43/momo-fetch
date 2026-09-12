@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 
 use adk_rust::futures::StreamExt;
 use adk_rust::{EventStream, Part};
@@ -221,18 +221,14 @@ fn summarize_response(response: &serde_json::Value) -> String {
 }
 
 /// Check if stdin is a terminal (not piped).
+///
+/// `std::io::IsTerminal`, not a hand-rolled trait over `libc::isatty`. The old
+/// one did not compile for `x86_64-pc-windows-msvc` at all: `STDIN_FILENO` is
+/// defined only under libc's `windows/gnu` module, so the Windows release build
+/// failed here — which is where the desktop CI matrix died. std has had this
+/// since 1.70, the crate requires 1.85, and it needs no `unsafe`.
 fn atty_check() -> bool {
     std::io::stdin().is_terminal()
-}
-
-trait IsTerminal {
-    fn is_terminal(&self) -> bool;
-}
-
-impl IsTerminal for std::io::Stdin {
-    fn is_terminal(&self) -> bool {
-        unsafe { libc::isatty(libc::STDIN_FILENO) != 0 }
-    }
 }
 
 #[cfg(test)]

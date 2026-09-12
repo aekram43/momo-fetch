@@ -15,6 +15,7 @@ The shell is small and single-purpose: it owns the keychain, supervises the gate
 | `desktop/src-tauri/src/deeplink.rs` | ~218 | Parse and validate `momo://` URLs; emit proposal events |
 | `desktop/src-tauri/src/shell_path.rs` | ~180 | Recover the login shell's `PATH` for a GUI launch, so the gateway can spawn stdio MCP servers |
 | `desktop/src-tauri/tauri.conf.json` | ~87 | Bundling, resources, beforeBuildCommand, deep link scheme |
+| `desktop/src-tauri/tauri.ci.conf.json` | 6 | CI overlay: empties `beforeBuildCommand`, which stages the wrong target's binary on a build matrix |
 | `web/src/lib/desktop.ts` | ~170 | IPC contract definition; event listeners; TypeScript types |
 
 Each Rust file starts with a long doc comment explaining *why* it is built that way. Read those first.
@@ -226,6 +227,10 @@ Edit `tauri.conf.json`. The `beforeBuildCommand` runs before every `cargo tauri 
 2. Copies it to `desktop/src-tauri/binaries/`
 
 This ensures the bundled gateway is never stale. Do not stage the binary by hand.
+
+The release workflow is the exception — it cross-builds per target, so it stages
+the binary itself and disables the command with `--config tauri.ci.conf.json`.
+See [Tauri-Specific Mechanics](./tauri-guide.md#except-in-ci-where-it-is-turned-off).
 
 ## See also
 

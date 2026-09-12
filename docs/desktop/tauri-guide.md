@@ -289,6 +289,23 @@ The binary lands at `binaries/momo-fetch` (or `.exe` on Windows), not in the roo
 
 **Never stage the binary by hand.** The old flow did; it shipped stale gateways. The build system now guarantees the bundled binary matches the source tree.
 
+### …except in CI, where it is turned off
+
+`.github/workflows/desktop.yml` builds a **matrix of targets**, and this command
+knows nothing about them: it runs a plain `cargo build --release` for the host
+and copies `target/release/momo-fetch`. On the `x86_64-apple-darwin` job that
+replaces the cross-built binary with an arm64 one, and on Windows the file is
+`momo-fetch.exe`, so the `cp` fails and takes the bundle step with it.
+
+So the workflow stages the binary itself — it is the only part of the build that
+knows the triple — and passes `--config tauri.ci.conf.json`, whose entire
+contents are an empty `beforeBuildCommand`. Local builds are untouched: without
+that flag the command runs exactly as above.
+
+```
+cargo tauri build --target <triple> --config tauri.ci.conf.json
+```
+
 ### Resources
 
 ```json

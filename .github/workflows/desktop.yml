@@ -50,18 +50,34 @@ jobs:
 
       # Tauri's Linux dependencies. Not needed on macOS or Windows, which use
       # the system webview.
+      #
+      # `libxdo-dev` and the appindicator package are here because the app
+      # enables tauri's `tray-icon` feature; without them the bundle step fails
+      # at pkg-config, not at apt, which reads like a Rust problem.
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev \
+            librsvg2-dev patchelf
 
+      # `cargo tauri` is not on the runners. The same line `scripts/build-desktop.sh`
+      # tells you to run locally when it is missing.
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      # **`build:desktop`, not `build`.** The gateway serves the UI at `/ui`, so
+      # the default build bakes that into every asset URL; Tauri loads the same
+      # files from the bundle root, where a `/ui` prefix 404s every stylesheet
+      # and script and the window comes up blank. `shell: bash` because the
+      # script sets `MOMO_BASE_PATH=` inline, which is not a thing in pwsh.
       - name: Build the web UI
         working-directory: web
+        shell: bash
         run: |
           npm ci
-          npm run build
+          npm run build:desktop
 
       - name: Build momo-fetch
         run: cargo build --release --target ${{ matrix.target }}
@@ -77,18 +93,23 @@ jobs:
             cp "target/${{ matrix.target }}/release/momo-fetch" desktop/src-tauri/binaries/
           fi
 
+      # `--config tauri.ci.conf.json` turns off `beforeBuildCommand`, which
+      # rebuilds momo-fetch for the *host* and copies `target/release/momo-fetch`
+      # over whatever the step above staged. Right locally, wrong here twice: on
+      # the x86_64 macOS job it would replace the cross-built binary with an
+      # arm64 one, and on Windows the file it copies is `momo-fetch.exe`, so the
+      # command simply fails. The staging step above already knows the target.
+      #
+      # No TAURI_SIGNING_* here: T13 adds signing. A secret that does not exist
+      # arrives as an empty string, and an empty signing key is worse than none —
+      # the bundler tries to sign with it and fails. Until the certificates land,
+      # the bundles are unsigned: they install and run, but macOS Gatekeeper
+      # needs a right-click-Open on first launch and SmartScreen warns on
+      # Windows. T11 (auto-update) is blocked on this, since the updater
+      # verifies a signature.
       - name: Bundle the desktop app
         working-directory: desktop/src-tauri
-        run: cargo tauri build --target ${{ matrix.target }}
-        env:
-          # T13 will add APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY /
-          # APPLE_ID / APPLE_TEAM_ID here, and the Windows cert alongside.
-          # Until then the bundles are unsigned: they install and run, but
-          # macOS Gatekeeper needs a right-click-Open on first launch and
-          # SmartScreen warns on Windows. T11 (auto-update) is blocked on this
-          # because the updater verifies a signature.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --target ${{ matrix.target }} --config tauri.ci.conf.json
 
       - uses: actions/upload-artifact@v4
         with:
