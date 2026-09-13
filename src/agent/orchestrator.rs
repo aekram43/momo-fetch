@@ -254,14 +254,22 @@ fn spawn_process(
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "momo-fetch".into());
 
-        let work_dir = ctx.project_path.display().to_string();
+        let harness_dir = ctx
+            .mailbox_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| ctx.project_path.join(".harness"));
+        let log_path = crate::team::worker_log_path(&harness_dir, &worker_name);
+        std::fs::create_dir_all(log_path.parent().unwrap())
+            .map_err(|e| AdkError::tool(format!("failed to create workers dir: {e}")))?;
+
         let cmd = format!(
-            "cd {} && {} -a '{}' -p '{}' 2>&1 | tee .harness/worker-{}.log",
-            work_dir,
+            "cd {} && {{ {} -a '{}' -p '{}'; }} 2>&1 | tee -a '{}'",
+            ctx.project_path.display(),
             binary_path,
             agent_def.name.replace('\'', "'\\''"),
             task.replace('\'', "'\\''"),
-            worker_name,
+            log_path.display(),
         );
 
         crate::team::TmuxManager::send_keys(pid, &cmd)
