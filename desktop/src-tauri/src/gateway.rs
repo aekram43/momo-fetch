@@ -299,8 +299,6 @@ pub fn await_ready(url: &str, timeout: Duration) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn listening_line_is_parsed_exactly() {
         // The format is a contract with the Rust side (G11). If this parse ever
