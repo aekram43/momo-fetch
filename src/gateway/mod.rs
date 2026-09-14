@@ -381,6 +381,14 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
             get(models::v2_provider_models)
                 .delete(models::v2_provider_models_refresh),
         )
+        .route(
+            "/v2/providers/{provider}/models/custom",
+            post(models::v2_custom_model_add),
+        )
+        .route(
+            "/v2/providers/{provider}/models/custom/remove",
+            post(models::v2_custom_model_remove),
+        )
         .route("/v2/switch-model", post(v2_handlers::v2_switch_model))
         .route("/v2/switch-provider", post(v2_handlers::v2_switch_provider))
         .route("/v2/switch", post(v2_handlers::v2_switch))

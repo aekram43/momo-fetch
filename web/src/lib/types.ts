@@ -214,6 +214,8 @@ export interface Agent {
 export interface ProviderModels {
   provider: string;
   models: string[];
+  /** Models the user added for this provider; already merged into `models`. */
+  custom: string[];
   /** False when the catalogue could not be fetched — the UI offers free text. */
   available: boolean;
   cached: boolean;

@@ -34,7 +34,9 @@ rpassword = "7"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: settings.json is rewritten from the UI (custom models) and
+# must keep its key order, including the "// comment" keys users write.
+serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9"
 
 # Memory vault

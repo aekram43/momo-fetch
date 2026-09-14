@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 
 import {
+  addCustomModel,
   ApiError,
   getProviderModels,
   refreshProviderModels,
+  removeCustomModel,
   switchModel,
 } from "@/lib/api-client";
 import {
@@ -25,6 +27,10 @@ import type { ProviderModels } from "@/lib/types";
  * failing must not trap someone on the wrong model. When `available` is false
  * the select is replaced by a text field: type the name, switch, done. The
  * provider is the authority on whether the name is valid either way.
+ *
+ * Catalogues also lag behind what a provider serves, so a name the list does not
+ * have can be added: type it in the filter and pick "add". Added models are
+ * saved on the server per provider and offered from then on, with × to drop one.
  *
  * OpenRouter returns several hundred models, so the closed list is five rows —
  * the current model and the four this browser reached for most recently — and
@@ -56,7 +62,14 @@ export function ModelPicker({
         if (!cancelled) setData(d);
       } catch {
         if (!cancelled) {
-          setData({ provider, models: [], available: false, cached: false, error: null });
+          setData({
+            provider,
+            models: [],
+            custom: [],
+            available: false,
+            cached: false,
+            error: null,
+          });
         }
       }
     })();
@@ -86,6 +99,31 @@ export function ModelPicker({
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Save the name to this provider's list, then switch to it. */
+  async function add(model: string) {
+    const name = model.trim();
+    if (busy || !name) return;
+    try {
+      await addCustomModel(provider, name);
+    } catch {
+      push({ tone: "error", message: `Could not add ${name}.` });
+      return;
+    }
+    await choose(name);
+  }
+
+  async function remove(model: string) {
+    if (busy) return;
+    try {
+      await removeCustomModel(provider, model);
+    } catch {
+      push({ tone: "error", message: `Could not remove ${model}.` });
+      return;
+    }
+    const d = await getProviderModels(provider).catch(() => null);
+    if (d) setData(d);
   }
 
   async function refresh() {
@@ -118,12 +156,29 @@ export function ModelPicker({
     );
   }
 
-  const query = filter.trim().toLowerCase();
+  const custom = data?.custom ?? [];
+  const name = filter.trim();
+  const query = name.toLowerCase();
   // Empty filter shows the shortlist; typing opens the whole catalogue.
   const matches = query
     ? (data?.models.filter((m) => m.toLowerCase().includes(query)) ?? [])
     : shortlistModels(data?.models ?? [], current, recent);
   const hidden = query ? 0 : (data?.models.length ?? 0) - matches.length;
+  // Offer to add only what the list lacks and the server would accept.
+  const canAdd = !!name && !/\s/.test(name) && !data?.models.includes(name);
+
+  const removeButton = (m: string) => (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void remove(m)}
+      className="shrink-0 rounded px-1 font-mono text-[10px] text-faint transition-colors hover:text-ink"
+      title={`Remove ${m} from ${provider}`}
+      aria-label={`Remove ${m}`}
+    >
+      ×
+    </button>
+  );
 
   return (
     <div className="rounded border border-rule bg-raised p-1.5">
@@ -135,18 +190,19 @@ export function ModelPicker({
             autoFocus
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder={`Filter ${data.models.length} models…`}
+            onKeyDown={(e) => e.key === "Enter" && canAdd && void add(name)}
+            placeholder={`Filter ${data.models.length} models, or add one…`}
             aria-label="Filter models"
             className="mb-1 w-full rounded border border-rule bg-void px-1.5 py-1 font-mono text-[10px] text-ink outline-none placeholder:text-faint"
           />
           <ul className="max-h-44 overflow-y-auto">
             {matches.slice(0, 200).map((m) => (
-              <li key={m}>
+              <li key={m} className="flex items-center">
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void choose(m)}
-                  className={`w-full truncate rounded px-1.5 py-0.5 text-left font-mono text-[10px] transition-colors ${
+                  className={`min-w-0 flex-1 truncate rounded px-1.5 py-0.5 text-left font-mono text-[10px] transition-colors ${
                     m === current
                       ? "bg-signal/15 text-signal"
                       : "text-dim hover:bg-void hover:text-ink"
@@ -155,9 +211,23 @@ export function ModelPicker({
                 >
                   {m}
                 </button>
+                {custom.includes(m) && removeButton(m)}
               </li>
             ))}
-            {matches.length === 0 && (
+            {canAdd && (
+              <li>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void add(name)}
+                  className="w-full truncate rounded px-1.5 py-0.5 text-left font-mono text-[10px] text-signal transition-colors hover:bg-void"
+                  title={`Add ${name} to ${provider} and switch to it`}
+                >
+                  + add {name}
+                </button>
+              </li>
+            )}
+            {matches.length === 0 && !canAdd && (
               <li className="px-1.5 py-1 text-[10px] text-faint">No match.</li>
             )}
           </ul>
@@ -178,6 +248,28 @@ export function ModelPicker({
           <p className="mb-1 text-[10px] leading-relaxed text-faint">
             {data.error ?? "Could not list models."} Type one instead.
           </p>
+          {custom.length > 0 && (
+            <ul className="mb-1 max-h-32 overflow-y-auto">
+              {custom.map((m) => (
+                <li key={m} className="flex items-center">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void choose(m)}
+                    className={`min-w-0 flex-1 truncate rounded px-1.5 py-0.5 text-left font-mono text-[10px] transition-colors ${
+                      m === current
+                        ? "bg-signal/15 text-signal"
+                        : "text-dim hover:bg-void hover:text-ink"
+                    }`}
+                    title={m}
+                  >
+                    {m}
+                  </button>
+                  {removeButton(m)}
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="flex gap-1">
             <input
               autoFocus
@@ -188,6 +280,15 @@ export function ModelPicker({
               aria-label="Model name"
               className="min-w-0 flex-1 rounded border border-rule bg-void px-1.5 py-1 font-mono text-[10px] text-ink outline-none placeholder:text-faint"
             />
+            <button
+              type="button"
+              disabled={busy || !typed.trim() || /\s/.test(typed.trim())}
+              onClick={() => void add(typed)}
+              className="shrink-0 rounded border border-rule px-1.5 py-1 font-mono text-[10px] text-dim transition-colors hover:text-ink disabled:opacity-40"
+              title="Save to this provider's list and switch"
+            >
+              add
+            </button>
             <button
               type="button"
               disabled={busy || !typed.trim()}

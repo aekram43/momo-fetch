@@ -238,6 +238,22 @@ export const refreshProviderModels = (provider: string) =>
     { method: "DELETE" },
   );
 
+/**
+ * Offer a model the provider's catalogue does not list. Saved server-side per
+ * provider; it does not switch to it.
+ */
+export const addCustomModel = (provider: string, model: string) =>
+  post<{ provider: string; custom: string[] }>(
+    `/v2/providers/${encodeURIComponent(provider)}/models/custom`,
+    { model },
+  );
+
+export const removeCustomModel = (provider: string, model: string) =>
+  post<{ provider: string; custom: string[] }>(
+    `/v2/providers/${encodeURIComponent(provider)}/models/custom/remove`,
+    { model },
+  );
+
 export const switchModel = (model: string) =>
   post<{ provider: string; model: string }>("/v2/switch-model", { model });
 
