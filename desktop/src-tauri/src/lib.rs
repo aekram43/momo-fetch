@@ -676,7 +676,7 @@ pub fn run() {
 fn explain(error: &str, project: &std::path::Path) -> String {
     if error.contains("Secret not found") || error.contains("API_KEY") {
         format!(
-            "{error}\n\nAdd the key below. It is kept in the OS keychain, and saving restarts the agent.\n\nOr put it in the workspace .env instead:\n\n               {}/.env\n\nwith one line, e.g.\n\n               OPENROUTER_API_KEY=sk-or-...\n\nthen reopen the app.",
+            "{error}\n\nThe desktop app reads .env from its workspace:\n\n               {}/.env\n\nCreate that file with one line, e.g.\n\n               OPENROUTER_API_KEY=sk-or-...\n\nthen reopen the app.",
             project.display()
         )
     } else {

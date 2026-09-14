@@ -40,16 +40,25 @@ impl ProviderManager {
     /// Create ProviderManager from settings file with fallback to env.
     ///
     /// Priority order:
-    /// 1. Settings file (default_provider + default_model)
+    /// 1. Settings file (default_provider + default_model), if its key is set
     /// 2. Environment variables or OS keychain
     /// 3. Fallback → Ollama (localhost)
+    ///
+    /// A settings provider with no key falls through to 2 instead of failing:
+    /// one configured provider is enough to work, and when there is none the
+    /// gateway still starts so the UI can say so (see [`Self::llm_ready`]).
     pub fn from_settings_or_env(settings_provider: Option<&str>, settings_model: Option<&str>) -> anyhow::Result<Self> {
-        // If settings specify both provider and model, use them
+        use crate::config::secrets::SecretStore;
+
         if let (Some(provider), Some(model)) = (settings_provider, settings_model) {
-            return Self::from_provider_and_model(provider, model);
+            if !missing_key(provider, |name| SecretStore::get(name).is_ok()) {
+                return Self::from_provider_and_model(provider, model);
+            }
+            tracing::warn!(
+                "No API key for settings provider '{provider}'; using the first provider that has one"
+            );
         }
 
-        // Otherwise, fall back to environment detection
         Self::from_env()
     }
 
@@ -206,6 +215,20 @@ impl ProviderManager {
     /// Get current model name.
     pub fn current_model_name(&self) -> &str {
         &self.current_model
+    }
+
+    /// Whether the current provider can serve a turn right now.
+    ///
+    /// False after [`Self::from_env`] ran out of keyed providers and landed on an
+    /// Ollama that is not running: the "no LLM configured" state the UI warns
+    /// about, instead of the gateway refusing to start.
+    pub fn llm_ready(&self) -> bool {
+        use crate::config::secrets::SecretStore;
+
+        match self.current_provider.as_str() {
+            "ollama" => ollama_reachable(),
+            provider => !missing_key(provider, |name| SecretStore::get(name).is_ok()),
+        }
     }
 
     /// Get the context window cache.
@@ -524,6 +547,15 @@ const KNOWN_PROVIDERS: &[&str] = &[
     "ollama",
 ];
 
+/// Built-in providers that cannot run without an API key.
+const KEYED_PROVIDERS: &[&str] = &["anthropic", "openai", "deepseek", "groq", "openrouter", "zai"];
+
+/// Whether `provider` needs a key it does not have. Ollama and custom endpoints
+/// never count as missing one; `has_key` is injected so tests need no keychain.
+fn missing_key(provider: &str, has_key: impl Fn(&str) -> bool) -> bool {
+    KEYED_PROVIDERS.contains(&provider) && !has_key(provider)
+}
+
 /// Whether a local Ollama server is actually accepting connections.
 ///
 /// Ollama requires no API key, so key presence says nothing about whether it
@@ -594,5 +626,14 @@ mod tests {
         // custom provider reads from LLM_MODEL env var, defaults to "default"
         assert_eq!(default_model_for_provider("custom"), "default");
         assert_eq!(default_model_for_provider("unknown"), "unknown");
+    }
+
+    #[test]
+    fn only_keyed_providers_can_be_missing_a_key() {
+        let has_key = |name: &str| name == "zai";
+        assert!(missing_key("openrouter", has_key));
+        assert!(!missing_key("zai", has_key));
+        assert!(!missing_key("ollama", has_key));
+        assert!(!missing_key("my-endpoint", has_key));
     }
 }

@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { FileAttach } from "@/components/chat/file-attach";
 import { MessageContent } from "@/components/chat/message-content";
+import { NoLlmBanner } from "@/components/chat/no-llm-banner";
 import { ToolCallCard } from "@/components/chat/tool-call-card";
 import { TypingIndicator } from "@/components/shared/skeleton";
 import { useChatStream } from "@/hooks/use-chat-stream";
@@ -78,6 +79,7 @@ export function ChatPanel() {
         )}
       </div>
 
+      <NoLlmBanner />
       {error && <Banner tone="halt">{error}</Banner>}
       {conflict && <ConflictBanner onInterrupt={() => void stop()} />}
 

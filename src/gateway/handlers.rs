@@ -447,6 +447,8 @@ pub async fn health(State(state): State<GatewayState>) -> impl IntoResponse {
             "version": env!("CARGO_PKG_VERSION"),
             "provider": harness.provider_mgr().current_provider(),
             "model": harness.provider_mgr().current_model_name(),
+            // False when no provider can serve a turn; the UI asks for a key.
+            "llm_ready": harness.provider_mgr().llm_ready(),
             "session_id": harness.current_session_id(),
             "agent": harness.config().agent_name,
             "permission_mode": harness.sandbox().permission_mode().to_string(),

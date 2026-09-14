@@ -363,6 +363,8 @@ export interface Health {
   version?: string;
   provider?: string;
   model?: string;
+  /** False when no provider can serve a turn: no key set and no Ollama running. */
+  llm_ready?: boolean;
   session_id?: string;
   mcp_running?: number;
   turn_active: boolean;

@@ -10,7 +10,6 @@ import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { StandingPermissions } from "@/components/layout/standing-permissions";
 import { RoutinesDialog } from "@/components/routines/routines-dialog";
-import { ApiKeysPanel } from "@/components/settings/api-keys-panel";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { Toaster } from "@/components/shared/toaster";
 import { TurnRail } from "@/components/shared/turn-rail";
@@ -157,25 +156,9 @@ function BootScreen({ error, stderr }: { error?: string; stderr?: string }) {
             {stderr}
           </pre>
         )}
-        {error && needsKey(error) && (
-          <div className="mt-6">
-            <ApiKeysPanel />
-          </div>
-        )}
       </div>
-      <Toaster />
     </div>
   );
-}
-
-/**
- * A missing key is the one start failure the user can fix from this screen.
- * Settings → API keys lives in the shell, which is not rendered until the
- * gateway is up, so without this the screen asks for a key and offers nowhere
- * to put it.
- */
-function needsKey(error: string) {
-  return error.includes("Secret not found") || error.includes("API_KEY");
 }
 
 /** Bottom rail: the facts that change what the next thing you do will cost. */
