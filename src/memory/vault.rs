@@ -1972,7 +1972,7 @@ mod tests {
             .unwrap();
 
         // Extract from it
-        let result = vault
+        vault
             .extract_from_memcell(
                 &memcell_ref,
                 "momo-fetch",

@@ -1,7 +1,6 @@
 //! Gateway HTTP handlers.
 
 use std::pin::Pin;
-use std::sync::Arc;
 
 use adk_rust::futures::StreamExt;
 use adk_rust::Part;
@@ -11,7 +10,6 @@ use axum::{
     Json,
 };
 use futures::Stream;
-use tokio::sync::RwLock;
 
 use super::types::*;
 use crate::gateway::GatewayState;

@@ -343,7 +343,7 @@ mod tests {
         let project = tmp.path().join("project");
         fs::create_dir_all(&project).unwrap();
 
-        let service = SkillService::new(&project).unwrap();
+        SkillService::new(&project).unwrap();
 
         // Test name extraction (without actually cloning)
         let name = "https://github.com/example/my-skill.git"

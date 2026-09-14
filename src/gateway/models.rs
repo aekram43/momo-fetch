@@ -17,7 +17,7 @@
 //! lookup failed.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};

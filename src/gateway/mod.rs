@@ -15,7 +15,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
     middleware,
     routing::{get, post},
     Router,
@@ -339,8 +338,8 @@ pub async fn run(config: HarnessConfig, overrides: BindOverrides) -> anyhow::Res
             .iter()
             .filter_map(|o| o.parse().ok())
             .collect();
-        use axum::http::{Method, HeaderValue};
-        use tower_http::cors::{Any, AllowOrigin};
+        use axum::http::Method;
+        use tower_http::cors::AllowOrigin;
         // **This list must cover every method the router serves.** A method
         // missing here fails only cross-origin, which means it works in the
         // browser at `/ui` (same origin, no preflight) and fails silently in

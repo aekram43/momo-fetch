@@ -12,6 +12,11 @@ pub struct ChatMessage {
 }
 
 /// Chat completion request (OpenAI-compatible).
+///
+/// `model`, `stream`, `temperature`, `max_tokens`, `stop` and `user` are accepted
+/// so OpenAI clients deserialize cleanly, but nothing reads them: streaming is
+/// chosen by route (`/v1/chat/completions/stream`), not by the `stream` flag.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatCompletionRequest {
     /// Model name (ignored — momo uses its own model, but kept for compatibility).

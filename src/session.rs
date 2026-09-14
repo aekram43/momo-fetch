@@ -514,7 +514,7 @@ mod tests {
     async fn test_get_session() {
         let mgr = SessionManager::new_in_memory();
 
-        let created = mgr.create_session(Some("get-test")).await.unwrap();
+        mgr.create_session(Some("get-test")).await.unwrap();
         let fetched = mgr.get_session("get-test").await.unwrap();
         assert_eq!(fetched.id(), "get-test");
     }

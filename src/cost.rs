@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn test_session_summary() {
-        let (tmp, tracker) = make_tracker();
+        let (_tmp, tracker) = make_tracker();
         tracker.set_session_context("sess-1", "anthropic", "claude-sonnet-4-20250514");
 
         tracker.reset_turn();
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn test_set_session_context_recomputes() {
-        let (tmp, tracker) = make_tracker();
+        let (_tmp, tracker) = make_tracker();
 
         // Add two records for different sessions with project
         tracker.set_session_context_with_project(
@@ -716,7 +716,6 @@ mod tests {
         tracker.record_event(&make_usage(1000, 500));
         tracker.finalize_turn();
 
-        let today = Utc::now().format("%Y-%m-%d").to_string();
         let summary = tracker.today_summary();
         assert_eq!(summary.total_prompt_tokens, 1000);
         assert_eq!(summary.request_count, 1);
