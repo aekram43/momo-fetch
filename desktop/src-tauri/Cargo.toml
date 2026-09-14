@@ -1,6 +1,6 @@
 [package]
 name = "momo-worker"
-version = "1.0.5"
+version = "1.0.6"
 description = "Desktop shell for the momo-fetch agent harness"
 authors = ["aekmaxion"]
 license = "MIT"
